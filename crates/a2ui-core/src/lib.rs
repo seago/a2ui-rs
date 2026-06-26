@@ -8,5 +8,14 @@ pub mod datamodel;
 pub mod message;
 pub use message::{ClientEnvelope, ServerEnvelope};
 pub use component::ComponentId;
+pub use component::Catalog;
 pub use datamodel::DataModel;
 pub mod prelude;
+
+#[cfg(feature = "embed-assets")]
+pub fn load_basic_catalog() -> Result<Catalog> {
+    let json = include_str!("assets/catalogs/basic/catalog.json");
+    let catalog: Catalog = serde_json::from_str(json)?;
+    catalog.validate()?;
+    Ok(catalog)
+}

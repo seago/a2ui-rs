@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "a2ui://catalogs/basic/v1",
+  "catalogId": "a2ui://catalogs/basic/v1",
+  "instructions": "# A2UI Basic Catalog\n\nStandard component set for A2UI Protocol v1.0.",
+  "components": {
+    "Text": {"type":"object","required":["text"],"properties":{"text":{"anyOf":[{"type":"string"},{"$ref":"#/$defs/dynamicString"}]}}},
+    "Button": {"type":"object","required":["child"],"properties":{"child":{"type":"string"},"variant":{"enum":["default","primary","borderless"]}}},
+    "TextField": {"type":"object","required":["value"],"properties":{"value":{"$ref":"#/$defs/dynamicString"},"variant":{"enum":["shortText","number","longText","obscured"]}}},
+    "Column": {"type":"object","properties":{"children":{"$ref":"#/$defs/childList"}}},
+    "Row": {"type":"object","properties":{"children":{"$ref":"#/$defs/childList"}}},
+    "Image": {"type":"object","required":["url"],"properties":{"url":{"$ref":"#/$defs/dynamicString"}}},
+    "Card": {"type":"object","required":["child"],"properties":{"child":{"type":"string"}}},
+    "CheckBox": {"type":"object","properties":{"value":{"$ref":"#/$defs/dynamicBoolean"},"label":{"type":"string"}}},
+    "Divider": {"type":"object"},
+    "Icon": {"type":"object","properties":{"name":{"type":"string"}}},
+    "List": {"type":"object","properties":{"children":{"$ref":"#/$defs/childList"}}},
+    "Tabs": {"type":"object","properties":{"tabs":{"type":"array"}}},
+    "Modal": {"type":"object","properties":{"content":{"type":"string"},"trigger":{"type":"string"}}},
+    "Slider": {"type":"object","properties":{"value":{"$ref":"#/$defs/dynamicNumber"},"min":{"type":"number"},"max":{"type":"number"}}},
+    "ChoicePicker": {"type":"object","properties":{"value":{"$ref":"#/$defs/dynamicStringList"},"options":{"type":"array"}}},
+    "DateTimeInput": {"type":"object","properties":{"label":{"type":"string"}}},
+    "Video": {"type":"object","properties":{"url":{"type":"string"}}},
+    "AudioPlayer": {"type":"object","properties":{"url":{"type":"string"}}}
+  },
+  "functions": {
+    "required": {"type":"object","returnType":"boolean","callableFrom":"clientOnly","properties":{"value":{}}},
+    "regex": {"type":"object","returnType":"boolean","callableFrom":"clientOnly","properties":{"value":{},"pattern":{"type":"string"}}},
+    "email": {"type":"object","returnType":"boolean","callableFrom":"clientOnly","properties":{"value":{"type":"string"}}},
+    "length": {"type":"object","returnType":"boolean","callableFrom":"clientOnly","properties":{"value":{"type":"string"},"min":{"type":"integer"},"max":{"type":"integer"}}},
+    "numeric": {"type":"object","returnType":"boolean","callableFrom":"clientOnly","properties":{"value":{},"min":{"type":"number"},"max":{"type":"number"}}},
+    "and": {"type":"object","returnType":"boolean","callableFrom":"clientOrRemote","properties":{"values":{"type":"array"}}},
+    "or": {"type":"object","returnType":"boolean","callableFrom":"clientOrRemote","properties":{"values":{"type":"array"}}},
+    "not": {"type":"object","returnType":"boolean","callableFrom":"clientOrRemote","properties":{"value":{"type":"boolean"}}},
+    "formatString": {"type":"object","returnType":"string","callableFrom":"clientOrRemote","properties":{"template":{"type":"string"}}},
+    "formatNumber": {"type":"object","returnType":"string","callableFrom":"clientOrRemote"},
+    "formatCurrency": {"type":"object","returnType":"string","callableFrom":"clientOrRemote"},
+    "formatDate": {"type":"object","returnType":"string","callableFrom":"clientOrRemote"},
+    "pluralize": {"type":"object","returnType":"string","callableFrom":"clientOrRemote"},
+    "openUrl": {"type":"object","returnType":"void","callableFrom":"clientOnly","properties":{"url":{"type":"string"}}}
+  },
+  "$defs": {
+    "surfaceProperties": {"type":"object","properties":{"agentDisplayName":{"type":"string"},"iconUrl":{"type":"string","format":"uri"}}},
+    "anyComponent": {"oneOf":[],"discriminator":{"propertyName":"component"}},
+    "anyFunction": {"oneOf":[],"discriminator":{"propertyName":"call"}}
+  }
+}
