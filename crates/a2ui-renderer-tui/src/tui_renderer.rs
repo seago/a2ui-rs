@@ -17,7 +17,7 @@ use ratatui::{
     Frame,
 };
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// TUI 渲染器实现
 #[derive(Debug)]
@@ -40,6 +40,8 @@ pub struct TuiRenderer {
     pending_responses: HashMap<String, String>,
     /// P2-2: Surface 的 sendDataModel 标记（为 true 时 action 附带完整 data model）
     send_data_model: HashMap<String, bool>,
+    /// P4-1: 需要增量重渲染的 surface 集合
+    dirty_surfaces: HashSet<String>,
 }
 
 /// 最大并发 Surface 数量（DoS 防护）
@@ -60,6 +62,7 @@ impl TuiRenderer {
             focused_component: None,
             pending_responses: HashMap::new(),
             send_data_model: HashMap::new(),
+            dirty_surfaces: HashSet::new(),
         }
     }
 
@@ -107,20 +110,27 @@ impl TuiRenderer {
     where
         B: ratatui::backend::Backend,
     {
+        // 增量渲染：只重渲染脏 surface；无脏标记时全量渲染
+        let surfaces_to_render: Vec<_> = if self.dirty_surfaces.is_empty() {
+            self.surfaces.values().cloned().collect()
+        } else {
+            self.dirty_surfaces.iter().cloned().collect()
+        };
+
         let mapper = WidgetMapper;
 
         terminal
             .draw(|frame: &mut Frame| {
                 let area = frame.buffer_mut().area().clone();
 
-                for (_, surface_id) in &self.surfaces {
-                    let binding = match self.data_bindings.get(surface_id) {
+                for surface_id in surfaces_to_render {
+                    let binding = match self.data_bindings.get(&surface_id) {
                         Some(b) => b,
                         None => continue,
                     };
 
                     let builder = WidgetBuilder::new(&mapper, binding, &self.forest);
-                    let widgets = builder.build_tree(surface_id, area);
+                    let widgets = builder.build_tree(&surface_id, area);
 
                     for widget in widgets {
                         self.draw_widget(frame, widget);
@@ -133,6 +143,9 @@ impl TuiRenderer {
                     e
                 ))
             })?;
+
+        // 渲染完成后清除脏标记
+        self.dirty_surfaces.clear();
 
         Ok(())
     }
@@ -333,8 +346,11 @@ impl Renderer for TuiRenderer {
             if let Some(path) = &msg.path {
                 binding.set(path, msg.value.unwrap_or(Value::Null))?;
                 // 查询依赖图，获取需要重渲染的组件
-                let _affected = self.dependency_graph.on_data_change(path);
-                // TODO: 使用 _affected 列表进行增量渲染
+                let affected = self.dependency_graph.on_data_change(path);
+                // 记录受影响的 surface 需要重渲染
+                if !affected.is_empty() {
+                    self.dirty_surfaces.insert(surface_id);
+                }
             }
         }
         Ok(())
@@ -365,12 +381,14 @@ impl Renderer for TuiRenderer {
 
             // 写入 DataModel
             // 需要找到对应的 surface — 通过查找哪个 binding 包含该路径
-            for (_surface_id, binding) in self.data_bindings.iter_mut() {
+            for (surface_id, binding) in self.data_bindings.iter_mut() {
                 if binding.as_value().pointer(&response_path).is_some() || response_path == "/" {
                     binding.set(&response_path, write_value)?;
-                    // 查询依赖图，触发重渲染
-                    let _affected = self.dependency_graph.on_data_change(&response_path);
-                    // TODO: 使用 _affected 列表进行增量渲染
+                    // 查询依赖图，标记受影响的 surface 为脏
+                    let affected = self.dependency_graph.on_data_change(&response_path);
+                    if !affected.is_empty() {
+                        self.dirty_surfaces.insert(surface_id.clone());
+                    }
                     break;
                 }
             }
@@ -1366,5 +1384,190 @@ mod tests {
         let content = buf.area();
         assert!(content.width > 0);
         assert!(content.height > 0);
+    }
+
+    // --- P4-1: Incremental rendering with DependencyGraph ---
+
+    #[tokio::test]
+    async fn test_incremental_render_marks_dirty_on_update_data_model() {
+        let mut renderer = TuiRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("name_label").unwrap(),
+            DynamicValue::Path {
+                path: "/user/name".into(),
+            },
+        );
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+            })
+            .await
+            .unwrap();
+
+        // 初始状态：没有脏 surface
+        assert!(renderer.dirty_surfaces.is_empty());
+
+        // 更新有依赖的路径 → 应标记 s1 为脏
+        renderer
+            .update_data_model(UpdateDataModel {
+                surface_id: "s1".into(),
+                path: Some("/user/name".into()),
+                value: Some(json!("Bob")),
+            })
+            .await
+            .unwrap();
+
+        assert!(renderer.dirty_surfaces.contains("s1"));
+    }
+
+    #[tokio::test]
+    async fn test_incremental_render_no_dirty_on_unbound_path() {
+        let mut renderer = TuiRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("name_label").unwrap(),
+            DynamicValue::Path {
+                path: "/user/name".into(),
+            },
+        );
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+            })
+            .await
+            .unwrap();
+
+        // 更新没有组件依赖的路径 → 不应标记为脏
+        renderer
+            .update_data_model(UpdateDataModel {
+                surface_id: "s1".into(),
+                path: Some("/other/path".into()),
+                value: Some(json!("value")),
+            })
+            .await
+            .unwrap();
+
+        assert!(renderer.dirty_surfaces.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_incremental_render_marks_dirty_on_action_response() {
+        let mut renderer = TuiRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("result_label").unwrap(),
+            DynamicValue::Path {
+                path: "/result".into(),
+            },
+        );
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: Some(serde_json::json!({"result": "pending"})),
+            })
+            .await
+            .unwrap();
+
+        // 注册 pending response
+        renderer.register_pending_response("action-1", "/result");
+
+        // 模拟服务器响应
+        renderer
+            .action_response(ActionResponse {
+                action_id: "action-1".into(),
+                response: a2ui_core::message::server_to_client::ActionResponsePayload::Success(
+                    serde_json::json!("done"),
+                ),
+            })
+            .await
+            .unwrap();
+
+        // 应标记 s1 为脏（因为 /result 有组件依赖）
+        assert!(renderer.dirty_surfaces.contains("s1"));
+    }
+
+    #[tokio::test]
+    async fn test_incremental_render_clears_dirty_after_render() {
+        use ratatui::backend::TestBackend;
+
+        let mut renderer = TuiRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("name_label").unwrap(),
+            DynamicValue::Path {
+                path: "/user/name".into(),
+            },
+        );
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+            })
+            .await
+            .unwrap();
+
+        // 先标记为脏
+        renderer
+            .update_data_model(UpdateDataModel {
+                surface_id: "s1".into(),
+                path: Some("/user/name".into()),
+                value: Some(json!("Bob")),
+            })
+            .await
+            .unwrap();
+        assert!(renderer.dirty_surfaces.contains("s1"));
+
+        // render_frame 后应清除脏标记
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        renderer.render_frame(&mut terminal).await.unwrap();
+
+        assert!(renderer.dirty_surfaces.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_incremental_render_full_render_when_no_dirty() {
+        use ratatui::backend::TestBackend;
+
+        let mut renderer = TuiRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("name_label").unwrap(),
+            DynamicValue::Path {
+                path: "/user/name".into(),
+            },
+        );
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+            })
+            .await
+            .unwrap();
+
+        // 没有脏 surface 时，render_frame 应正常渲染所有 surface
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let result = renderer.render_frame(&mut terminal).await;
+        assert!(result.is_ok());
+        assert!(renderer.dirty_surfaces.is_empty());
     }
 }
