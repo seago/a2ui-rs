@@ -1,0 +1,24 @@
+[package]
+name = "a2ui-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "A2UI CLI — command line interface for rendering A2UI surfaces"
+repository = "https://github.com/yufeng108/a2ui-rs"
+
+[[bin]]
+name = "a2ui"
+path = "src/main.rs"
+
+[dependencies]
+a2ui-core = { path = "../a2ui-core" }
+a2ui-renderer = { path = "../a2ui-renderer" }
+a2ui-renderer-tui = { path = "../a2ui-renderer-tui" }
+a2ui-transport = { path = "../a2ui-transport" }
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = "0.3"
