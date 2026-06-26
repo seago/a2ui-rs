@@ -3,9 +3,9 @@
 //! 定义 `Transport` trait 和基础实现（JSONL、WebSocket）。
 
 pub mod error;
-pub mod transport;
 pub mod jsonl;
+pub mod transport;
 
 pub use error::TransportError;
-pub use transport::Transport;
 pub use jsonl::{JsonlTransport, JsonlTransportReader, JsonlTransportWriter};
+pub use transport::Transport;

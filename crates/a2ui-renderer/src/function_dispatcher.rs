@@ -36,15 +36,20 @@ impl FunctionDispatcher {
     /// 注册函数
     pub fn register(&mut self, name: impl Into<String>, callable_from: CallableFrom) {
         let name = name.into();
-        self.functions.insert(name.clone(), FunctionDef {
-            name: name.clone(),
-            callable_from,
-        });
+        self.functions.insert(
+            name.clone(),
+            FunctionDef {
+                name: name.clone(),
+                callable_from,
+            },
+        );
     }
 
     /// 执行函数调用
     pub fn dispatch(&self, name: &str, args: Value) -> RenderResult<Value> {
-        let func = self.functions.get(name)
+        let func = self
+            .functions
+            .get(name)
             .ok_or_else(|| crate::error::RendererError::FunctionNotAvailable(name.to_string()))?;
         // 简化实现：返回空值，实际由平台实现
         let _ = (func, args);
@@ -53,7 +58,7 @@ impl FunctionDispatcher {
 
     /// 检查函数是否可以从指定端调用
     pub fn can_call_from(&self, name: &str, from: CallableFrom) -> bool {
-        self.functions.get(name).map_or(false, |f| {
+        self.functions.get(name).is_some_and(|f| {
             f.callable_from == from || f.callable_from == CallableFrom::ClientOrRemote
         })
     }

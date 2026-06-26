@@ -61,7 +61,11 @@ impl ActionMessage {
         }
     }
 
-    pub fn with_response(mut self, response_path: impl Into<String>, action_id: impl Into<String>) -> Self {
+    pub fn with_response(
+        mut self,
+        response_path: impl Into<String>,
+        action_id: impl Into<String>,
+    ) -> Self {
         self.want_response = true;
         self.response_path = Some(response_path.into());
         self.action_id = Some(action_id.into());
@@ -141,7 +145,10 @@ mod tests {
     #[test]
     fn test_action_function_call() {
         let mut args = HashMap::new();
-        args.insert("value".into(), DynamicValue::Literal("test@example.com".into()));
+        args.insert(
+            "value".into(),
+            DynamicValue::Literal("test@example.com".into()),
+        );
         let action = Action::FunctionCall(FunctionCallAction {
             call: "validate".into(),
             args,
@@ -181,7 +188,8 @@ mod tests {
 
     #[test]
     fn test_server_envelope_deserialize_v1_0() {
-        let json = r#"{"version":"v1.0","updateDataModel":{"surfaceId":"s1","path":"/","value":{"x":1}}}"#;
+        let json =
+            r#"{"version":"v1.0","updateDataModel":{"surfaceId":"s1","path":"/","value":{"x":1}}}"#;
         let env: ServerEnvelope = serde_json::from_str(json).unwrap();
         if let ServerEnvelope::V1_0(msg) = env {
             match msg {

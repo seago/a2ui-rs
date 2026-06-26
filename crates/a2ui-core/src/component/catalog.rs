@@ -172,10 +172,7 @@ mod tests {
             catalog.function_callable_from("validate"),
             Some("clientOnly")
         );
-        assert_eq!(
-            catalog.function_callable_from("fetch"),
-            Some("remoteOnly")
-        );
+        assert_eq!(catalog.function_callable_from("fetch"), Some("remoteOnly"));
     }
 
     #[test]

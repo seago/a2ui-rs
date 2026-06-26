@@ -1,5 +1,7 @@
 use crate::error::TransportResult;
 use a2ui_core::{ClientEnvelope, ServerEnvelope};
+#[allow(unused_imports)]
+use serde::{Deserialize, Serialize};
 
 /// Transport trait — 所有传输实现必须满足此契约
 #[async_trait::async_trait]

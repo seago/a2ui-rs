@@ -31,18 +31,20 @@
 //!
 //! [`ServerEnvelope`]: message::ServerEnvelope
 
+#![allow(clippy::module_inception)]
+
 mod error;
 pub use error::{A2uiError, Result};
-pub mod state;
 pub mod component;
 pub mod datamodel;
 pub mod message;
 pub mod schema;
-pub use schema::CatalogValidator;
-pub use message::{ClientEnvelope, ServerEnvelope};
-pub use component::ComponentId;
+pub mod state;
 pub use component::Catalog;
+pub use component::ComponentId;
 pub use datamodel::DataModel;
+pub use message::{ClientEnvelope, ServerEnvelope};
+pub use schema::CatalogValidator;
 pub mod prelude;
 
 #[cfg(feature = "embed-assets")]

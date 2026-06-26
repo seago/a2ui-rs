@@ -15,27 +15,32 @@ impl ComponentId {
     pub fn new<S: AsRef<str>>(s: S) -> crate::error::Result<Self> {
         let s = s.as_ref();
         if s.is_empty() {
-            return Err(crate::error::A2uiError::InvalidComponentId("empty ID".to_string()));
+            return Err(crate::error::A2uiError::InvalidComponentId(
+                "empty ID".to_string(),
+            ));
         }
         if s.starts_with('@') {
-            return Err(crate::error::A2uiError::InvalidComponentId(
-                format!("'@' namespace is reserved for system: {}", s)
-            ));
+            return Err(crate::error::A2uiError::InvalidComponentId(format!(
+                "'@' namespace is reserved for system: {}",
+                s
+            )));
         }
         // UAX #31: 首字符必须是 XID_Start 或 _
         let mut chars = s.chars();
         let first = chars.next().unwrap();
         if !is_xid_start(first) {
-            return Err(crate::error::A2uiError::InvalidComponentId(
-                format!("ID must start with XID_Start or '_': {}", s)
-            ));
+            return Err(crate::error::A2uiError::InvalidComponentId(format!(
+                "ID must start with XID_Start or '_': {}",
+                s
+            )));
         }
         // 后续字符必须是 XID_Continue
         for c in chars {
             if !is_xid_continue(c) {
-                return Err(crate::error::A2uiError::InvalidComponentId(
-                    format!("ID contains invalid character '{}': {}", c, s)
-                ));
+                return Err(crate::error::A2uiError::InvalidComponentId(format!(
+                    "ID contains invalid character '{}': {}",
+                    c, s
+                )));
             }
         }
         Ok(Self(s.to_string()))
@@ -368,7 +373,9 @@ mod tests {
 
     #[test]
     fn test_dynamic_value_path() {
-        let dv: DynamicValue<String> = DynamicValue::Path { path: "/user/name".into() };
+        let dv: DynamicValue<String> = DynamicValue::Path {
+            path: "/user/name".into(),
+        };
         assert_eq!(dv.as_path(), Some("/user/name"));
     }
 
@@ -441,10 +448,7 @@ mod tests {
 
     #[test]
     fn test_component_row() {
-        let comp = Component::row(
-            ComponentId::new("row").unwrap(),
-            vec![],
-        );
+        let comp = Component::row(ComponentId::new("row").unwrap(), vec![]);
         assert_eq!(comp.component_type(), "Row");
     }
 
@@ -453,7 +457,8 @@ mod tests {
         let comp = Component::text(
             ComponentId::new("t").unwrap(),
             DynamicValue::Literal("hi".to_string()),
-        ).with_weight(2.0);
+        )
+        .with_weight(2.0);
         assert_eq!(comp.common().weight, Some(2.0));
     }
 

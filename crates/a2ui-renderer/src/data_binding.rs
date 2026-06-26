@@ -1,5 +1,5 @@
-use a2ui_core::prelude::*;
 use crate::error::RenderResult;
+use a2ui_core::prelude::*;
 use serde_json::Value;
 
 /// Data Binding：封装 DataModel，提供路径读写和 DynamicValue 解析
@@ -32,12 +32,12 @@ impl DataBinding {
     {
         match dynamic {
             DynamicValue::Literal(v) => Ok(v.clone().into()),
-            DynamicValue::Path { path } => self.data_model.get(path)
-                .cloned()
-                .ok_or_else(|| crate::error::RendererError::SurfaceNotFound(format!("path not found: {}", path))),
-            DynamicValue::FunctionCall { call, .. } => {
-                Err(crate::error::RendererError::FunctionNotAvailable(call.clone()))
-            }
+            DynamicValue::Path { path } => self.data_model.get(path).cloned().ok_or_else(|| {
+                crate::error::RendererError::SurfaceNotFound(format!("path not found: {}", path))
+            }),
+            DynamicValue::FunctionCall { call, .. } => Err(
+                crate::error::RendererError::FunctionNotAvailable(call.clone()),
+            ),
         }
     }
 
@@ -89,7 +89,9 @@ mod tests {
     fn test_resolve_path() {
         let dm = DataModel::new(json!({"user": {"name": "Alice"}}));
         let binding = DataBinding::new(dm);
-        let dv: DynamicValue<String> = DynamicValue::Path { path: "/user/name".into() };
+        let dv: DynamicValue<String> = DynamicValue::Path {
+            path: "/user/name".into(),
+        };
         assert_eq!(binding.resolve_dynamic(&dv).unwrap(), "Alice");
     }
 

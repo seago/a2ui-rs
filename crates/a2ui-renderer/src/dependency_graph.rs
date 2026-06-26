@@ -20,21 +20,29 @@ impl DependencyGraph {
     /// 注册组件对路径的依赖
     pub fn register_dependency(&mut self, component_id: ComponentId, path: String) {
         // 正向：component → paths
-        self.dependencies.entry(component_id.clone()).or_default().insert(path.clone());
+        self.dependencies
+            .entry(component_id.clone())
+            .or_default()
+            .insert(path.clone());
         // 反向：path → components
-        self.dependents.entry(path).or_default().insert(component_id);
+        self.dependents
+            .entry(path)
+            .or_default()
+            .insert(component_id);
     }
 
     /// 获取依赖指定路径的所有组件
     pub fn dependents(&self, path: &str) -> Vec<&ComponentId> {
-        self.dependents.get(path)
+        self.dependents
+            .get(path)
             .map(|set| set.iter().collect())
             .unwrap_or_default()
     }
 
     /// 当路径变更时，返回需要重渲染的组件列表
     pub fn on_data_change(&mut self, path: &str) -> Vec<ComponentId> {
-        self.dependents.get(path)
+        self.dependents
+            .get(path)
             .map(|set| set.iter().cloned().collect())
             .unwrap_or_default()
     }
@@ -72,7 +80,10 @@ mod tests {
         let comp = ComponentId::new("label").unwrap();
         graph.register_dependency(comp.clone(), "/user/name".to_string());
 
-        assert!(graph.get_dependencies(&comp).unwrap().contains("/user/name"));
+        assert!(graph
+            .get_dependencies(&comp)
+            .unwrap()
+            .contains("/user/name"));
     }
 
     #[test]
@@ -119,7 +130,9 @@ mod tests {
         graph.register_dependency(ComponentId::new("b").unwrap(), "/y".to_string());
 
         graph.clear();
-        assert!(graph.get_dependencies(&ComponentId::new("a").unwrap()).is_none());
+        assert!(graph
+            .get_dependencies(&ComponentId::new("a").unwrap())
+            .is_none());
     }
 
     #[test]

@@ -72,7 +72,10 @@ mod tests {
     fn test_validate_ok() {
         let mut catalog = Catalog::new("test".to_string());
         catalog.add_component("Text", json!({"type": "object"}));
-        catalog.add_function("required", json!({"returnType":"boolean","callableFrom":"clientOnly"}));
+        catalog.add_function(
+            "required",
+            json!({"returnType":"boolean","callableFrom":"clientOnly"}),
+        );
         assert!(CatalogValidator::validate(&catalog).is_ok());
     }
 

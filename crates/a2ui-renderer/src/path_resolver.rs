@@ -1,5 +1,5 @@
-use a2ui_core::prelude::*;
 use crate::error::RenderResult;
+use a2ui_core::prelude::*;
 use serde_json::Value;
 
 /// 路径解析引擎
@@ -71,20 +71,21 @@ impl PathResolver {
     {
         match dynamic {
             DynamicValue::Literal(v) => Ok(v.clone().into()),
-            DynamicValue::Path { path } => self.resolve(path)
-                .ok_or_else(|| crate::error::RendererError::SurfaceNotFound(format!("path not found: {}", path))),
-            DynamicValue::FunctionCall { call, .. } => {
-                Err(crate::error::RendererError::FunctionNotAvailable(call.clone()))
-            }
+            DynamicValue::Path { path } => self.resolve(path).ok_or_else(|| {
+                crate::error::RendererError::SurfaceNotFound(format!("path not found: {}", path))
+            }),
+            DynamicValue::FunctionCall { call, .. } => Err(
+                crate::error::RendererError::FunctionNotAvailable(call.clone()),
+            ),
         }
     }
 
     /// 获取当前作用域的 JSON Pointer 基础路径
     fn current_base_path(&self) -> String {
-        for scope in self.scope_stack.iter().rev() {
+        if let Some(scope) = self.scope_stack.iter().next_back() {
             match scope {
                 Scope::Collection { base_path, .. } => return base_path.clone(),
-                Scope::Root => break,
+                Scope::Root => {}
             }
         }
         String::new()
@@ -92,10 +93,10 @@ impl PathResolver {
 
     /// 获取当前索引
     fn current_index(&self) -> Option<usize> {
-        for scope in self.scope_stack.iter().rev() {
+        if let Some(scope) = self.scope_stack.iter().next_back() {
             match scope {
                 Scope::Collection { index, .. } => return Some(*index),
-                Scope::Root => break,
+                Scope::Root => {}
             }
         }
         None

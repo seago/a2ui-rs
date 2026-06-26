@@ -1,12 +1,12 @@
-use a2ui_core::prelude::*;
 use crate::error::RenderResult;
+use a2ui_core::prelude::*;
 use std::collections::HashMap;
 
 /// Catalog 注册表：管理已加载的 Catalog
 #[derive(Debug, Clone, Default)]
 pub struct CatalogRegistry {
     catalogs: HashMap<String, Catalog>,
-    basic_catalog_id: Option<String>,
+    _basic_catalog_id: Option<String>,
 }
 
 impl CatalogRegistry {

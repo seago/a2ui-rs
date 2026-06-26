@@ -85,10 +85,12 @@ mod tests {
 
     #[test]
     fn test_child_list_array() {
-        let cl = ChildList::Array { list: vec![
-            ComponentId::new("child1").unwrap(),
-            ComponentId::new("child2").unwrap(),
-        ]};
+        let cl = ChildList::Array {
+            list: vec![
+                ComponentId::new("child1").unwrap(),
+                ComponentId::new("child2").unwrap(),
+            ],
+        };
         let ids: Vec<_> = cl.component_ids().collect();
         assert_eq!(ids.len(), 2);
     }
@@ -105,10 +107,12 @@ mod tests {
 
     #[test]
     fn test_child_list_array_serialize() {
-        let cl = ChildList::Array { list: vec![
-            ComponentId::new("a").unwrap(),
-            ComponentId::new("b").unwrap(),
-        ]};
+        let cl = ChildList::Array {
+            list: vec![
+                ComponentId::new("a").unwrap(),
+                ComponentId::new("b").unwrap(),
+            ],
+        };
         let json = serde_json::to_value(&cl).unwrap();
         assert_eq!(json["children"][0], "a");
         assert_eq!(json["children"][1], "b");

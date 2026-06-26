@@ -18,11 +18,7 @@ impl FocusManager {
     /// 设置可聚焦组件列表
     pub fn set_focusable(&mut self, components: Vec<ComponentId>) {
         self.focusable = components;
-        self.current_index = if self.focusable.is_empty() {
-            -1
-        } else {
-            0
-        };
+        self.current_index = if self.focusable.is_empty() { -1 } else { 0 };
     }
 
     /// 获取当前聚焦的组件

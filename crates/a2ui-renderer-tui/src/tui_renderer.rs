@@ -1,18 +1,13 @@
 use crate::WidgetMapper;
-use a2ui_core::prelude::*;
+use a2ui_core::message::client_to_server::FunctionResponse;
 use a2ui_core::message::server_to_client::{
     ActionResponse, CallFunction, CreateSurface, DeleteSurface, UpdateComponents, UpdateDataModel,
 };
-use a2ui_core::message::client_to_server::FunctionResponse;
+use a2ui_core::prelude::*;
 use a2ui_renderer::{
-    ComponentForest, DataBinding, DependencyGraph, RenderResult,
-    Renderer, SurfaceHandle, UserEvent,
+    ComponentForest, DataBinding, DependencyGraph, RenderResult, Renderer, SurfaceHandle, UserEvent,
 };
-use ratatui::{
-    layout::Rect,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, Frame};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -26,7 +21,7 @@ pub struct TuiRenderer {
     /// DataModel 绑定（使用字符串作为 Surface 标识）
     data_bindings: HashMap<String, DataBinding>,
     /// 依赖图
-    dependency_graph: DependencyGraph,
+    _dependency_graph: DependencyGraph,
     /// 当前聚焦的组件
     focused_component: Option<ComponentId>,
 }
@@ -38,7 +33,7 @@ impl TuiRenderer {
             surfaces: HashMap::new(),
             forest: ComponentForest::new(),
             data_bindings: HashMap::new(),
-            dependency_graph: DependencyGraph::new(),
+            _dependency_graph: DependencyGraph::new(),
             focused_component: None,
         }
     }
@@ -72,7 +67,10 @@ impl Renderer for TuiRenderer {
 
         // 注册 DataModel
         let data_model = msg.data_model.unwrap_or(Value::Object(Default::default()));
-        self.data_bindings.insert(surface_id.clone(), DataBinding::new(DataModel::new(data_model)));
+        self.data_bindings.insert(
+            surface_id.clone(),
+            DataBinding::new(DataModel::new(data_model)),
+        );
 
         // 记录 Surface 映射
         self.surfaces.insert(handle, surface_id);
@@ -131,36 +129,64 @@ impl Renderer for TuiRenderer {
     async fn handle_user_event(&mut self, event: UserEvent) -> RenderResult<Option<ActionMessage>> {
         match event {
             UserEvent::Click { component_id } => {
-                let action = ActionMessage::event("click", "")
-                    .with_context("source", DynamicValue::Literal(Value::String(component_id.as_str().to_string())));
+                let action = ActionMessage::event("click", "").with_context(
+                    "source",
+                    DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
+                );
                 Ok(Some(action))
             }
             UserEvent::KeyPress { key } => {
                 if key == "Enter" || key == " " {
                     if let Some(ref comp_id) = self.focused_component {
-                        let action = ActionMessage::event("activate", "")
-                            .with_context("source", DynamicValue::Literal(Value::String(comp_id.as_str().to_string())));
+                        let action = ActionMessage::event("activate", "").with_context(
+                            "source",
+                            DynamicValue::Literal(Value::String(comp_id.as_str().to_string())),
+                        );
                         return Ok(Some(action));
                     }
                 }
                 Ok(None)
             }
-            UserEvent::TextInput { component_id, value } => {
+            UserEvent::TextInput {
+                component_id,
+                value,
+            } => {
                 let action = ActionMessage::event("input", "")
-                    .with_context("component", DynamicValue::Literal(Value::String(component_id.as_str().to_string())))
+                    .with_context(
+                        "component",
+                        DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
+                    )
                     .with_context("value", DynamicValue::Literal(Value::String(value)));
                 Ok(Some(action))
             }
-            UserEvent::CheckToggle { component_id, checked } => {
+            UserEvent::CheckToggle {
+                component_id,
+                checked,
+            } => {
                 let action = ActionMessage::event("toggle", "")
-                    .with_context("component", DynamicValue::Literal(Value::String(component_id.as_str().to_string())))
-                    .with_context("checked", DynamicValue::Literal(Value::String(checked.to_string())));
+                    .with_context(
+                        "component",
+                        DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
+                    )
+                    .with_context(
+                        "checked",
+                        DynamicValue::Literal(Value::String(checked.to_string())),
+                    );
                 Ok(Some(action))
             }
-            UserEvent::SliderChange { component_id, value } => {
+            UserEvent::SliderChange {
+                component_id,
+                value,
+            } => {
                 let action = ActionMessage::event("slider_change", "")
-                    .with_context("component", DynamicValue::Literal(Value::String(component_id.as_str().to_string())))
-                    .with_context("value", DynamicValue::Literal(Value::String(value.to_string())));
+                    .with_context(
+                        "component",
+                        DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
+                    )
+                    .with_context(
+                        "value",
+                        DynamicValue::Literal(Value::String(value.to_string())),
+                    );
                 Ok(Some(action))
             }
         }

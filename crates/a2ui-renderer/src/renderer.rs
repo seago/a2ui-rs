@@ -1,10 +1,9 @@
-use a2ui_core::prelude::*;
+use crate::RenderResult;
+use a2ui_core::message::client_to_server::FunctionResponse;
 use a2ui_core::message::server_to_client::{
     ActionResponse, CallFunction, CreateSurface, DeleteSurface, UpdateComponents, UpdateDataModel,
 };
-use a2ui_core::message::client_to_server::FunctionResponse;
-use crate::RenderResult;
-use async_trait::async_trait;
+use a2ui_core::prelude::*;
 use uuid::Uuid;
 
 /// Surface 句柄（全局唯一标识符）
@@ -23,6 +22,12 @@ impl SurfaceHandle {
     }
 }
 
+impl Default for SurfaceHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// 用户事件（平台无关）
 #[derive(Debug, Clone)]
 pub enum UserEvent {
@@ -31,11 +36,20 @@ pub enum UserEvent {
     /// 键盘按下事件
     KeyPress { key: String },
     /// 文本输入事件
-    TextInput { component_id: ComponentId, value: String },
+    TextInput {
+        component_id: ComponentId,
+        value: String,
+    },
     /// 复选框切换事件
-    CheckToggle { component_id: ComponentId, checked: bool },
+    CheckToggle {
+        component_id: ComponentId,
+        checked: bool,
+    },
     /// 滑块变化事件
-    SliderChange { component_id: ComponentId, value: f64 },
+    SliderChange {
+        component_id: ComponentId,
+        value: f64,
+    },
 }
 
 /// 渲染器 trait — 各平台 crate 必须实现此 trait
@@ -82,7 +96,9 @@ mod tests {
         let _e = UserEvent::Click {
             component_id: ComponentId::new("btn").unwrap(),
         };
-        let _e = UserEvent::KeyPress { key: "Enter".into() };
+        let _e = UserEvent::KeyPress {
+            key: "Enter".into(),
+        };
         let _e = UserEvent::TextInput {
             component_id: ComponentId::new("input").unwrap(),
             value: "hi".into(),

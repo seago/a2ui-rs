@@ -1,5 +1,5 @@
-pub use a2ui_core::A2uiError;
 use a2ui_core::state::{StateOperation, SurfaceState};
+pub use a2ui_core::A2uiError;
 use a2ui_core::ComponentId;
 use thiserror::Error;
 
@@ -41,7 +41,10 @@ pub type RenderResult<T> = Result<T, RendererError>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use a2ui_core::{ComponentId, state::{SurfaceState, StateOperation}};
+    use a2ui_core::{
+        state::{StateOperation, SurfaceState},
+        ComponentId,
+    };
 
     #[test]
     fn test_surface_not_found() {

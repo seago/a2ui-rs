@@ -198,7 +198,10 @@ mod tests {
     #[test]
     fn test_state_operation_str() {
         assert_eq!(StateOperation::CreateSurface.as_str(), "CreateSurface");
-        assert_eq!(StateOperation::UpdateComponents.as_str(), "UpdateComponents");
+        assert_eq!(
+            StateOperation::UpdateComponents.as_str(),
+            "UpdateComponents"
+        );
         assert_eq!(StateOperation::UpdateDataModel.as_str(), "UpdateDataModel");
         assert_eq!(StateOperation::DeleteSurface.as_str(), "DeleteSurface");
     }

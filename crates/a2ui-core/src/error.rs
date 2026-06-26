@@ -29,10 +29,7 @@ pub enum A2uiError {
 
     /// 状态机违规（在错误状态执行了非法操作）
     #[error("Invalid state transition: current={current:?}, attempted={attempted:?}")]
-    InvalidStateTransition {
-        current: String,
-        attempted: String,
-    },
+    InvalidStateTransition { current: String, attempted: String },
 
     /// JSON 反序列化失败
     #[error("Deserialization error: {0}")]
@@ -81,7 +78,10 @@ mod tests {
     #[test]
     fn test_catalog_not_found_display() {
         let err = A2uiError::CatalogNotFound("https://example.com/catalog".into());
-        assert_eq!(err.to_string(), "Catalog not found: https://example.com/catalog");
+        assert_eq!(
+            err.to_string(),
+            "Catalog not found: https://example.com/catalog"
+        );
     }
 
     #[test]

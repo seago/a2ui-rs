@@ -63,9 +63,7 @@ impl WidgetMapper {
     /// 获取组件的默认尺寸约束
     pub fn size_constraints(&self, component: &Component) -> (Constraint, Constraint) {
         match component.component_type() {
-            "Column" | "Row" | "List" => {
-                (Constraint::Min(1), Constraint::Percentage(100))
-            }
+            "Column" | "Row" | "List" => (Constraint::Min(1), Constraint::Percentage(100)),
             _ => (Constraint::Length(1), Constraint::Length(1)),
         }
     }
@@ -118,10 +116,7 @@ mod tests {
     #[test]
     fn test_column_size_constraints() {
         let mapper = WidgetMapper;
-        let comp = Component::column(
-            ComponentId::new("col").unwrap(),
-            vec![],
-        );
+        let comp = Component::column(ComponentId::new("col").unwrap(), vec![]);
         let (w, _h) = mapper.size_constraints(&comp);
         assert!(matches!(w, Constraint::Min(_)));
     }

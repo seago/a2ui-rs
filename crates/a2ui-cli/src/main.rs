@@ -1,8 +1,6 @@
-use a2ui_core::prelude::*;
 use a2ui_renderer_tui::TuiRenderer;
 use a2ui_transport::JsonlTransport;
 use clap::{Parser, Subcommand};
-use std::io;
 use tracing::info;
 
 /// A2UI CLI — 渲染 A2UI 协议的 UI 表面
@@ -42,11 +40,10 @@ async fn main() -> anyhow::Result<()> {
 async fn run_render(input: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     info!("Starting A2UI renderer");
 
-    let mut renderer = TuiRenderer::new();
+    let _renderer = TuiRenderer::new();
 
     // 简化实现：初始化 transport 占位（实际渲染逻辑在后续迭代中完成）
-    if input.is_some() {
-        let path = input.unwrap();
+    if let Some(path) = input {
         let file = std::fs::File::open(path)?;
         let reader = tokio::fs::File::from_std(file);
         let _transport = JsonlTransport::new(reader, tokio::io::stdout());
