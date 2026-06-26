@@ -13,7 +13,7 @@ pub mod catalog_registry;
 pub mod dependency_graph;
 
 pub use error::{RendererError, RenderResult};
-pub use renderer::Renderer;
+pub use renderer::{Renderer, SurfaceHandle, UserEvent};
 pub use component_forest::ComponentForest;
 pub use data_binding::DataBinding;
 pub use path_resolver::PathResolver;
