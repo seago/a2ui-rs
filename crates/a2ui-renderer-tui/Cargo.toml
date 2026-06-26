@@ -8,6 +8,10 @@ authors.workspace = true
 description = "A2UI TUI Renderer implementation using ratatui"
 repository = "https://github.com/yufeng108/a2ui-rs"
 
+[[test]]
+name = "e2e"
+path = "tests/e2e_tests.rs"
+
 [dependencies]
 a2ui-core = { path = "../a2ui-core" }
 a2ui-renderer = { path = "../a2ui-renderer" }

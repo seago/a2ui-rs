@@ -20,7 +20,7 @@ use std::collections::HashMap;
 #[derive(Debug)]
 pub struct TuiRenderer {
     /// Surface 句柄 → SurfaceId 映射
-    surfaces: HashMap<SurfaceHandle, String>,
+    pub surfaces: HashMap<SurfaceHandle, String>,
     /// 组件森林（所有 Surface 的组件树）
     forest: ComponentForest,
     /// DataModel 绑定（使用字符串作为 Surface 标识）
