@@ -1,0 +1,16 @@
+[package]
+name = "a2ui-transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "A2UI Transport layer abstraction"
+repository = "https://github.com/yufeng108/a2ui-rs"
+
+[dependencies]
+a2ui-core = { path = "../a2ui-core" }
+tokio.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
