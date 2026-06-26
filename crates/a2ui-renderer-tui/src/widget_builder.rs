@@ -221,18 +221,9 @@ impl<'a> WidgetBuilder<'a> {
             }
             "Slider" => {
                 let props = component.properties();
-                let value = props
-                    .get("value")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
-                let min = props
-                    .get("min")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
-                let max = props
-                    .get("max")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(100.0);
+                let value = props.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let min = props.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let max = props.get("max").and_then(|v| v.as_f64()).unwrap_or(100.0);
                 RenderableWidget::Slider {
                     id: component.id().clone(),
                     area,
@@ -417,8 +408,10 @@ mod tests {
 
         let tf_widget = widgets.iter().find(|w| w.id().as_str() == "name_input");
         assert!(tf_widget.is_some(), "TextField widget should exist in tree");
-        assert!(matches!(tf_widget.unwrap(), RenderableWidget::TextField { .. }),
-            "TextField component should produce RenderableWidget::TextField");
+        assert!(
+            matches!(tf_widget.unwrap(), RenderableWidget::TextField { .. }),
+            "TextField component should produce RenderableWidget::TextField"
+        );
     }
 
     #[test]
@@ -432,8 +425,9 @@ mod tests {
             vec![ComponentId::new("agree").unwrap()],
         );
         let cb: Component = serde_json::from_str(
-            r#"{"id":"agree","component":"CheckBox","checked":true,"label":"I agree"}"#
-        ).unwrap();
+            r#"{"id":"agree","component":"CheckBox","checked":true,"label":"I agree"}"#,
+        )
+        .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", cb).unwrap();
 
@@ -442,8 +436,10 @@ mod tests {
 
         let cb_widget = widgets.iter().find(|w| w.id().as_str() == "agree");
         assert!(cb_widget.is_some(), "CheckBox widget should exist in tree");
-        assert!(matches!(cb_widget.unwrap(), RenderableWidget::CheckBox { .. }),
-            "CheckBox component should produce RenderableWidget::CheckBox");
+        assert!(
+            matches!(cb_widget.unwrap(), RenderableWidget::CheckBox { .. }),
+            "CheckBox component should produce RenderableWidget::CheckBox"
+        );
     }
 
     #[test]
@@ -457,8 +453,9 @@ mod tests {
             vec![ComponentId::new("volume").unwrap()],
         );
         let sl: Component = serde_json::from_str(
-            r#"{"id":"volume","component":"Slider","value":50,"min":0,"max":100}"#
-        ).unwrap();
+            r#"{"id":"volume","component":"Slider","value":50,"min":0,"max":100}"#,
+        )
+        .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", sl).unwrap();
 
@@ -467,7 +464,9 @@ mod tests {
 
         let sl_widget = widgets.iter().find(|w| w.id().as_str() == "volume");
         assert!(sl_widget.is_some(), "Slider widget should exist in tree");
-        assert!(matches!(sl_widget.unwrap(), RenderableWidget::Slider { .. }),
-            "Slider component should produce RenderableWidget::Slider");
+        assert!(
+            matches!(sl_widget.unwrap(), RenderableWidget::Slider { .. }),
+            "Slider component should produce RenderableWidget::Slider"
+        );
     }
 }

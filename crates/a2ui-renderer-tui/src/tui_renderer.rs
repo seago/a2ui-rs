@@ -152,7 +152,12 @@ impl TuiRenderer {
                 let text = Paragraph::new(format!("[{}]", reason));
                 frame.render_widget(text, area);
             }
-            RenderableWidget::TextField { area, value, placeholder, .. } => {
+            RenderableWidget::TextField {
+                area,
+                value,
+                placeholder,
+                ..
+            } => {
                 let display = if value.is_empty() {
                     placeholder.as_str()
                 } else {
@@ -161,14 +166,29 @@ impl TuiRenderer {
                 let text = Paragraph::new(format!("[{}]", display));
                 frame.render_widget(text, area);
             }
-            RenderableWidget::CheckBox { area, label, checked, .. } => {
+            RenderableWidget::CheckBox {
+                area,
+                label,
+                checked,
+                ..
+            } => {
                 let status = if checked { "[x]" } else { "[ ]" };
                 let text = Paragraph::new(format!("{} {}", status, label));
                 frame.render_widget(text, area);
             }
-            RenderableWidget::Slider { area, value, min, max, .. } => {
+            RenderableWidget::Slider {
+                area,
+                value,
+                min,
+                max,
+                ..
+            } => {
                 let range = max - min;
-                let ratio = if range == 0.0 { 0.0 } else { ((value - min) / range).clamp(0.0, 1.0) };
+                let ratio = if range == 0.0 {
+                    0.0
+                } else {
+                    ((value - min) / range).clamp(0.0, 1.0)
+                };
                 let filled = (ratio * 20.0).round() as usize;
                 let bar = format!("[{}{}]", "=".repeat(filled), " ".repeat(20 - filled));
                 let text = Paragraph::new(bar);
@@ -1292,8 +1312,9 @@ mod tests {
 
         let mut renderer = TuiRenderer::new();
         let cb: Component = serde_json::from_str(
-            r#"{"id":"agree","component":"CheckBox","checked":true,"label":"I agree"}"#
-        ).unwrap();
+            r#"{"id":"agree","component":"CheckBox","checked":true,"label":"I agree"}"#,
+        )
+        .unwrap();
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
@@ -1322,8 +1343,9 @@ mod tests {
 
         let mut renderer = TuiRenderer::new();
         let sl: Component = serde_json::from_str(
-            r#"{"id":"volume","component":"Slider","value":50,"min":0,"max":100}"#
-        ).unwrap();
+            r#"{"id":"volume","component":"Slider","value":50,"min":0,"max":100}"#,
+        )
+        .unwrap();
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
