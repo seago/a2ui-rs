@@ -40,6 +40,12 @@ pub async fn process_server_envelope(
                 let response = renderer.call_function(msg).await?;
                 info!("Function response: call={}", response.call);
             }
+            V1_0ServerMessage::Capabilities(msg) => {
+                info!(
+                    "Capabilities: version={}, features={:?}",
+                    msg.version, msg.features
+                );
+            }
         },
     }
 

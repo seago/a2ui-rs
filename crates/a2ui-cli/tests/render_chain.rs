@@ -22,9 +22,8 @@ async fn test_process_server_envelope_calls_render_frame() {
         data_model: None,
     };
 
-    let envelope = a2ui_core::ServerEnvelope::V1_0(
-        a2ui_core::message::V1_0ServerMessage::CreateSurface(msg)
-    );
+    let envelope =
+        a2ui_core::ServerEnvelope::V1_0(a2ui_core::message::V1_0ServerMessage::CreateSurface(msg));
 
     a2ui_cli::process_server_envelope(&mut renderer, envelope, &mut terminal)
         .await

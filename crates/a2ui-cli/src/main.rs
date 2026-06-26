@@ -1,3 +1,4 @@
+use a2ui_core::message::Capabilities;
 use a2ui_core::prelude::*;
 use a2ui_renderer_tui::TuiRenderer;
 use a2ui_transport::jsonl::JsonlTransport;
@@ -54,6 +55,21 @@ impl InputTransport {
             InputTransport::Stdin(t) => Transport::connect(t).await?,
         }
         Ok(())
+    }
+
+    async fn handshake(&mut self) -> anyhow::Result<Capabilities> {
+        let client_caps = Capabilities {
+            version: "1.0".to_string(),
+            features: vec!["tui".to_string()],
+        };
+        match self {
+            InputTransport::File(t) => Transport::handshake(t, client_caps)
+                .await
+                .map_err(Into::into),
+            InputTransport::Stdin(t) => Transport::handshake(t, client_caps)
+                .await
+                .map_err(Into::into),
+        }
     }
 
     /// 接收服务端信封消息（Agent → Renderer）
@@ -132,6 +148,13 @@ async fn run_render(input: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     transport.connect().await?;
     info!("Transport connected");
 
+    // 执行能力协商握手
+    let server_caps = transport.handshake().await?;
+    info!(
+        "Server capabilities: version={}, features={:?}",
+        server_caps.version, server_caps.features
+    );
+
     // 仅 STDIN 模式打印欢迎信息
     if matches!(transport, InputTransport::Stdin(_)) {
         println!("A2UI TUI Renderer ready. Send JSONL messages on stdin.");
@@ -151,7 +174,9 @@ async fn run_render(input: Option<std::path::PathBuf>) -> anyhow::Result<()> {
 
         match result {
             Ok(Ok(Some(envelope))) => {
-                if let Err(e) = process_server_envelope(&mut renderer, envelope, &mut terminal).await {
+                if let Err(e) =
+                    process_server_envelope(&mut renderer, envelope, &mut terminal).await
+                {
                     error!("Error processing message: {}", e);
                 }
             }

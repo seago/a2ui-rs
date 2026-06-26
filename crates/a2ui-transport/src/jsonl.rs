@@ -1,6 +1,10 @@
 use crate::error::TransportResult;
 use crate::{Transport, TransportError};
-use a2ui_core::{ClientEnvelope, ServerEnvelope};
+use a2ui_core::message::Capabilities;
+use a2ui_core::{
+    message::{V1_0ClientMessage, V1_0ServerMessage},
+    ClientEnvelope, ServerEnvelope,
+};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
 #[async_trait::async_trait]
@@ -11,6 +15,22 @@ where
 {
     async fn connect(&mut self) -> TransportResult<()> {
         Ok(())
+    }
+
+    async fn handshake(&mut self, capabilities: Capabilities) -> TransportResult<Capabilities> {
+        // 发送客户端能力描述
+        let client_msg = V1_0ClientMessage::Capabilities(capabilities);
+        self.send(ClientEnvelope::V1_0(client_msg)).await?;
+
+        // 接收服务端能力描述
+        let envelope = self.receive().await?;
+        match envelope {
+            ServerEnvelope::V1_0(V1_0ServerMessage::Capabilities(server_caps)) => Ok(server_caps),
+            _ => Err(TransportError::ConnectionError(
+                "expected capabilities message during handshake".to_string(),
+            )
+            .into()),
+        }
     }
 
     async fn send(&mut self, envelope: ClientEnvelope) -> TransportResult<()> {
@@ -104,6 +124,15 @@ mod tests {
     }
 
     #[test]
+    fn test_jsonl_transport_new() {
+        let input = Builder::new().read(b"").build();
+        let output = Vec::new();
+        let _transport = JsonlTransport::new(input, output);
+        // 结构验证
+        assert!(true);
+    }
+
+    #[test]
     fn test_jsonl_transport_send_receive_roundtrip() {
         let input =
             b"{\"version\":\"v1.0\",\"action\":{\"name\":\"click\",\"surfaceId\":\"s1\"}}\n";
@@ -122,11 +151,53 @@ mod tests {
     }
 
     #[test]
-    fn test_jsonl_transport_new() {
-        let input = Builder::new().read(b"").build();
-        let output = Vec::new();
-        let _transport = JsonlTransport::new(input, output);
-        // 结构验证
-        assert!(true);
+    fn test_jsonl_transport_handshake() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            // 模拟服务端响应：返回 capabilities 消息
+            let server_response =
+                b"{\"version\":\"v1.0\",\"capabilities\":{\"version\":\"1.0\",\"features\":[\"basic\"]}}\n";
+            let input = Builder::new().read(server_response).build();
+            let mut output = Vec::new();
+
+            let mut transport = JsonlTransport::new(input, &mut output);
+            transport.connect().await.unwrap();
+
+            let client_caps = Capabilities {
+                version: "1.0".to_string(),
+                features: vec!["tui".to_string()],
+            };
+            let server_caps = transport.handshake(client_caps).await.unwrap();
+
+            assert_eq!(server_caps.version, "1.0");
+            assert_eq!(server_caps.features, vec!["basic"]);
+
+            // 验证写入的内容包含客户端能力描述
+            let written = String::from_utf8(output).unwrap();
+            assert!(written.contains("capabilities"));
+            assert!(written.contains("tui"));
+        });
+    }
+
+    #[test]
+    fn test_jsonl_transport_handshake_unexpected_message() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            // 模拟服务端返回非 capabilities 消息
+            let server_response =
+                b"{\"version\":\"v1.0\",\"createSurface\":{\"surfaceId\":\"s1\"}}\n";
+            let input = Builder::new().read(server_response).build();
+            let mut output = Vec::new();
+
+            let mut transport = JsonlTransport::new(input, &mut output);
+            transport.connect().await.unwrap();
+
+            let client_caps = Capabilities {
+                version: "1.0".to_string(),
+                features: vec![],
+            };
+            let result = transport.handshake(client_caps).await;
+            assert!(result.is_err());
+        });
     }
 }

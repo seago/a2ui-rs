@@ -93,6 +93,7 @@ pub enum V1_0ServerMessage {
     DeleteSurface(DeleteSurface),
     ActionResponse(ActionResponse),
     CallFunction(CallFunction),
+    Capabilities(crate::message::capabilities::Capabilities),
 }
 
 #[cfg(test)]
@@ -278,6 +279,31 @@ mod tests {
     fn test_deny_unknown_fields_on_call_function() {
         let json = r#"{"functionCallId":"fc1","wantResponse":true,"call":{"call":"test","args":{}},"extra":"x"}"#;
         let result: Result<CallFunction> = serde_json::from_str(json).map_err(Into::into);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_server_envelope_capabilities() {
+        let caps = crate::message::capabilities::Capabilities {
+            version: "1.0".to_string(),
+            features: vec!["basic".to_string()],
+        };
+        let envelope = ServerEnvelope::V1_0(V1_0ServerMessage::Capabilities(caps));
+        let json = serde_json::to_string(&envelope).unwrap();
+        let parsed: ServerEnvelope = serde_json::from_str(&json).unwrap();
+        if let ServerEnvelope::V1_0(V1_0ServerMessage::Capabilities(c)) = parsed {
+            assert_eq!(c.version, "1.0");
+            assert_eq!(c.features, vec!["basic"]);
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn test_deny_unknown_fields_on_server_capabilities_message() {
+        let json =
+            r#"{"version":"v1.0","capabilities":{"version":"1.0","features":[],"extra":"x"}}"#;
+        let result: Result<ServerEnvelope> = serde_json::from_str(json).map_err(Into::into);
         assert!(result.is_err());
     }
 

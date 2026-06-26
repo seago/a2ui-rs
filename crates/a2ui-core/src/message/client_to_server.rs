@@ -107,6 +107,7 @@ pub enum V1_0ClientMessage {
     Action(ActionMessage),
     FunctionResponse(FunctionResponse),
     Error(ClientError),
+    Capabilities(crate::message::capabilities::Capabilities),
 }
 
 #[cfg(test)]
@@ -239,6 +240,82 @@ mod tests {
                 _ => panic!("wrong variant"),
             }
         }
+    }
+
+    #[test]
+    fn test_capabilities_serialization() {
+        let caps = crate::message::capabilities::Capabilities {
+            version: "1.0".to_string(),
+            features: vec!["tui".to_string(), "gui".to_string()],
+        };
+        let json = serde_json::to_value(&caps).unwrap();
+        assert_eq!(json["version"], "1.0");
+        assert_eq!(json["features"][0], "tui");
+        assert_eq!(json["features"][1], "gui");
+    }
+
+    #[test]
+    fn test_capabilities_deny_unknown_fields() {
+        let json = r#"{"version":"1.0","features":[],"extra":"x"}"#;
+        let result: Result<crate::message::capabilities::Capabilities> =
+            serde_json::from_str(json).map_err(Into::into);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_capability_exchange_serialization() {
+        let exchange = crate::message::capabilities::CapabilityExchange {
+            client_capabilities: crate::message::capabilities::Capabilities {
+                version: "1.0".to_string(),
+                features: vec!["tui".to_string()],
+            },
+            server_capabilities: crate::message::capabilities::Capabilities {
+                version: "1.0".to_string(),
+                features: vec!["basic".to_string()],
+            },
+        };
+        let json = serde_json::to_value(&exchange).unwrap();
+        assert_eq!(json["clientCapabilities"]["version"], "1.0");
+        assert_eq!(json["serverCapabilities"]["version"], "1.0");
+        assert_eq!(json["serverCapabilities"]["features"][0], "basic");
+    }
+
+    #[test]
+    fn test_client_envelope_capabilities() {
+        let caps = crate::message::capabilities::Capabilities {
+            version: "1.0".to_string(),
+            features: vec!["tui".to_string()],
+        };
+        let msg = V1_0ClientMessage::Capabilities(caps);
+        let envelope = ClientEnvelope::V1_0(msg);
+        let json = serde_json::to_string(&envelope).unwrap();
+        let parsed: ClientEnvelope = serde_json::from_str(&json).unwrap();
+        if let ClientEnvelope::V1_0(V1_0ClientMessage::Capabilities(c)) = parsed {
+            assert_eq!(c.version, "1.0");
+            assert_eq!(c.features, vec!["tui"]);
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn test_deny_unknown_fields_on_client_capabilities_message() {
+        let json =
+            r#"{"version":"v1.0","capabilities":{"version":"1.0","features":[],"extra":"x"}}"#;
+        let result: Result<ClientEnvelope> = serde_json::from_str(json).map_err(Into::into);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_client_envelope_capabilities_integration() {
+        let caps = crate::message::capabilities::Capabilities {
+            version: "1.0".to_string(),
+            features: vec!["tui".to_string(), "jsonl".to_string()],
+        };
+        let envelope = ClientEnvelope::V1_0(V1_0ClientMessage::Capabilities(caps));
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert!(json.contains("capabilities"));
+        assert!(json.contains("tui"));
     }
 
     #[test]

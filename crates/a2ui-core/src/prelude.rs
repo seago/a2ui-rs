@@ -4,6 +4,7 @@ pub use crate::component::ComponentId;
 pub use crate::datamodel::DataModel;
 pub use crate::error::{A2uiError, Result};
 pub use crate::message::{ActionMessage, ClientEnvelope, ServerEnvelope, V1_0ServerMessage};
+pub use crate::message::{Capabilities, V1_0ClientMessage};
 pub use crate::schema::CatalogValidator;
 pub use crate::state::{StateMachine, SurfaceState};
 pub use serde_json::json;

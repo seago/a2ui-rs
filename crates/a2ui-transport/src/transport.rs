@@ -1,4 +1,5 @@
 use crate::error::TransportResult;
+use a2ui_core::message::Capabilities;
 use a2ui_core::{ClientEnvelope, ServerEnvelope};
 use async_trait::async_trait;
 
@@ -11,6 +12,9 @@ use async_trait::async_trait;
 pub trait Transport: Send {
     /// 建立连接
     async fn connect(&mut self) -> TransportResult<()>;
+
+    /// 执行能力协商握手，交换客户端和服务端能力描述
+    async fn handshake(&mut self, capabilities: Capabilities) -> TransportResult<Capabilities>;
 
     /// 发送客户端信封消息到 Agent（写入输出流）
     async fn send(&mut self, envelope: ClientEnvelope) -> TransportResult<()>;
