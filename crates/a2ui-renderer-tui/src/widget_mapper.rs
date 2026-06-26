@@ -18,7 +18,7 @@ impl WidgetMapper {
     }
 
     /// 从组件属性中提取文本内容
-    fn extract_text(&self, component: &Component) -> String {
+    pub fn extract_text(&self, component: &Component) -> String {
         let props = component.properties();
         if let Some(text_val) = props.get("text") {
             if let Some(s) = text_val.as_str() {
