@@ -91,9 +91,18 @@ impl Transport for WebSocketTransport {
 }
 
 #[cfg(test)]
+impl WebSocketTransport {
+    /// 检查 WebSocket 是否已连接（仅用于测试）
+    fn is_connected(&self) -> bool {
+        self.ws.is_some()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use a2ui_core::message::{ActionMessage, V1_0ClientMessage};
+    use futures_util::stream::StreamExt;
 
     #[test]
     fn test_websocket_url_parse() {
@@ -132,5 +141,53 @@ mod tests {
         let mut transport = WebSocketTransport::new("ws://localhost:8080/a2ui").unwrap();
         let result = rt.block_on(async { transport.close().await });
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_websocket_connect_stores_state() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            // 启动一个简单的 WebSocket 回显服务器用于测试
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("failed to bind test server");
+            let addr = listener.local_addr().expect("failed to get local addr");
+
+            let server_handle = tokio::spawn(async move {
+                if let Ok((stream, _)) = listener.accept().await {
+                    if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
+                        // 保持连接打开，直到客户端断开
+                        while let Some(Ok(_)) = ws.next().await {}
+                    }
+                }
+            });
+
+            // 给服务器一点时间启动
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+            let url = format!("ws://{}/a2ui", addr);
+            let mut transport =
+                WebSocketTransport::new(&url).expect("failed to create transport");
+
+            // 连接前，ws 应为 None
+            assert!(
+                !transport.is_connected(),
+                "ws should be None before connect"
+            );
+
+            // 执行 connect
+            let connect_result = transport.connect().await;
+            assert!(connect_result.is_ok(), "connect failed: {:?}", connect_result);
+
+            // 连接后，ws 应为 Some
+            assert!(
+                transport.is_connected(),
+                "ws should be Some after connect"
+            );
+
+            // 清理服务器
+            server_handle.abort();
+            let _ = server_handle.await;
+        });
     }
 }
