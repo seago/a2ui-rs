@@ -1,4 +1,4 @@
-use a2ui_core::A2uiError;
+pub use a2ui_core::A2uiError;
 use a2ui_core::state::{StateOperation, SurfaceState};
 use a2ui_core::ComponentId;
 use thiserror::Error;
