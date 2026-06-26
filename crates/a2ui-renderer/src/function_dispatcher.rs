@@ -1,6 +1,7 @@
 use crate::error::RenderResult;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// 函数执行边界
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,11 +21,34 @@ pub struct FunctionDef {
     pub callable_from: CallableFrom,
 }
 
+/// 函数处理器类型别名
+pub type FunctionHandler = Arc<dyn Fn(Value) -> RenderResult<Value> + Send + Sync>;
+
 /// 函数调度器
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct FunctionDispatcher {
-    /// 已注册的函数
+    /// 已注册的函数元数据
     functions: HashMap<String, FunctionDef>,
+    /// 函数处理器（闭包）
+    handlers: HashMap<String, FunctionHandler>,
+}
+
+impl Clone for FunctionDispatcher {
+    fn clone(&self) -> Self {
+        Self {
+            functions: self.functions.clone(),
+            handlers: self.handlers.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for FunctionDispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FunctionDispatcher")
+            .field("functions", &self.functions)
+            .field("handlers_count", &self.handlers.len())
+            .finish()
+    }
 }
 
 impl FunctionDispatcher {
@@ -33,7 +57,7 @@ impl FunctionDispatcher {
         Self::default()
     }
 
-    /// 注册函数
+    /// 注册函数元数据（不提供执行逻辑）
     pub fn register(&mut self, name: impl Into<String>, callable_from: CallableFrom) {
         let name = name.into();
         self.functions.insert(
@@ -45,14 +69,38 @@ impl FunctionDispatcher {
         );
     }
 
+    /// 注册函数并附带执行处理器
+    pub fn register_with_handler(
+        &mut self,
+        name: impl Into<String>,
+        callable_from: CallableFrom,
+        handler: FunctionHandler,
+    ) {
+        let name = name.into();
+        self.functions.insert(
+            name.clone(),
+            FunctionDef {
+                name: name.clone(),
+                callable_from,
+            },
+        );
+        self.handlers.insert(name, handler);
+    }
+
     /// 执行函数调用
     pub fn dispatch(&self, name: &str, args: Value) -> RenderResult<Value> {
         let func = self
             .functions
             .get(name)
             .ok_or_else(|| crate::error::RendererError::FunctionNotAvailable(name.to_string()))?;
-        // 简化实现：返回空值，实际由平台实现
-        let _ = (func, args);
+
+        // 优先使用注册的 handler
+        if let Some(handler) = self.handlers.get(name) {
+            return handler(args);
+        }
+
+        // 简化实现：没有 handler 时返回空值
+        let _ = func;
         Ok(Value::Null)
     }
 
@@ -124,5 +172,28 @@ mod tests {
         dispatcher.register("f2", CallableFrom::RemoteOnly);
         let names = dispatcher.registered_names();
         assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn test_dispatch_with_handler() {
+        let mut dispatcher = FunctionDispatcher::new();
+        dispatcher.register_with_handler(
+            "upper",
+            CallableFrom::ClientOrRemote,
+            Arc::new(|args| {
+                let s = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                Ok(json!(s.to_uppercase()))
+            }),
+        );
+        let result = dispatcher.dispatch("upper", json!({"value": "hello"})).unwrap();
+        assert_eq!(result, json!("HELLO"));
+    }
+
+    #[test]
+    fn test_dispatch_without_handler_returns_null() {
+        let mut dispatcher = FunctionDispatcher::new();
+        dispatcher.register("noop", CallableFrom::ClientOrRemote);
+        let result = dispatcher.dispatch("noop", json!({})).unwrap();
+        assert_eq!(result, Value::Null);
     }
 }

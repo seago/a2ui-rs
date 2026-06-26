@@ -8,6 +8,7 @@ pub mod component_forest;
 pub mod data_binding;
 pub mod dependency_graph;
 pub mod error;
+pub mod format_string;
 pub mod function_dispatcher;
 pub mod path_resolver;
 pub mod renderer;

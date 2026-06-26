@@ -17,3 +17,4 @@ tokio.workspace = true
 async-trait.workspace = true
 tracing = "0.1"
 uuid = { version = "1.6", features = ["v4"] }
+regex = "1.10"
