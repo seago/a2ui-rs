@@ -123,6 +123,11 @@ async fn run_render(input: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     };
 
     let mut renderer = TuiRenderer::new();
+
+    // 创建 ratatui Terminal（使用 stderr 作为后端输出）
+    let backend = ratatui::backend::CrosstermBackend::new(std::io::stderr());
+    let mut terminal = ratatui::Terminal::new(backend)?;
+
     transport.connect().await?;
     info!("Transport connected");
 
@@ -145,7 +150,7 @@ async fn run_render(input: Option<std::path::PathBuf>) -> anyhow::Result<()> {
 
         match result {
             Ok(Ok(Some(envelope))) => {
-                if let Err(e) = process_server_envelope(&mut renderer, envelope).await {
+                if let Err(e) = process_server_envelope(&mut renderer, envelope, &mut terminal).await {
                     error!("Error processing message: {}", e);
                 }
             }
@@ -174,6 +179,7 @@ async fn run_render(input: Option<std::path::PathBuf>) -> anyhow::Result<()> {
 async fn process_server_envelope(
     renderer: &mut TuiRenderer,
     envelope: ServerEnvelope,
+    terminal: &mut ratatui::Terminal<impl ratatui::backend::Backend>,
 ) -> anyhow::Result<()> {
     use a2ui_core::message::V1_0ServerMessage;
 
@@ -209,7 +215,49 @@ async fn process_server_envelope(
     }
 
     // 渲染更新
-    renderer.render().await?;
+    renderer.render_frame(terminal).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[tokio::test]
+    async fn test_process_server_envelope_calls_render_frame() {
+        // 创建 renderer 和 TestBackend terminal
+        let mut renderer = TuiRenderer::new();
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // 构造 CreateSurface 消息
+        let comp = Component::text(
+            ComponentId::new("root").unwrap(),
+            DynamicValue::Literal("Hello".to_string()),
+        );
+        let envelope = ServerEnvelope::V1_0(
+            V1_0ServerMessage::CreateSurface(
+                a2ui_core::message::server_to_client::CreateSurface {
+                    surface_id: "s1".to_string(),
+                    catalog_id: "basic".to_string(),
+                    surface_properties: None,
+                    send_data_model: false,
+                    components: Some(vec![comp]),
+                    data_model: None,
+                }
+            )
+        );
+
+        // 处理信封并传入 terminal
+        process_server_envelope(&mut renderer, envelope, &mut terminal)
+            .await
+            .unwrap();
+
+        // 验证 render_frame 被调用：terminal buffer 应有内容
+        let buf = terminal.backend().buffer();
+        assert!(buf.area().width > 0, "terminal buffer should have been drawn to");
+    }
 }

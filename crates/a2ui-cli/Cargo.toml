@@ -21,6 +21,7 @@ anyhow = "1.0"
 async-trait.workspace = true
 atty = "0.2"
 clap = { version = "4.5", features = ["derive"] }
+ratatui = "0.26"
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
