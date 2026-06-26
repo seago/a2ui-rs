@@ -1,4 +1,5 @@
 use a2ui_core::prelude::*;
+use a2ui_core::A2uiError;
 use crate::error::RenderResult;
 use std::collections::HashMap;
 
@@ -41,16 +42,6 @@ struct ComponentSurface {
     root: ComponentId,
 }
 
-impl ComponentSurface {
-    fn new() -> Self {
-        Self {
-            tree: None,
-            components: HashMap::new(),
-            root: ComponentId::new("_root_").expect("placeholder ComponentId must be valid"),
-        }
-    }
-}
-
 impl ComponentForest {
     /// 创建新的空组件森林
     pub fn new() -> Self {
@@ -58,8 +49,14 @@ impl ComponentForest {
     }
 
     /// 向指定 Surface 添加或更新组件
-    pub fn upsert(&mut self, surface_id: &str, component: Component) -> RenderResult<()> {
-        let surface = self.surfaces.entry(surface_id.to_string()).or_insert_with(ComponentSurface::new);
+    pub fn upsert(&mut self, surface_id: &String, component: Component) -> RenderResult<()> {
+        let surface = self.surfaces.entry(surface_id.clone()).or_insert_with(|| {
+            ComponentSurface {
+                tree: None,
+                components: HashMap::new(),
+                root: ComponentId::new("_root_").expect("_root_ is a valid ComponentId"),
+            }
+        });
 
         let comp_id = component.id().clone();
         let is_root = comp_id.as_str() == "root";
@@ -74,33 +71,33 @@ impl ComponentForest {
     }
 
     /// 获取指定 Surface 的组件
-    pub fn get(&self, surface_id: &str, component_id: &ComponentId) -> Option<&Component> {
+    pub fn get(&self, surface_id: &String, component_id: &ComponentId) -> Option<&Component> {
         self.surfaces.get(surface_id)?.components.get(component_id)
     }
 
     /// 获取指定 Surface 的 root 组件
-    pub fn get_root(&self, surface_id: &str) -> Option<&Component> {
+    pub fn get_root(&self, surface_id: &String) -> Option<&Component> {
         let surface = self.surfaces.get(surface_id)?;
         surface.components.get(&surface.root)
     }
 
     /// 移除整个 Surface
-    pub fn remove_surface(&mut self, surface_id: &str) -> RenderResult<()> {
+    pub fn remove_surface(&mut self, surface_id: &String) -> RenderResult<()> {
         self.surfaces.remove(surface_id);
         Ok(())
     }
 
     /// 构建组件树
-    pub fn build_tree(&self, surface_id: &str) -> RenderResult<ComponentTreeNode> {
+    pub fn build_tree(&self, surface_id: &String) -> RenderResult<ComponentTreeNode> {
         let surface = self.surfaces.get(surface_id)
             .ok_or_else(|| A2uiError::SurfaceNotFound(surface_id.to_string()))?;
 
         let root_id = &surface.root;
         let root_comp = surface.components.get(root_id)
-            .ok_or_else(|| A2uiError::ComponentNotFound(root_id.as_str().to_string()))?;
+            .ok_or_else(|| A2uiError::ComponentNotFound(root_id.to_string()))?;
 
         self.build_node(root_comp, &surface.components)
-            .ok_or_else(|| A2uiError::ComponentNotFound(root_id.as_str().to_string()))
+            .ok_or_else(|| A2uiError::ComponentNotFound(root_id.to_string()))
             .map_err(Into::into)
     }
 
@@ -174,9 +171,9 @@ mod tests {
             ComponentId::new("root").unwrap(),
             DynamicValue::Literal("Hello".to_string()),
         );
-        forest.upsert("s1", comp).unwrap();
+        forest.upsert(&"s1".into(), comp).unwrap();
 
-        let retrieved = forest.get("s1", &ComponentId::new("root").unwrap());
+        let retrieved = forest.get(&"s1".into(), &ComponentId::new("root").unwrap());
         assert!(retrieved.is_some());
     }
 
@@ -191,10 +188,10 @@ mod tests {
             ComponentId::new("child").unwrap(),
             DynamicValue::Literal("World".to_string()),
         );
-        forest.upsert("s1", root).unwrap();
-        forest.upsert("s1", child).unwrap();
+        forest.upsert(&"s1".into(), root).unwrap();
+        forest.upsert(&"s1".into(), child).unwrap();
 
-        let root_comp = forest.get_root("s1");
+        let root_comp = forest.get_root(&"s1".into());
         assert!(root_comp.is_some());
         assert_eq!(root_comp.unwrap().id().as_str(), "root");
     }
@@ -210,10 +207,10 @@ mod tests {
             ComponentId::new("child1").unwrap(),
             DynamicValue::Literal("Hello".to_string()),
         );
-        forest.upsert("s1", root).unwrap();
-        forest.upsert("s1", child1).unwrap();
+        forest.upsert(&"s1".into(), root).unwrap();
+        forest.upsert(&"s1".into(), child1).unwrap();
 
-        let tree = forest.build_tree("s1").unwrap();
+        let tree = forest.build_tree(&"s1".into()).unwrap();
         assert_eq!(tree.component.id().as_str(), "root");
         assert_eq!(tree.children.len(), 1);
     }
@@ -225,10 +222,10 @@ mod tests {
             ComponentId::new("root").unwrap(),
             DynamicValue::Literal("Hello".to_string()),
         );
-        forest.upsert("s1", comp).unwrap();
-        assert!(forest.get("s1", &ComponentId::new("root").unwrap()).is_some());
+        forest.upsert(&"s1".into(), comp).unwrap();
+        assert!(forest.get(&"s1".into(), &ComponentId::new("root").unwrap()).is_some());
 
-        forest.remove_surface("s1").unwrap();
-        assert!(forest.get("s1", &ComponentId::new("root").unwrap()).is_none());
+        forest.remove_surface(&"s1".into()).unwrap();
+        assert!(forest.get(&"s1".into(), &ComponentId::new("root").unwrap()).is_none());
     }
 }
