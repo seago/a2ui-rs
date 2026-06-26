@@ -1,0 +1,17 @@
+[package]
+name = "a2ui-renderer-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "A2UI TUI Renderer implementation using ratatui"
+repository = "https://github.com/yufeng108/a2ui-rs"
+
+[dependencies]
+a2ui-core = { path = "../a2ui-core" }
+a2ui-renderer = { path = "../a2ui-renderer" }
+ratatui = "0.26"
+crossterm = { version = "0.27", features = ["event-stream"] }
+tokio.workspace = true
+tracing.workspace = true

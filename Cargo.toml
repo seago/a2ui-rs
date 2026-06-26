@@ -1,10 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/a2ui-core", "crates/a2ui-renderer"]
+members = ["crates/a2ui-core", "crates/a2ui-renderer", "crates/a2ui-renderer-tui"]
 exclude = [
     "crates/a2ui-transport",
-    "crates/a2ui-renderer-tui", "crates/a2ui-renderer-gui",
-    "crates/a2ui-renderer-web", "crates/a2ui-cli",
+    "crates/a2ui-renderer-gui", "crates/a2ui-renderer-web", "crates/a2ui-cli",
 ]
 
 [workspace.package]
@@ -18,5 +17,6 @@ authors = ["yufeng108"]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
+tracing = "0.1"
 tokio = { version = "1.35", features = ["full"] }
 async-trait = "0.1"
