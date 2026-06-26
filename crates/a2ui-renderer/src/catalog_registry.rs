@@ -1,5 +1,5 @@
 use a2ui_core::prelude::*;
-use crate::error::{A2uiError, RenderResult};
+use crate::error::RenderResult;
 use std::collections::HashMap;
 
 /// Catalog 注册表：管理已加载的 Catalog
