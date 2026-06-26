@@ -6,6 +6,8 @@ pub mod state;
 pub mod component;
 pub mod datamodel;
 pub mod message;
+pub mod schema;
+pub use schema::CatalogValidator;
 pub use message::{ClientEnvelope, ServerEnvelope};
 pub use component::ComponentId;
 pub use component::Catalog;
