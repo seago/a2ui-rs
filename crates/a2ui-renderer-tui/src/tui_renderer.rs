@@ -152,6 +152,28 @@ impl TuiRenderer {
                 let text = Paragraph::new(format!("[{}]", reason));
                 frame.render_widget(text, area);
             }
+            RenderableWidget::TextField { area, value, placeholder, .. } => {
+                let display = if value.is_empty() {
+                    placeholder.as_str()
+                } else {
+                    value.as_str()
+                };
+                let text = Paragraph::new(format!("[{}]", display));
+                frame.render_widget(text, area);
+            }
+            RenderableWidget::CheckBox { area, label, checked, .. } => {
+                let status = if checked { "[x]" } else { "[ ]" };
+                let text = Paragraph::new(format!("{} {}", status, label));
+                frame.render_widget(text, area);
+            }
+            RenderableWidget::Slider { area, value, min, max, .. } => {
+                let range = max - min;
+                let ratio = if range == 0.0 { 0.0 } else { ((value - min) / range).clamp(0.0, 1.0) };
+                let filled = (ratio * 20.0).round() as usize;
+                let bar = format!("[{}{}]", "=".repeat(filled), " ".repeat(20 - filled));
+                let text = Paragraph::new(bar);
+                frame.render_widget(text, area);
+            }
         }
     }
 
@@ -1230,5 +1252,97 @@ mod tests {
         } else {
             panic!("dataModel context should be Literal");
         }
+    }
+
+    // --- P3-3: TextField/CheckBox/Slider rendering tests ---
+
+    #[tokio::test]
+    async fn test_render_frame_with_text_field() {
+        use ratatui::backend::TestBackend;
+
+        let mut renderer = TuiRenderer::new();
+        let tf: Component = serde_json::from_str(
+            r#"{"id":"name_input","component":"TextField","value":"Alice","placeholder":"Enter name"}"#
+        ).unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![tf]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        renderer.render_frame(&mut terminal).await.unwrap();
+
+        let buf = terminal.backend().buffer();
+        let content = buf.area();
+        assert!(content.width > 0);
+        assert!(content.height > 0);
+    }
+
+    #[tokio::test]
+    async fn test_render_frame_with_checkbox() {
+        use ratatui::backend::TestBackend;
+
+        let mut renderer = TuiRenderer::new();
+        let cb: Component = serde_json::from_str(
+            r#"{"id":"agree","component":"CheckBox","checked":true,"label":"I agree"}"#
+        ).unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![cb]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        renderer.render_frame(&mut terminal).await.unwrap();
+
+        let buf = terminal.backend().buffer();
+        let content = buf.area();
+        assert!(content.width > 0);
+        assert!(content.height > 0);
+    }
+
+    #[tokio::test]
+    async fn test_render_frame_with_slider() {
+        use ratatui::backend::TestBackend;
+
+        let mut renderer = TuiRenderer::new();
+        let sl: Component = serde_json::from_str(
+            r#"{"id":"volume","component":"Slider","value":50,"min":0,"max":100}"#
+        ).unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![sl]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        renderer.render_frame(&mut terminal).await.unwrap();
+
+        let buf = terminal.backend().buffer();
+        let content = buf.area();
+        assert!(content.width > 0);
+        assert!(content.height > 0);
     }
 }

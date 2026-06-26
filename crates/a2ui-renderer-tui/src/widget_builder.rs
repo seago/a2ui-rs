@@ -22,6 +22,25 @@ pub enum RenderableWidget {
         area: Rect,
         reason: String,
     },
+    TextField {
+        id: ComponentId,
+        area: Rect,
+        value: String,
+        placeholder: String,
+    },
+    CheckBox {
+        id: ComponentId,
+        area: Rect,
+        label: String,
+        checked: bool,
+    },
+    Slider {
+        id: ComponentId,
+        area: Rect,
+        value: f64,
+        min: f64,
+        max: f64,
+    },
 }
 
 impl RenderableWidget {
@@ -30,6 +49,9 @@ impl RenderableWidget {
             Self::Paragraph { id, .. } => id,
             Self::Block { id, .. } => id,
             Self::Placeholder { id, .. } => id,
+            Self::TextField { id, .. } => id,
+            Self::CheckBox { id, .. } => id,
+            Self::Slider { id, .. } => id,
         }
     }
 
@@ -38,6 +60,9 @@ impl RenderableWidget {
             Self::Paragraph { area, .. } => *area,
             Self::Block { area, .. } => *area,
             Self::Placeholder { area, .. } => *area,
+            Self::TextField { area, .. } => *area,
+            Self::CheckBox { area, .. } => *area,
+            Self::Slider { area, .. } => *area,
         }
     }
 }
@@ -157,6 +182,65 @@ impl<'a> WidgetBuilder<'a> {
                 area,
                 title: format!("[{}]", ctype),
             },
+            "TextField" => {
+                let props = component.properties();
+                let value = props
+                    .get("value")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let placeholder = props
+                    .get("placeholder")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                RenderableWidget::TextField {
+                    id: component.id().clone(),
+                    area,
+                    value,
+                    placeholder,
+                }
+            }
+            "CheckBox" => {
+                let props = component.properties();
+                let label = props
+                    .get("label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let checked = props
+                    .get("checked")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                RenderableWidget::CheckBox {
+                    id: component.id().clone(),
+                    area,
+                    label,
+                    checked,
+                }
+            }
+            "Slider" => {
+                let props = component.properties();
+                let value = props
+                    .get("value")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let min = props
+                    .get("min")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let max = props
+                    .get("max")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(100.0);
+                RenderableWidget::Slider {
+                    id: component.id().clone(),
+                    area,
+                    value,
+                    min,
+                    max,
+                }
+            }
             _ => {
                 // 尝试提取文本
                 let text = self.mapper.extract_text(component);
@@ -308,5 +392,82 @@ mod tests {
         let root_widget = widgets.iter().find(|w| w.id().as_str() == "root");
         assert!(root_widget.is_some());
         assert_eq!(root_widget.unwrap().area(), Rect::new(10, 20, 80, 24));
+    }
+
+    // --- P3-3: TextField/CheckBox/Slider widget mapping tests ---
+
+    #[test]
+    fn test_textfield_component_maps_to_textfield_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("name_input").unwrap()],
+        );
+        let tf: Component = serde_json::from_str(
+            r#"{"id":"name_input","component":"TextField","value":"Alice","placeholder":"Enter name"}"#
+        ).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", tf).unwrap();
+
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+
+        let tf_widget = widgets.iter().find(|w| w.id().as_str() == "name_input");
+        assert!(tf_widget.is_some(), "TextField widget should exist in tree");
+        assert!(matches!(tf_widget.unwrap(), RenderableWidget::TextField { .. }),
+            "TextField component should produce RenderableWidget::TextField");
+    }
+
+    #[test]
+    fn test_checkbox_component_maps_to_checkbox_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("agree").unwrap()],
+        );
+        let cb: Component = serde_json::from_str(
+            r#"{"id":"agree","component":"CheckBox","checked":true,"label":"I agree"}"#
+        ).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", cb).unwrap();
+
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+
+        let cb_widget = widgets.iter().find(|w| w.id().as_str() == "agree");
+        assert!(cb_widget.is_some(), "CheckBox widget should exist in tree");
+        assert!(matches!(cb_widget.unwrap(), RenderableWidget::CheckBox { .. }),
+            "CheckBox component should produce RenderableWidget::CheckBox");
+    }
+
+    #[test]
+    fn test_slider_component_maps_to_slider_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("volume").unwrap()],
+        );
+        let sl: Component = serde_json::from_str(
+            r#"{"id":"volume","component":"Slider","value":50,"min":0,"max":100}"#
+        ).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", sl).unwrap();
+
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+
+        let sl_widget = widgets.iter().find(|w| w.id().as_str() == "volume");
+        assert!(sl_widget.is_some(), "Slider widget should exist in tree");
+        assert!(matches!(sl_widget.unwrap(), RenderableWidget::Slider { .. }),
+            "Slider component should produce RenderableWidget::Slider");
     }
 }
