@@ -1,13 +1,18 @@
+use crate::WidgetMapper;
 use a2ui_core::prelude::*;
 use a2ui_core::message::server_to_client::{
     ActionResponse, CallFunction, CreateSurface, DeleteSurface, UpdateComponents, UpdateDataModel,
 };
 use a2ui_core::message::client_to_server::FunctionResponse;
 use a2ui_renderer::{
-    ComponentForest, DataBinding, DependencyGraph, RendererError, RenderResult,
+    ComponentForest, DataBinding, DependencyGraph, RenderResult,
     Renderer, SurfaceHandle, UserEvent,
 };
-use ratatui::widgets::Paragraph;
+use ratatui::{
+    layout::Rect,
+    widgets::Paragraph,
+    Frame,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -36,6 +41,13 @@ impl TuiRenderer {
             dependency_graph: DependencyGraph::new(),
             focused_component: None,
         }
+    }
+
+    /// 渲染单个组件到 Frame（简化实现）
+    pub fn render_component(&self, component: &Component, frame: &mut Frame, area: Rect) {
+        let mapper = WidgetMapper;
+        let paragraph = mapper.map_to_paragraph(component);
+        frame.render_widget(paragraph, area);
     }
 }
 

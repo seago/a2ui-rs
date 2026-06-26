@@ -8,3 +8,5 @@ pub mod focus_manager;
 pub mod input_handler;
 
 pub use tui_renderer::TuiRenderer;
+pub use input_handler::InputHandler;
+pub use widget_mapper::WidgetMapper;
