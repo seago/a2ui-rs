@@ -1,19 +1,22 @@
 use crate::error::TransportResult;
 use a2ui_core::{ClientEnvelope, ServerEnvelope};
-#[allow(unused_imports)]
-use serde::{Deserialize, Serialize};
+use async_trait::async_trait;
 
 /// Transport trait — 所有传输实现必须满足此契约
-#[async_trait::async_trait]
+///
+/// 命名约定（从传输通道视角）：
+/// - `send`: 写入输出流（Renderer → Agent，即 ClientEnvelope）
+/// - `receive`: 读取输入流（Agent → Renderer，即 ServerEnvelope）
+#[async_trait]
 pub trait Transport: Send {
     /// 建立连接
     async fn connect(&mut self) -> TransportResult<()>;
 
-    /// 发送服务端信封消息
-    async fn send(&mut self, envelope: ServerEnvelope) -> TransportResult<()>;
+    /// 发送客户端信封消息到 Agent（写入输出流）
+    async fn send(&mut self, envelope: ClientEnvelope) -> TransportResult<()>;
 
-    /// 接收客户端信封消息
-    async fn receive(&mut self) -> TransportResult<ClientEnvelope>;
+    /// 从 Agent 接收服务端信封消息（从输入流读取）
+    async fn receive(&mut self) -> TransportResult<ServerEnvelope>;
 
     /// 关闭连接
     async fn close(&mut self) -> TransportResult<()>;

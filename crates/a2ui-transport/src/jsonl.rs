@@ -13,28 +13,29 @@ where
         Ok(())
     }
 
-    async fn send(&mut self, envelope: ServerEnvelope) -> TransportResult<()> {
+    async fn send(&mut self, envelope: ClientEnvelope) -> TransportResult<()> {
         let json = serde_json::to_string(&envelope)
-            .map_err(|e| TransportError::SendError(format!("serialization error: {}", e)))?;
+            .map_err(|e| crate::TransportError::SendError(format!("serialization error: {}", e)))?;
         self.writer
             .write_all(json.as_bytes())
             .await
-            .map_err(|e| TransportError::SendError(format!("write error: {}", e)))?;
+            .map_err(|e| crate::TransportError::SendError(format!("write error: {}", e)))?;
         self.writer
             .write_all(b"\n")
             .await
-            .map_err(|e| TransportError::SendError(format!("write error: {}", e)))?;
+            .map_err(|e| crate::TransportError::SendError(format!("write error: {}", e)))?;
         Ok(())
     }
 
-    async fn receive(&mut self) -> TransportResult<ClientEnvelope> {
+    async fn receive(&mut self) -> TransportResult<ServerEnvelope> {
         let mut line = String::new();
         self.reader
             .read_line(&mut line)
             .await
-            .map_err(|e| TransportError::ReceiveError(format!("read error: {}", e)))?;
-        let envelope: ClientEnvelope = serde_json::from_str(&line)
-            .map_err(|e| TransportError::ReceiveError(format!("deserialization error: {}", e)))?;
+            .map_err(|e| crate::TransportError::ReceiveError(format!("read error: {}", e)))?;
+        let envelope: ServerEnvelope = serde_json::from_str(&line).map_err(|e| {
+            crate::TransportError::ReceiveError(format!("deserialization error: {}", e))
+        })?;
         Ok(envelope)
     }
 
@@ -61,6 +62,20 @@ where
             reader: BufReader::new(reader),
             writer,
         }
+    }
+
+    /// 读取一行 JSONL 数据（不经过 Transport trait，直接操作 reader）
+    pub async fn receive_line(&mut self) -> TransportResult<Option<String>> {
+        let mut line = String::new();
+        let n = self
+            .reader
+            .read_line(&mut line)
+            .await
+            .map_err(|e| TransportError::ReceiveError(format!("read error: {}", e)))?;
+        if n == 0 {
+            return Ok(None);
+        }
+        Ok(Some(line))
     }
 }
 
