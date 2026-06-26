@@ -8,4 +8,4 @@ pub mod jsonl;
 
 pub use error::TransportError;
 pub use transport::Transport;
-pub use jsonl::JsonlTransport;
+pub use jsonl::{JsonlTransport, JsonlTransportReader, JsonlTransportWriter};

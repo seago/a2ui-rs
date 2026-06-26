@@ -1,14 +1,19 @@
+use a2ui_core::A2uiError;
 use thiserror::Error;
 
-/// Transport layer errors.
 #[derive(Debug, Error)]
 pub enum TransportError {
-    #[error("connection error: {0}")]
+    #[error("Connection error: {0}")]
     ConnectionError(String),
 
-    #[error("send error: {0}")]
+    #[error("Send error: {0}")]
     SendError(String),
 
-    #[error("receive error: {0}")]
+    #[error("Receive error: {0}")]
     ReceiveError(String),
+
+    #[error("Core error: {0}")]
+    CoreError(#[from] A2uiError),
 }
+
+pub type TransportResult<T> = Result<T, TransportError>;

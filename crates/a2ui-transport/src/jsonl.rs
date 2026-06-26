@@ -1,8 +1,92 @@
-/// JSONL (JSON Lines) transport 占位实现。
-pub struct JsonlTransport;
+use crate::{Transport, TransportError};
+use crate::error::TransportResult;
+use a2ui_core::{ClientEnvelope, ServerEnvelope};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
-impl JsonlTransport {
-    pub fn new() -> Self {
-        Self
+#[async_trait::async_trait]
+impl<R, W> Transport for JsonlTransport<R, W>
+where
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
+{
+    async fn connect(&mut self) -> TransportResult<()> {
+        Ok(())
+    }
+
+    async fn send(&mut self, envelope: ServerEnvelope) -> TransportResult<()> {
+        let json = serde_json::to_string(&envelope).map_err(|e| {
+            TransportError::SendError(format!("serialization error: {}", e))
+        })?;
+        self.writer.write_all(json.as_bytes()).await.map_err(|e| {
+            TransportError::SendError(format!("write error: {}", e))
+        })?;
+        self.writer.write_all(b"\n").await.map_err(|e| {
+            TransportError::SendError(format!("write error: {}", e))
+        })?;
+        Ok(())
+    }
+
+    async fn receive(&mut self) -> TransportResult<ClientEnvelope> {
+        let mut line = String::new();
+        self.reader.read_line(&mut line).await.map_err(|e| {
+            TransportError::ReceiveError(format!("read error: {}", e))
+        })?;
+        let envelope: ClientEnvelope = serde_json::from_str(&line).map_err(|e| {
+            TransportError::ReceiveError(format!("deserialization error: {}", e))
+        })?;
+        Ok(envelope)
+    }
+
+    async fn close(&mut self) -> TransportResult<()> {
+        Ok(())
+    }
+}
+
+/// JSONL Transport：基于 STDIN/STDOUT 行分隔 JSON
+#[derive(Debug)]
+pub struct JsonlTransport<R, W> {
+    pub reader: BufReader<R>,
+    pub writer: W,
+}
+
+impl<R, W> JsonlTransport<R, W>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    /// 从 reader/writer 创建
+    pub fn new(reader: R, writer: W) -> Self {
+        Self {
+            reader: BufReader::new(reader),
+            writer,
+        }
+    }
+}
+
+impl JsonlTransport<tokio::io::Stdin, tokio::io::Stdout> {
+    /// 从标准输入/输出创建（tokio 运行时）
+    pub fn from_std() -> Self {
+        Self::new(tokio::io::stdin(), tokio::io::stdout())
+    }
+}
+
+/// Convenience type alias for a JSONL transport using stdin as reader
+pub type JsonlTransportReader<W> = JsonlTransport<tokio::io::Stdin, W>;
+
+/// Convenience type alias for a JSONL transport using stdout as writer
+pub type JsonlTransportWriter<R> = JsonlTransport<R, tokio::io::Stdout>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio_test::io::Builder;
+
+    #[test]
+    fn test_jsonl_transport_new() {
+        let input = Builder::new().read(b"").build();
+        let output = Vec::new();
+        let _transport = JsonlTransport::new(input, output);
+        // 结构验证
+        assert!(true);
     }
 }
