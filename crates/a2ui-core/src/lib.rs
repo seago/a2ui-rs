@@ -5,5 +5,8 @@ pub use error::{A2uiError, Result};
 pub mod state;
 pub mod component;
 pub mod datamodel;
+pub mod message;
+pub use message::{ClientEnvelope, ServerEnvelope};
 pub use component::ComponentId;
 pub use datamodel::DataModel;
+pub mod prelude;

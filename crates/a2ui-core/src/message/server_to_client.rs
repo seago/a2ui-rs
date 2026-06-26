@@ -1,0 +1,261 @@
+use crate::component::component::Component;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseError {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ActionResponsePayload {
+    Success(Value),
+    Error(ResponseError),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallFunctionPayload {
+    pub call: String,
+    pub args: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSurface {
+    pub surface_id: String,
+    pub catalog_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface_properties: Option<Value>,
+    #[serde(default)]
+    pub send_data_model: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub components: Option<Vec<Component>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_model: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateComponents {
+    pub surface_id: String,
+    pub components: Vec<Component>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDataModel {
+    pub surface_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteSurface {
+    pub surface_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionResponse {
+    pub action_id: String,
+    #[serde(flatten)]
+    pub response: ActionResponsePayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallFunction {
+    pub function_call_id: String,
+    pub want_response: bool,
+    #[serde(flatten)]
+    pub call: CallFunctionPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum V1_0ServerMessage {
+    CreateSurface(CreateSurface),
+    UpdateComponents(UpdateComponents),
+    UpdateDataModel(UpdateDataModel),
+    DeleteSurface(DeleteSurface),
+    ActionResponse(ActionResponse),
+    CallFunction(CallFunction),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::component::{ComponentId, DynamicValue};
+    use crate::prelude::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_create_surface_serialize() {
+        let msg = CreateSurface {
+            surface_id: "s1".into(),
+            catalog_id: "basic".into(),
+            surface_properties: None,
+            send_data_model: false,
+            components: None,
+            data_model: None,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["surfaceId"], "s1");
+        assert_eq!(json["catalogId"], "basic");
+        assert_eq!(json["sendDataModel"], false);
+    }
+
+    #[test]
+    fn test_create_surface_with_components() {
+        let comp = Component::text(
+            ComponentId::new("root").unwrap(),
+            DynamicValue::Literal("Hello".to_string()),
+        );
+        let msg = CreateSurface {
+            surface_id: "s1".into(),
+            catalog_id: "basic".into(),
+            surface_properties: None,
+            send_data_model: false,
+            components: Some(vec![comp]),
+            data_model: None,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["components"][0]["id"], "root");
+    }
+
+    #[test]
+    fn test_update_components() {
+        let comp = Component::text(
+            ComponentId::new("title").unwrap(),
+            DynamicValue::Literal("Title".to_string()),
+        );
+        let msg = UpdateComponents {
+            surface_id: "s1".into(),
+            components: vec![comp],
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["surfaceId"], "s1");
+        assert_eq!(json["components"][0]["id"], "title");
+    }
+
+    #[test]
+    fn test_update_data_model() {
+        let msg = UpdateDataModel {
+            surface_id: "s1".into(),
+            path: None,
+            value: Some(json!({"name": "Alice"})),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["value"]["name"], "Alice");
+    }
+
+    #[test]
+    fn test_update_data_model_delete() {
+        let msg = UpdateDataModel {
+            surface_id: "s1".into(),
+            path: Some("/name".into()),
+            value: None,
+        };
+        assert!(msg.value.is_none());
+    }
+
+    #[test]
+    fn test_delete_surface() {
+        let msg = DeleteSurface {
+            surface_id: "s1".into(),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["surfaceId"], "s1");
+    }
+
+    #[test]
+    fn test_action_response_success() {
+        let msg = ActionResponse {
+            action_id: "act1".into(),
+            response: ActionResponsePayload::Success(json!({"value": "done"})),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["actionId"], "act1");
+        assert_eq!(json["value"], "done");
+    }
+
+    #[test]
+    fn test_action_response_error() {
+        let msg = ActionResponse {
+            action_id: "act1".into(),
+            response: ActionResponsePayload::Error(ResponseError {
+                code: "INVALID_INPUT".into(),
+                message: "Invalid data".into(),
+            }),
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["actionId"], "act1");
+        assert_eq!(json["code"], "INVALID_INPUT");
+    }
+
+    #[test]
+    fn test_call_function() {
+        let msg = CallFunction {
+            function_call_id: "fc1".into(),
+            want_response: true,
+            call: CallFunctionPayload {
+                call: "formatString".into(),
+                args: json!({"template": "Hi"}),
+            },
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["functionCallId"], "fc1");
+        assert_eq!(json["call"], "formatString");
+        assert!(json["wantResponse"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn test_deserialize_create_surface() {
+        let json = r#"{"version":"v1.0","createSurface":{"surfaceId":"s1","catalogId":"basic"}}"#;
+        let envelope: ServerEnvelope = serde_json::from_str(json).unwrap();
+        match envelope {
+            ServerEnvelope::V1_0(V1_0ServerMessage::CreateSurface(msg)) => {
+                assert_eq!(msg.surface_id, "s1");
+                assert_eq!(msg.catalog_id, "basic");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_deserialize_update_components() {
+        let json = r#"{"version":"v1.0","updateComponents":{"surfaceId":"s1","components":[]}}"#;
+        let envelope: ServerEnvelope = serde_json::from_str(json).unwrap();
+        match envelope {
+            ServerEnvelope::V1_0(V1_0ServerMessage::UpdateComponents(msg)) => {
+                assert_eq!(msg.surface_id, "s1");
+                assert!(msg.components.is_empty());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_deserialize_action_response() {
+        let json = r#"{"version":"v1.0","actionResponse":{"actionId":"a1","value":"ok"}}"#;
+        let envelope: ServerEnvelope = serde_json::from_str(json).unwrap();
+        match envelope {
+            ServerEnvelope::V1_0(V1_0ServerMessage::ActionResponse(msg)) => {
+                assert_eq!(msg.action_id, "a1");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_deserialize_unknown_message_fails() {
+        let json = r#"{"version":"v1.0","unknownMessage":{}}"#;
+        let result: Result<ServerEnvelope> = serde_json::from_str(json).map_err(|e| e.into());
+        assert!(result.is_err());
+    }
+}
