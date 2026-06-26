@@ -1,11 +1,12 @@
 use a2ui_core::prelude::*;
-use a2ui_renderer::Renderer;
 use a2ui_renderer_tui::TuiRenderer;
 use a2ui_transport::jsonl::JsonlTransport;
 use a2ui_transport::Transport;
 use clap::{Parser, Subcommand};
 use std::time::Duration;
 use tracing::{error, info, warn};
+
+use a2ui_cli::process_server_envelope;
 
 /// A2UI CLI — 渲染 A2UI 协议的 UI 表面
 #[derive(Parser, Debug)]
@@ -173,91 +174,4 @@ async fn run_render(input: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     transport.close().await?;
     info!("Transport closed");
     Ok(())
-}
-
-/// 处理服务端信封消息，调用渲染器对应方法
-async fn process_server_envelope(
-    renderer: &mut TuiRenderer,
-    envelope: ServerEnvelope,
-    terminal: &mut ratatui::Terminal<impl ratatui::backend::Backend>,
-) -> anyhow::Result<()> {
-    use a2ui_core::message::V1_0ServerMessage;
-
-    match envelope {
-        ServerEnvelope::V1_0(message) => match message {
-            V1_0ServerMessage::CreateSurface(msg) => {
-                info!("CreateSurface: id={}", msg.surface_id);
-                let _handle = renderer.create_surface(msg).await?;
-                info!("Surface created");
-            }
-            V1_0ServerMessage::UpdateComponents(msg) => {
-                info!("UpdateComponents: surface={}", msg.surface_id);
-                renderer.update_components(msg).await?;
-            }
-            V1_0ServerMessage::UpdateDataModel(msg) => {
-                info!("UpdateDataModel: surface={}", msg.surface_id);
-                renderer.update_data_model(msg).await?;
-            }
-            V1_0ServerMessage::DeleteSurface(msg) => {
-                info!("DeleteSurface: id={}", msg.surface_id);
-                renderer.delete_surface(msg).await?;
-            }
-            V1_0ServerMessage::ActionResponse(msg) => {
-                info!("ActionResponse: id={}", msg.action_id);
-                renderer.action_response(msg).await?;
-            }
-            V1_0ServerMessage::CallFunction(msg) => {
-                info!("CallFunction: id={}", msg.function_call_id);
-                let response = renderer.call_function(msg).await?;
-                info!("Function response: call={}", response.call);
-            }
-        },
-    }
-
-    // 渲染更新
-    renderer.render_frame(terminal).await?;
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ratatui::backend::TestBackend;
-    use ratatui::Terminal;
-
-    #[tokio::test]
-    async fn test_process_server_envelope_calls_render_frame() {
-        // 创建 renderer 和 TestBackend terminal
-        let mut renderer = TuiRenderer::new();
-        let backend = TestBackend::new(80, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-
-        // 构造 CreateSurface 消息
-        let comp = Component::text(
-            ComponentId::new("root").unwrap(),
-            DynamicValue::Literal("Hello".to_string()),
-        );
-        let envelope = ServerEnvelope::V1_0(
-            V1_0ServerMessage::CreateSurface(
-                a2ui_core::message::server_to_client::CreateSurface {
-                    surface_id: "s1".to_string(),
-                    catalog_id: "basic".to_string(),
-                    surface_properties: None,
-                    send_data_model: false,
-                    components: Some(vec![comp]),
-                    data_model: None,
-                }
-            )
-        );
-
-        // 处理信封并传入 terminal
-        process_server_envelope(&mut renderer, envelope, &mut terminal)
-            .await
-            .unwrap();
-
-        // 验证 render_frame 被调用：terminal buffer 应有内容
-        let buf = terminal.backend().buffer();
-        assert!(buf.area().width > 0, "terminal buffer should have been drawn to");
-    }
 }
