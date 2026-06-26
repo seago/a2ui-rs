@@ -3,3 +3,5 @@
 mod error;
 pub use error::{A2uiError, Result};
 pub mod state;
+pub mod component;
+pub use component::ComponentId;
