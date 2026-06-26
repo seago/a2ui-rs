@@ -1,13 +1,24 @@
-use crate::WidgetMapper;
-use a2ui_core::message::client_to_server::FunctionResponse;
-use a2ui_core::message::server_to_client::{
-    ActionResponse, CallFunction, CreateSurface, DeleteSurface, UpdateComponents, UpdateDataModel,
+use crate::{
+    WidgetBuilder,
+    widget_builder::RenderableWidget,
+    WidgetMapper,
 };
 use a2ui_core::prelude::*;
+use a2ui_core::message::{
+    client_to_server::FunctionResponse,
+    server_to_client::{
+        ActionResponse, CallFunction, CreateSurface, DeleteSurface, UpdateComponents,
+        UpdateDataModel,
+    },
+};
 use a2ui_renderer::{
     ComponentForest, DataBinding, DependencyGraph, RenderResult, Renderer, SurfaceHandle, UserEvent,
 };
-use ratatui::{layout::Rect, Frame};
+use ratatui::{
+    layout::Rect,
+    widgets::{Block, Paragraph},
+    Frame,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -41,6 +52,53 @@ impl TuiRenderer {
     /// 获取依赖图的只读引用（用于测试和查询）
     pub fn dependency_graph(&self) -> &DependencyGraph {
         &self.dependency_graph
+    }
+
+    /// 使用 ratatui Terminal 执行实际帧绘制
+    pub async fn render_frame<B>(&mut self, terminal: &mut ratatui::Terminal<B>) -> RenderResult<()>
+    where
+        B: ratatui::backend::Backend,
+    {
+        let mapper = WidgetMapper;
+
+        terminal.draw(|frame: &mut Frame| {
+            let area = frame.buffer_mut().area().clone();
+
+            for (_, surface_id) in &self.surfaces {
+                let binding = match self.data_bindings.get(surface_id) {
+                    Some(b) => b,
+                    None => continue,
+                };
+
+                let builder = WidgetBuilder::new(&mapper, binding, &self.forest);
+                let widgets = builder.build_tree(surface_id, area);
+
+                for widget in widgets {
+                    self.draw_widget(frame, widget);
+                }
+            }
+        })
+        .map_err(|e| a2ui_renderer::error::RendererError::BindingError(format!("terminal draw error: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// 将单个 RenderableWidget 绘制到 Frame
+    fn draw_widget(&self, frame: &mut Frame, widget: RenderableWidget) {
+        match widget {
+            RenderableWidget::Paragraph { area, text, .. } => {
+                let para = Paragraph::new(text);
+                frame.render_widget(para, area);
+            }
+            RenderableWidget::Block { area, title, .. } => {
+                let block = Block::default().title(title);
+                frame.render_widget(block, area);
+            }
+            RenderableWidget::Placeholder { area, reason, .. } => {
+                let text = Paragraph::new(format!("[{}]", reason));
+                frame.render_widget(text, area);
+            }
+        }
     }
 
     /// 渲染单个组件到 Frame（简化实现）
@@ -245,6 +303,9 @@ impl Renderer for TuiRenderer {
 mod tests {
     use super::*;
     use a2ui_core::ComponentId;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use serde_json::json;
 
     #[test]
     fn test_tui_renderer_new() {
@@ -349,5 +410,68 @@ mod tests {
         let affected = graph.dependents("/user/name");
         assert_eq!(affected.len(), 1);
         assert_eq!(affected[0].as_str(), "name_label");
+    }
+
+    #[tokio::test]
+    async fn test_render_frame_produces_widgets() {
+        use ratatui::backend::TestBackend;
+
+        let mut renderer = TuiRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("title").unwrap(),
+            DynamicValue::Literal("Hello".into()),
+        );
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        renderer.render_frame(&mut terminal).await.unwrap();
+
+        let buf = terminal.backend().buffer();
+        assert!(buf.area().width > 0);
+    }
+
+    #[tokio::test]
+    async fn test_render_frame_with_column_layout() {
+        use ratatui::backend::TestBackend;
+
+        let mut renderer = TuiRenderer::new();
+        let title = Component::text(
+            ComponentId::new("title").unwrap(),
+            DynamicValue::Literal("Title".into()),
+        );
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("title").unwrap()],
+        );
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![root, title]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        renderer.render_frame(&mut terminal).await.unwrap();
+
+        let buf = terminal.backend().buffer();
+        assert!(buf.area().width > 0);
+        assert!(buf.area().height > 0);
     }
 }
