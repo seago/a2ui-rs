@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(tag = "version")]
 pub enum ServerEnvelope {
     #[serde(rename = "v1.0")]
@@ -20,6 +21,7 @@ impl ServerEnvelope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(tag = "version")]
 pub enum ClientEnvelope {
     #[serde(rename = "v1.0")]

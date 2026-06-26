@@ -29,10 +29,11 @@ impl FormatString {
 
                 if dispatcher.can_call_from(func_name, CallableFrom::ClientOrRemote) {
                     let args = parse_function_args(args_str);
-                    let args_map: serde_json::Map<String, serde_json::Value> = args.into_iter().collect();
+                    let args_map: serde_json::Map<String, serde_json::Value> =
+                        args.into_iter().collect();
                     let args_value = serde_json::Value::Object(args_map);
                     if let Ok(value) = dispatcher.dispatch(func_name, args_value) {
-                        return value_to_string(value);
+                        return html_escape(&value_to_string(value));
                     }
                 }
                 // 函数不可用或执行失败 → 返回空
@@ -41,7 +42,7 @@ impl FormatString {
 
             // 否则解析为 JSON Pointer 路径
             match resolver.resolve(expr) {
-                Some(value) => value_to_string(value),
+                Some(value) => html_escape(&value_to_string(value)),
                 None => "".into(),
             }
         })
@@ -55,6 +56,23 @@ fn value_to_string(value: serde_json::Value) -> String {
         serde_json::Value::String(s) => s,
         _ => value.to_string(),
     }
+}
+
+/// HTML 上下文转义：将特殊字符替换为 HTML entity
+///
+/// 转义规则：
+/// - `&` → `&amp;`
+/// - `<` → `&lt;`
+/// - `>` → `&gt;`
+/// - `"` → `&quot;`
+///
+/// 这是防止 XSS 的必要措施：formatString 的解析结果如果直接拼接到
+/// HTML 中，未转义的特殊字符可能导致注入攻击。
+pub fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// 解析函数参数字符串 "key=value,key2=value2" → HashMap
@@ -135,5 +153,43 @@ mod tests {
         let dispatcher = FunctionDispatcher::new();
         let result = FormatString::resolve("${unknownFunc:value=x}", &resolver, &dispatcher);
         assert_eq!(result, "");
+    }
+
+    // --- P2-1: formatString HTML escaping ---
+
+    #[test]
+    fn test_resolve_escapes_html_in_path_value() {
+        let dm = a2ui_core::DataModel::new(json!({"name": "<script>alert(1)</script>"}));
+        let resolver = PathResolver::new(dm);
+        let dispatcher = FunctionDispatcher::new();
+        let result = FormatString::resolve("Hello, ${name}!", &resolver, &dispatcher);
+        assert_eq!(result, "Hello, &lt;script&gt;alert(1)&lt;/script&gt;!");
+    }
+
+    #[test]
+    fn test_resolve_escapes_ampersand() {
+        let dm = a2ui_core::DataModel::new(json!({"brand": "A&T"}));
+        let resolver = PathResolver::new(dm);
+        let dispatcher = FunctionDispatcher::new();
+        let result = FormatString::resolve("${brand}", &resolver, &dispatcher);
+        assert_eq!(result, "A&amp;T");
+    }
+
+    #[test]
+    fn test_resolve_escapes_quotes() {
+        let dm = a2ui_core::DataModel::new(json!({"msg": "say \"hello\""}));
+        let resolver = PathResolver::new(dm);
+        let dispatcher = FunctionDispatcher::new();
+        let result = FormatString::resolve("${msg}", &resolver, &dispatcher);
+        assert_eq!(result, "say &quot;hello&quot;");
+    }
+
+    #[test]
+    fn test_resolve_no_escape_on_safe_text() {
+        let dm = a2ui_core::DataModel::new(json!({"name": "Alice"}));
+        let resolver = PathResolver::new(dm);
+        let dispatcher = FunctionDispatcher::new();
+        let result = FormatString::resolve("Hello, ${name}!", &resolver, &dispatcher);
+        assert_eq!(result, "Hello, Alice!");
     }
 }

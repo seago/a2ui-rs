@@ -42,10 +42,37 @@ pub enum A2uiError {
         component_id: String,
         check_index: usize,
     },
+
+    /// JSON Pointer 路径无效
+    #[error("invalid JSON Pointer: {0}")]
+    InvalidPointer(String),
+
+    /// 路径遍历攻击检测
+    #[error("path traversal detected: {0}")]
+    PathTraversal(String),
 }
 
 /// 便捷类型别名
 pub type Result<T, E = A2uiError> = std::result::Result<T, E>;
+
+impl A2uiError {
+    /// 生产模式错误消息：移除敏感信息
+    pub fn sanitize_core(&self) -> String {
+        match self {
+            A2uiError::SurfaceNotFound(_) => "Surface not found".to_string(),
+            A2uiError::SurfaceIdConflict(_) => "Surface ID conflict".to_string(),
+            A2uiError::InvalidComponentId(_) => "Invalid component ID".to_string(),
+            A2uiError::ComponentNotFound(_) => "Component reference not found".to_string(),
+            A2uiError::CatalogNotFound(_) => "Catalog not found".to_string(),
+            A2uiError::FunctionNotAvailable(_) => "Function not available".to_string(),
+            A2uiError::InvalidStateTransition { .. } => "Invalid state transition".to_string(),
+            A2uiError::Deserialization(_) => "Deserialization error".to_string(),
+            A2uiError::ValidationError { .. } => "Validation error".to_string(),
+            A2uiError::InvalidPointer(_) => "Invalid path".to_string(),
+            A2uiError::PathTraversal(_) => "Path traversal detected".to_string(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

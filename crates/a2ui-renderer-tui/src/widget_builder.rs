@@ -1,9 +1,7 @@
-use a2ui_renderer::{
-    ComponentForest, DataBinding,
-};
-use a2ui_renderer::component_forest::ComponentTreeNode;
 use crate::WidgetMapper;
 use a2ui_core::prelude::*;
+use a2ui_renderer::component_forest::ComponentTreeNode;
+use a2ui_renderer::{ComponentForest, DataBinding};
 use ratatui::layout::Rect;
 
 /// 渲染目标 widget（类型抹平，用于渲染管线）
@@ -94,7 +92,10 @@ impl<'a> WidgetBuilder<'a> {
 
         // 为缺失的组件创建占位符
         for missing_id in &child_ids {
-            if !children.iter().any(|c| c.component.id().as_str() == missing_id.as_str()) {
+            if !children
+                .iter()
+                .any(|c| c.component.id().as_str() == missing_id.as_str())
+            {
                 widgets.push(RenderableWidget::Placeholder {
                     id: missing_id.clone(),
                     area,
@@ -245,7 +246,9 @@ mod tests {
         );
         let title = Component::text(
             ComponentId::new("title").unwrap(),
-            DynamicValue::Path { path: "/title".into() },
+            DynamicValue::Path {
+                path: "/title".into(),
+            },
         );
 
         forest.upsert("s1", root).unwrap();

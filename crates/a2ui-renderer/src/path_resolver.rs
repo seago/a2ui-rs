@@ -74,9 +74,18 @@ impl PathResolver {
             DynamicValue::Path { path } => self.resolve(path).ok_or_else(|| {
                 crate::error::RendererError::SurfaceNotFound(format!("path not found: {}", path))
             }),
-            DynamicValue::FunctionCall { call, .. } => Err(
-                crate::error::RendererError::FunctionNotAvailable(call.clone()),
-            ),
+            DynamicValue::FunctionCall { call, .. } => {
+                if call == "@index" {
+                    return self.current_index().map(|i| json!(i)).ok_or_else(|| {
+                        crate::error::RendererError::SurfaceNotFound(
+                            "@index used outside of collection scope".to_string(),
+                        )
+                    });
+                }
+                Err(crate::error::RendererError::FunctionNotAvailable(
+                    call.clone(),
+                ))
+            }
         }
     }
 
@@ -174,5 +183,41 @@ mod tests {
         let resolver = PathResolver::new(dm);
         let dv: DynamicValue<i64> = DynamicValue::Path { path: "/x".into() };
         assert_eq!(resolver.resolve_dynamic(&dv).unwrap(), 42);
+    }
+
+    // --- P1-1: @index scope system ---
+
+    #[test]
+    fn test_resolve_dynamic_at_index_in_collection() {
+        let dm = DataModel::new(json!({"items": [{"name": "a"}, {"name": "b"}]}));
+        let mut resolver = PathResolver::new(dm);
+        resolver.enter_collection("/items", 1);
+        let dv: DynamicValue<i64> = DynamicValue::FunctionCall {
+            call: "@index".into(),
+            args: json!({}),
+        };
+        assert_eq!(resolver.resolve_dynamic(&dv).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_resolve_dynamic_at_index_at_root_returns_error() {
+        let resolver = PathResolver::new(DataModel::empty());
+        let dv: DynamicValue<i64> = DynamicValue::FunctionCall {
+            call: "@index".into(),
+            args: json!({}),
+        };
+        assert!(resolver.resolve_dynamic(&dv).is_err());
+    }
+
+    #[test]
+    fn test_resolve_at_index_zero_based() {
+        let dm = DataModel::new(json!({"items": [{"name": "first"}, {"name": "second"}]}));
+        let mut resolver = PathResolver::new(dm);
+        resolver.enter_collection("/items", 0);
+        let dv: DynamicValue<i64> = DynamicValue::FunctionCall {
+            call: "@index".into(),
+            args: json!({}),
+        };
+        assert_eq!(resolver.resolve_dynamic(&dv).unwrap(), 0);
     }
 }

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 pub type ActionContext = HashMap<String, DynamicValue>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct EventAction {
     pub name: String,
@@ -18,6 +19,7 @@ pub struct EventAction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionCallAction {
     pub call: String,
@@ -32,6 +34,7 @@ pub enum Action {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionMessage {
     pub name: String,
@@ -79,6 +82,7 @@ impl ActionMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionResponse {
     pub function_call_id: String,
@@ -87,6 +91,7 @@ pub struct FunctionResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientError {
     pub code: String,
@@ -96,6 +101,7 @@ pub struct ClientError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub enum V1_0ClientMessage {
     Action(ActionMessage),
@@ -239,6 +245,27 @@ mod tests {
     fn test_unknown_version_fails() {
         let json = r#"{"version":"v9.9","createSurface":{"surfaceId":"s1"}}"#;
         let result: Result<ServerEnvelope> = serde_json::from_str(json).map_err(Into::into);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deny_unknown_fields_on_action_message() {
+        let json = r#"{"name":"click","surfaceId":"s1","unknownField":true}"#;
+        let result: Result<ActionMessage> = serde_json::from_str(json).map_err(Into::into);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deny_unknown_fields_on_client_error() {
+        let json = r#"{"code":"E","message":"err","extra":"x"}"#;
+        let result: Result<ClientError> = serde_json::from_str(json).map_err(Into::into);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deny_unknown_fields_on_function_response() {
+        let json = r#"{"functionCallId":"fc1","call":"req","value":true,"extra":"x"}"#;
+        let result: Result<FunctionResponse> = serde_json::from_str(json).map_err(Into::into);
         assert!(result.is_err());
     }
 }

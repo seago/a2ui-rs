@@ -19,6 +19,7 @@ a2ui-renderer-tui = { path = "../a2ui-renderer-tui" }
 a2ui-transport = { path = "../a2ui-transport" }
 anyhow = "1.0"
 async-trait.workspace = true
+atty = "0.2"
 clap = { version = "4.5", features = ["derive"] }
 serde_json.workspace = true
 tokio.workspace = true

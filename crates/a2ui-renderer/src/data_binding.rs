@@ -21,7 +21,7 @@ impl DataBinding {
 
     /// 设置 JSON Pointer 路径的值
     pub fn set(&mut self, path: &str, value: Value) -> RenderResult<()> {
-        self.data_model.apply_pointer(path, Some(value));
+        self.data_model.apply_pointer(path, Some(value))?;
         Ok(())
     }
 

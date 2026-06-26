@@ -157,6 +157,9 @@ fn test_client_action_message() {
 fn test_catalog_validation_integration() {
     let mut catalog = Catalog::new("a2ui://catalogs/basic/v1".to_string());
     catalog.add_component("Text", json!({"type": "object"}));
-    catalog.add_function("required", json!({"returnType":"boolean","callableFrom":"clientOnly"}));
+    catalog.add_function(
+        "required",
+        json!({"returnType":"boolean","callableFrom":"clientOnly"}),
+    );
     assert!(CatalogValidator::validate(&catalog).is_ok());
 }

@@ -1,6 +1,10 @@
+use crate::data_binding::DataBinding;
 use crate::error::RenderResult;
+use crate::function_dispatcher::FunctionDispatcher;
+use crate::path_resolver::PathResolver;
 use a2ui_core::prelude::*;
 use a2ui_core::A2uiError;
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// 组件树节点
@@ -86,6 +90,211 @@ impl ComponentForest {
     pub fn remove_surface(&mut self, surface_id: &str) -> RenderResult<()> {
         self.surfaces.remove(surface_id);
         Ok(())
+    }
+
+    /// 获取指定 Surface 的组件数量
+    pub fn component_count(&self, surface_id: &str) -> usize {
+        self.surfaces
+            .get(surface_id)
+            .map(|s| s.components.len())
+            .unwrap_or(0)
+    }
+
+    /// 展开 ChildList::Object 模板：从 Data Model 读取数组，为每个项实例化模板组件
+    ///
+    /// 返回新创建的组件 ID 列表。父组件的 `children` 属性会从
+    /// `{"template": "...", "path": "..."}` 更新为 `{"children": [id0, id1, ...]}`。
+    pub fn expand_templates(
+        &mut self,
+        surface_id: &str,
+        data_binding: &DataBinding,
+        resolver: &PathResolver,
+        dispatcher: &FunctionDispatcher,
+    ) -> RenderResult<Vec<ComponentId>> {
+        // 1. 收集需要展开的模板（避免持有借用同时修改 HashMap）
+        let templates_to_expand: Vec<(ComponentId, String, String)> = {
+            let surface = self.surfaces.get(surface_id).ok_or_else(|| {
+                crate::error::RendererError::SurfaceNotFound(surface_id.to_string())
+            })?;
+            let mut result = Vec::new();
+            for comp in surface.components.values() {
+                if let Some(obj) = comp.properties().as_object() {
+                    if let Some(children_val) = obj.get("children") {
+                        if let Some(children_obj) = children_val.as_object() {
+                            if let (Some(template_id), Some(path)) = (
+                                children_obj.get("template").and_then(|v| v.as_str()),
+                                children_obj.get("path").and_then(|v| v.as_str()),
+                            ) {
+                                result.push((
+                                    comp.id().clone(),
+                                    template_id.to_string(),
+                                    path.to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            result
+        };
+
+        let mut all_new_ids = Vec::new();
+
+        // 2. 逐个展开模板
+        for (parent_id, template_id_str, data_path) in &templates_to_expand {
+            let new_ids = self.expand_one_template(
+                surface_id,
+                parent_id,
+                template_id_str,
+                data_path,
+                data_binding,
+                resolver,
+                dispatcher,
+            )?;
+            all_new_ids.extend(new_ids);
+        }
+
+        Ok(all_new_ids)
+    }
+
+    /// 展开单个 ChildList::Object 模板
+    fn expand_one_template(
+        &mut self,
+        surface_id: &str,
+        parent_id: &ComponentId,
+        template_id_str: &str,
+        data_path: &str,
+        data_binding: &DataBinding,
+        resolver: &PathResolver,
+        dispatcher: &FunctionDispatcher,
+    ) -> RenderResult<Vec<ComponentId>> {
+        // 读取 Data Model 中的数组（使用 DataBinding::get 而非 Value::get，前者走 JSON Pointer）
+        let array = data_binding
+            .get(data_path)
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                crate::error::RendererError::SurfaceNotFound(format!(
+                    "template data path not found: {}",
+                    data_path
+                ))
+            })?;
+
+        // 获取模板组件
+        let template_id = ComponentId::new(template_id_str)?;
+        let template = {
+            let surface = self.surfaces.get(surface_id).ok_or_else(|| {
+                crate::error::RendererError::SurfaceNotFound(surface_id.to_string())
+            })?;
+            surface
+                .components
+                .get(&template_id)
+                .cloned()
+                .ok_or_else(|| {
+                    crate::error::RendererError::ComponentNotFound(template_id.clone())
+                })?
+        };
+
+        let mut expanded_ids = Vec::new();
+
+        for (index, _item) in array.iter().enumerate() {
+            // 创建带集合作用域的解析器（克隆已有 resolver 以复用 DataModel）
+            let mut scope_resolver = resolver.clone();
+            scope_resolver.enter_collection(data_path, index);
+
+            let new_id_str = format!("{}_{}", template_id.as_str(), index);
+
+            // 将模板序列化为 JSON，解析动态值，设置新 ID，再反序列化
+            let mut template_json = serde_json::to_value(&template).unwrap();
+            if let Some(obj) = template_json.as_object_mut() {
+                obj.remove("id");
+                obj.insert("id".to_string(), Value::String(new_id_str.clone()));
+
+                // 解析每个属性中的 DynamicValue
+                for (key, val) in obj.iter_mut() {
+                    if key == "component" || key == "id" {
+                        continue;
+                    }
+                    *val = Self::resolve_value_json(val, &scope_resolver, dispatcher);
+                }
+            }
+
+            let new_comp: Component = serde_json::from_value(template_json).unwrap();
+            let new_id = ComponentId::new(&new_id_str)?;
+            self.upsert(surface_id, new_comp)?;
+            expanded_ids.push(new_id);
+        }
+
+        // 3. 更新父组件的 children 属性
+        if !expanded_ids.is_empty() {
+            let parent_comp = {
+                let surface = self.surfaces.get(surface_id).ok_or_else(|| {
+                    crate::error::RendererError::SurfaceNotFound(surface_id.to_string())
+                })?;
+                surface.components.get(parent_id).cloned().ok_or_else(|| {
+                    crate::error::RendererError::ComponentNotFound(parent_id.clone())
+                })?
+            };
+
+            // 通过 JSON 序列化/反序列化更新父组件（字段为 private）
+            let mut parent_json = serde_json::to_value(&parent_comp).unwrap();
+            if let Some(obj) = parent_json.as_object_mut() {
+                if let Some(children_val) = obj.get_mut("children") {
+                    if let Some(children_obj) = children_val.as_object_mut() {
+                        children_obj.remove("template");
+                        children_obj.remove("path");
+                        let ids: Vec<Value> = expanded_ids
+                            .iter()
+                            .map(|id| Value::String(id.as_str().to_string()))
+                            .collect();
+                        children_obj.insert("children".to_string(), Value::Array(ids));
+                    }
+                }
+            }
+            let new_parent: Component = serde_json::from_value(parent_json).unwrap();
+            self.upsert(surface_id, new_parent)?;
+        }
+
+        Ok(expanded_ids)
+    }
+
+    /// 递归解析 JSON 中的 DynamicValue 表达式
+    fn resolve_value_json(
+        value: &Value,
+        resolver: &PathResolver,
+        dispatcher: &FunctionDispatcher,
+    ) -> Value {
+        match value {
+            Value::Object(map) => {
+                // 检测 DynamicValue::Path: {"path": "..."}
+                if let Some(Value::String(p)) = map.get("path") {
+                    return resolver.resolve(p).unwrap_or(Value::Null);
+                }
+                // 检测 DynamicValue::FunctionCall: {"call": "...", "args": {...}}
+                if let Some(Value::String(call)) = map.get("call") {
+                    if call == "@index" {
+                        return resolver.resolve("@index").unwrap_or(Value::Null);
+                    }
+                    if let Some(args) = map.get("args") {
+                        if let Ok(result) = dispatcher.dispatch(call, args.clone()) {
+                            return result;
+                        }
+                    }
+                    return Value::Null;
+                }
+                // 递归处理嵌套对象
+                let mut result = serde_json::Map::new();
+                for (k, v) in map {
+                    result.insert(k.clone(), Self::resolve_value_json(v, resolver, dispatcher));
+                }
+                Value::Object(result)
+            }
+            Value::Array(arr) => Value::Array(
+                arr.iter()
+                    .map(|v| Self::resolve_value_json(v, resolver, dispatcher))
+                    .collect(),
+            ),
+            _ => value.clone(),
+        }
     }
 
     /// 构建组件树
@@ -236,5 +445,153 @@ mod tests {
         assert!(forest
             .get("s1", &ComponentId::new("root").unwrap())
             .is_none());
+    }
+
+    // --- P1-1: @index scope system — template expansion ---
+
+    #[test]
+    fn test_expand_templates_object_mode() {
+        let mut forest = ComponentForest::new();
+        let dm = DataModel::new(json!({"items": [{"name": "a"}, {"name": "b"}]}));
+        let binding = DataBinding::new(dm);
+        let resolver = PathResolver::new(DataModel::new(binding.as_value().clone()));
+
+        // Template: Text with relative path "name"
+        let template = Component::text(
+            ComponentId::new("item_tmpl").unwrap(),
+            DynamicValue::Path {
+                path: "name".into(),
+            },
+        );
+
+        // Parent with ChildList::Object: template + data path
+        let parent: Component =
+            serde_json::from_value(json!({"component": "Column", "id": "list", "children": {"template": "item_tmpl", "path": "/items"}}))
+                .unwrap();
+
+        forest.upsert("s1", parent).unwrap();
+        forest.upsert("s1", template).unwrap();
+
+        let new_ids = forest
+            .expand_templates("s1", &binding, &resolver, &FunctionDispatcher::new())
+            .unwrap();
+
+        assert_eq!(new_ids.len(), 2);
+
+        // Verify resolved values
+        let comp0 = forest
+            .get("s1", &ComponentId::new("item_tmpl_0").unwrap())
+            .unwrap();
+        assert_eq!(comp0.properties().get("text"), Some(&json!("a")));
+
+        let comp1 = forest
+            .get("s1", &ComponentId::new("item_tmpl_1").unwrap())
+            .unwrap();
+        assert_eq!(comp1.properties().get("text"), Some(&json!("b")));
+    }
+
+    #[test]
+    fn test_expand_templates_with_at_index() {
+        let mut forest = ComponentForest::new();
+        let dm = DataModel::new(json!({"items": [{"name": "x"}, {"name": "y"}, {"name": "z"}]}));
+        let binding = DataBinding::new(dm);
+        let resolver = PathResolver::new(DataModel::new(binding.as_value().clone()));
+
+        // Template uses @index function call
+        let template = Component::text(
+            ComponentId::new("idx_tmpl").unwrap(),
+            DynamicValue::FunctionCall {
+                call: "@index".into(),
+                args: json!({}),
+            },
+        );
+
+        let parent: Component =
+            serde_json::from_value(json!({"component": "Column", "id": "list", "children": {"template": "idx_tmpl", "path": "/items"}}))
+                .unwrap();
+
+        forest.upsert("s1", parent).unwrap();
+        forest.upsert("s1", template).unwrap();
+
+        let new_ids = forest
+            .expand_templates("s1", &binding, &resolver, &FunctionDispatcher::new())
+            .unwrap();
+
+        assert_eq!(new_ids.len(), 3);
+        assert_eq!(
+            forest
+                .get("s1", &ComponentId::new("idx_tmpl_0").unwrap())
+                .unwrap()
+                .properties()
+                .get("text"),
+            Some(&json!(0))
+        );
+        assert_eq!(
+            forest
+                .get("s1", &ComponentId::new("idx_tmpl_1").unwrap())
+                .unwrap()
+                .properties()
+                .get("text"),
+            Some(&json!(1))
+        );
+        assert_eq!(
+            forest
+                .get("s1", &ComponentId::new("idx_tmpl_2").unwrap())
+                .unwrap()
+                .properties()
+                .get("text"),
+            Some(&json!(2))
+        );
+    }
+
+    #[test]
+    fn test_expand_templates_empty_array() {
+        let mut forest = ComponentForest::new();
+        let dm = DataModel::new(json!({"items": []}));
+        let binding = DataBinding::new(dm);
+        let resolver = PathResolver::new(DataModel::new(binding.as_value().clone()));
+
+        let template = Component::text(
+            ComponentId::new("item_tmpl").unwrap(),
+            DynamicValue::Path {
+                path: "name".into(),
+            },
+        );
+        let parent: Component =
+            serde_json::from_value(json!({"component": "Column", "id": "list", "children": {"template": "item_tmpl", "path": "/items"}}))
+                .unwrap();
+
+        forest.upsert("s1", parent).unwrap();
+        forest.upsert("s1", template).unwrap();
+
+        let new_ids = forest
+            .expand_templates("s1", &binding, &resolver, &FunctionDispatcher::new())
+            .unwrap();
+
+        assert!(new_ids.is_empty());
+    }
+
+    #[test]
+    fn test_expand_templates_missing_data_path() {
+        let mut forest = ComponentForest::new();
+        let dm = DataModel::new(json!({"other": [1, 2]}));
+        let binding = DataBinding::new(dm);
+        let resolver = PathResolver::new(DataModel::new(binding.as_value().clone()));
+
+        let template = Component::text(
+            ComponentId::new("item_tmpl").unwrap(),
+            DynamicValue::Path {
+                path: "name".into(),
+            },
+        );
+        let parent: Component =
+            serde_json::from_value(json!({"component": "Column", "id": "list", "children": {"template": "item_tmpl", "path": "/missing"}}))
+                .unwrap();
+
+        forest.upsert("s1", parent).unwrap();
+        forest.upsert("s1", template).unwrap();
+
+        let result = forest.expand_templates("s1", &binding, &resolver, &FunctionDispatcher::new());
+        assert!(result.is_err());
     }
 }

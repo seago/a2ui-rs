@@ -185,7 +185,9 @@ mod tests {
                 Ok(json!(s.to_uppercase()))
             }),
         );
-        let result = dispatcher.dispatch("upper", json!({"value": "hello"})).unwrap();
+        let result = dispatcher
+            .dispatch("upper", json!({"value": "hello"}))
+            .unwrap();
         assert_eq!(result, json!("HELLO"));
     }
 

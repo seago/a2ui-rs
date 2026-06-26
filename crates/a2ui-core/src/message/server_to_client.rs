@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResponseError {
     pub code: String,
     pub message: String,
@@ -16,12 +17,14 @@ pub enum ActionResponsePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CallFunctionPayload {
     pub call: String,
     pub args: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSurface {
     pub surface_id: String,
@@ -37,6 +40,7 @@ pub struct CreateSurface {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateComponents {
     pub surface_id: String,
@@ -44,6 +48,7 @@ pub struct UpdateComponents {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDataModel {
     pub surface_id: String,
@@ -54,6 +59,7 @@ pub struct UpdateDataModel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteSurface {
     pub surface_id: String,
@@ -68,6 +74,7 @@ pub struct ActionResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct CallFunction {
     pub function_call_id: String,
@@ -77,6 +84,7 @@ pub struct CallFunction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub enum V1_0ServerMessage {
     CreateSurface(CreateSurface),
@@ -256,6 +264,27 @@ mod tests {
     fn test_deserialize_unknown_message_fails() {
         let json = r#"{"version":"v1.0","unknownMessage":{}}"#;
         let result: Result<ServerEnvelope> = serde_json::from_str(json).map_err(|e| e.into());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deny_unknown_fields_on_create_surface() {
+        let json = r#"{"surfaceId":"s1","catalogId":"basic","extraField":"value"}"#;
+        let result: Result<CreateSurface> = serde_json::from_str(json).map_err(Into::into);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deny_unknown_fields_on_call_function() {
+        let json = r#"{"functionCallId":"fc1","wantResponse":true,"call":{"call":"test","args":{}},"extra":"x"}"#;
+        let result: Result<CallFunction> = serde_json::from_str(json).map_err(Into::into);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_deny_unknown_fields_on_delete_surface() {
+        let json = r#"{"surfaceId":"s1","extra":"x"}"#;
+        let result: Result<DeleteSurface> = serde_json::from_str(json).map_err(Into::into);
         assert!(result.is_err());
     }
 }

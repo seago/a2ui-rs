@@ -4,6 +4,7 @@ use a2ui_renderer_tui::TuiRenderer;
 use a2ui_transport::jsonl::JsonlTransport;
 use a2ui_transport::Transport;
 use clap::{Parser, Subcommand};
+use std::time::Duration;
 use tracing::{error, info, warn};
 
 /// A2UI CLI — 渲染 A2UI 协议的 UI 表面
@@ -109,7 +110,15 @@ async fn run_render(input: Option<std::path::PathBuf>) -> anyhow::Result<()> {
         let writer = tokio::io::stdout();
         InputTransport::File(JsonlTransport::new(reader, writer))
     } else {
-        info!("Input source: STDIN");
+        // 检测 stdin 是否为交互式终端（TTY）
+        if atty::is(atty::Stream::Stdin) {
+            eprintln!("Error: a2ui render requires piped JSONL input, not interactive terminal.");
+            eprintln!("Usage:");
+            eprintln!("  echo '{{\"version\":\"v1.0\",...}}' | a2ui render");
+            eprintln!("  a2ui render --input messages.jsonl");
+            std::process::exit(1);
+        }
+        info!("Input source: STDIN (piped)");
         InputTransport::Stdin(JsonlTransport::from_std())
     };
 
@@ -123,20 +132,34 @@ async fn run_render(input: Option<std::path::PathBuf>) -> anyhow::Result<()> {
         println!("Waiting for createSurface...");
     }
 
-    // 消息处理主循环
+    // 消息处理主循环（stdin 模式带 5 秒超时，避免 EOF 检测延迟导致卡住）
+    let stdin_timeout = Duration::from_secs(5);
+    let file_timeout = Duration::from_secs(3600); // 文件模式超时时间很长，基本不会触发
     loop {
-        match transport.receive().await {
-            Ok(Some(envelope)) => {
+        let timeout = match transport {
+            InputTransport::Stdin(_) => stdin_timeout,
+            InputTransport::File(_) => file_timeout,
+        };
+
+        let result = tokio::time::timeout(timeout, transport.receive()).await;
+
+        match result {
+            Ok(Ok(Some(envelope))) => {
                 if let Err(e) = process_server_envelope(&mut renderer, envelope).await {
                     error!("Error processing message: {}", e);
                 }
             }
-            Ok(None) => {
+            Ok(Ok(None)) => {
                 info!("Input stream closed");
                 break;
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 warn!("Transport receive error: {}", e);
+                break;
+            }
+            Err(_) => {
+                // STDIN 超时：说明 EOF 已到达但 tokio 还没完全感知，退出
+                info!("Input stream EOF detected (timeout)");
                 break;
             }
         }
