@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/a2ui-core"]
+members = ["crates/a2ui-core", "crates/a2ui-renderer"]
 exclude = [
-    "crates/a2ui-transport", "crates/a2ui-renderer",
+    "crates/a2ui-transport",
     "crates/a2ui-renderer-tui", "crates/a2ui-renderer-gui",
     "crates/a2ui-renderer-web", "crates/a2ui-cli",
 ]

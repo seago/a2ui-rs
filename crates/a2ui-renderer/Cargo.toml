@@ -1,0 +1,19 @@
+[package]
+name = "a2ui-renderer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "A2UI Renderer trait and component tree management"
+repository = "https://github.com/yufeng108/a2ui-rs"
+
+[dependencies]
+a2ui-core = { path = "../a2ui-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+tracing = "0.1"
+uuid = { version = "1.6", features = ["v4"] }
