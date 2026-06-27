@@ -117,10 +117,14 @@ impl GuiRenderer {
             .insert(action_id.into(), response_path.into());
     }
 
-    /// 使用 egui 渲染一帧
+    /// 使用 egui 渲染一帧，返回用户交互生成的 action 消息
     /// 支持增量渲染：只重渲染 dirty_surfaces 中的 surface
-    pub fn render_frame(&mut self, ctx: &egui::Context) -> RenderResult<()> {
+    pub fn render_frame(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> RenderResult<Vec<a2ui_core::message::client_to_server::ActionMessage>> {
         let mapper = WidgetMapper;
+        let mut all_actions = Vec::new();
 
         // 确定要渲染的 surface 列表
         let surfaces_to_render: Vec<_> = if self.dirty_surfaces.is_empty() {
@@ -149,15 +153,38 @@ impl GuiRenderer {
             if let Some(root_widget) = widget_map.get("root") {
                 let root_clone = root_widget.clone();
                 let mut response_tracker: HashMap<String, egui::Response> = HashMap::new();
+                let mut user_events: Vec<a2ui_renderer::UserEvent> = Vec::new();
 
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    mapper.render_gui_widget(&root_clone, ui, &widget_map, &mut response_tracker);
+                    ui.with_layout(
+                        egui::Layout::top_down_justified(egui::Align::Center),
+                        |ui| {
+                            ui.vertical_centered(|ui| {
+                                mapper.render_gui_widget(
+                                    &root_clone,
+                                    ui,
+                                    &widget_map,
+                                    &mut response_tracker,
+                                    &mut user_events,
+                                );
+                            });
+                        },
+                    );
                 });
+
+                // 处理收集到的用户事件，生成 action 消息
+                for event in user_events {
+                    if let Ok(Some(action)) =
+                        pollster::block_on(self.handle_user_event(event))
+                    {
+                        all_actions.push(action);
+                    }
+                }
             }
         }
 
         self.dirty_surfaces.clear();
-        Ok(())
+        Ok(all_actions)
     }
 
     /// 递归遍历组件树节点，构建 flat widget map

@@ -392,12 +392,14 @@ impl WidgetMapper {
     }
 
     /// 将 RenderableGuiWidget 渲染到 egui::Ui
+    /// user_events: 收集渲染过程中产生的用户交互事件
     pub fn render_gui_widget(
         &self,
         widget: &RenderableGuiWidget,
         ui: &mut egui::Ui,
         widget_map: &HashMap<String, RenderableGuiWidget>,
         response_tracker: &mut HashMap<String, egui::Response>,
+        user_events: &mut Vec<a2ui_renderer::UserEvent>,
     ) {
         match widget {
             RenderableGuiWidget::Text { id, text } => {
@@ -421,6 +423,11 @@ impl WidgetMapper {
                     button = button.fill(egui::Color32::from_rgb(25, 118, 210));
                 }
                 let response = ui.add(button);
+                if response.clicked() {
+                    user_events.push(a2ui_renderer::UserEvent::Click {
+                        component_id: id.clone(),
+                    });
+                }
                 response_tracker.insert(id.as_str().to_string(), response);
             }
             RenderableGuiWidget::Column {
@@ -429,7 +436,7 @@ impl WidgetMapper {
                 ui.vertical(|ui| {
                     for child_id in children_ids {
                         if let Some(child) = widget_map.get(child_id.as_str()) {
-                            self.render_gui_widget(child, ui, widget_map, response_tracker);
+                            self.render_gui_widget(child, ui, widget_map, response_tracker, user_events);
                         }
                     }
                 });
@@ -440,7 +447,7 @@ impl WidgetMapper {
                 ui.horizontal(|ui| {
                     for child_id in children_ids {
                         if let Some(child) = widget_map.get(child_id.as_str()) {
-                            self.render_gui_widget(child, ui, widget_map, response_tracker);
+                            self.render_gui_widget(child, ui, widget_map, response_tracker, user_events);
                         }
                     }
                 });
@@ -456,7 +463,7 @@ impl WidgetMapper {
             RenderableGuiWidget::Card { child_id, .. } => {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     if let Some(child) = widget_map.get(child_id.as_str()) {
-                        self.render_gui_widget(child, ui, widget_map, response_tracker);
+                        self.render_gui_widget(child, ui, widget_map, response_tracker, user_events);
                     } else {
                         ui.label(format!("[missing: {}]", child_id));
                     }
@@ -470,6 +477,10 @@ impl WidgetMapper {
                 let response = ui.checkbox(&mut is_checked, label.clone());
                 if response.changed() {
                     ui.memory_mut(|mem| mem.data.insert_temp::<bool>(state_id, is_checked));
+                    user_events.push(a2ui_renderer::UserEvent::CheckToggle {
+                        component_id: id.clone(),
+                        checked: is_checked,
+                    });
                 }
                 response_tracker.insert(id.as_str().to_string(), response);
             }
@@ -485,7 +496,7 @@ impl WidgetMapper {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for child_id in children_ids {
                         if let Some(child) = widget_map.get(child_id.as_str()) {
-                            self.render_gui_widget(child, ui, widget_map, response_tracker);
+                            self.render_gui_widget(child, ui, widget_map, response_tracker, user_events);
                         } else {
                             ui.label(format!("[missing: {}]", child_id));
                         }
@@ -523,6 +534,10 @@ impl WidgetMapper {
                 let response = ui.add(egui::Slider::new(&mut val, *min..=*max));
                 if response.changed() {
                     ui.memory_mut(|mem| mem.data.insert_temp::<f64>(state_id, val));
+                    user_events.push(a2ui_renderer::UserEvent::SliderChange {
+                        component_id: id.clone(),
+                        value: val,
+                    });
                 }
                 response_tracker.insert(id.as_str().to_string(), response);
             }
@@ -544,7 +559,11 @@ impl WidgetMapper {
                 };
                 let response = ui.add(text_edit.hint_text(placeholder.clone()));
                 if response.changed() {
-                    ui.memory_mut(|mem| mem.data.insert_temp::<String>(state_id, text));
+                    ui.memory_mut(|mem| mem.data.insert_temp::<String>(state_id, text.clone()));
+                    user_events.push(a2ui_renderer::UserEvent::TextInput {
+                        component_id: id.clone(),
+                        value: text,
+                    });
                 }
                 response_tracker.insert(id.as_str().to_string(), response);
             }

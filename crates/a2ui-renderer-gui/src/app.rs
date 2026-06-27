@@ -14,8 +14,6 @@ pub struct A2uiApp {
     message_rx: tokio::sync::mpsc::UnboundedReceiver<ServerEnvelope>,
     /// 发送客户端 action 消息的 channel
     action_tx: tokio::sync::mpsc::UnboundedSender<a2ui_core::ClientEnvelope>,
-    /// 本帧累积的待发送 action
-    pending_actions: Vec<a2ui_core::message::client_to_server::ActionMessage>,
 }
 
 impl A2uiApp {
@@ -29,7 +27,6 @@ impl A2uiApp {
             renderer,
             message_rx,
             action_tx,
-            pending_actions: Vec::new(),
         }
     }
 
@@ -117,15 +114,22 @@ impl eframe::App for A2uiApp {
             }
         }
 
-        // 2. 渲染当前帧
-        if let Err(e) = self.renderer.render_frame(ctx) {
-            tracing::error!("渲染帧失败: {}", e);
+        // 2. 渲染当前帧，获取用户交互产生的 action
+        match self.renderer.render_frame(ctx) {
+            Ok(actions) => {
+                for action in actions {
+                    let envelope = a2ui_core::ClientEnvelope::V1_0(
+                        a2ui_core::message::V1_0ClientMessage::Action(action),
+                    );
+                    let _ = self.action_tx.send(envelope);
+                }
+            }
+            Err(e) => {
+                tracing::error!("渲染帧失败: {}", e);
+            }
         }
 
-        // 3. 清空 pending actions（已在 process_envelope 中发送）
-        self.pending_actions.clear();
-
-        // 4. 持续请求重绘（egui 即时模式需要）
+        // 3. 持续请求重绘（egui 即时模式需要）
         ctx.request_repaint();
     }
 }
