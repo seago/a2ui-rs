@@ -52,9 +52,77 @@ impl std::fmt::Debug for FunctionDispatcher {
 }
 
 impl FunctionDispatcher {
-    /// 创建新的调度器
+    /// 创建新的调度器，注册内置 Basic Catalog 函数
     pub fn new() -> Self {
-        Self::default()
+        let mut dispatcher = Self::default();
+
+        // 注册 formatNumber
+        dispatcher.register_with_handler(
+            "formatNumber",
+            CallableFrom::ClientOrRemote,
+            Arc::new(|args| {
+                let value = args.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let decimals = args.get("decimals").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let grouping = args
+                    .get("grouping")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                Ok(Value::String(format_number(value, decimals, grouping)))
+            }),
+        );
+
+        // 注册 formatCurrency
+        dispatcher.register_with_handler(
+            "formatCurrency",
+            CallableFrom::ClientOrRemote,
+            Arc::new(|args| {
+                let value = args.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let currency = args
+                    .get("currency")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("USD")
+                    .to_string();
+                let decimals = args.get("decimals").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
+                let grouping = args
+                    .get("grouping")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                Ok(Value::String(format_currency(
+                    value, &currency, decimals, grouping,
+                )))
+            }),
+        );
+
+        // 注册 formatDate
+        dispatcher.register_with_handler(
+            "formatDate",
+            CallableFrom::ClientOrRemote,
+            Arc::new(|args| {
+                let value = args
+                    .get("value")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let format_str = args
+                    .get("format")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("YYYY-MM-DD")
+                    .to_string();
+                Ok(Value::String(format_date(&value, &format_str)))
+            }),
+        );
+
+        // 注册 pluralize
+        dispatcher.register_with_handler(
+            "pluralize",
+            CallableFrom::ClientOrRemote,
+            Arc::new(|args| {
+                let value = args.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0) as i64;
+                Ok(Value::String(pluralize(value, &args)))
+            }),
+        );
+
+        dispatcher
     }
 
     /// 注册函数元数据（不提供执行逻辑）
@@ -122,6 +190,231 @@ impl FunctionDispatcher {
     }
 }
 
+// ============================================================================
+// 格式化辅助函数
+// ============================================================================
+
+/// 为数字字符串的整数部分添加千位分隔符
+fn add_thousands_separator(s: &str) -> String {
+    let mut result = String::new();
+    let is_negative = s.starts_with('-');
+    let abs_str = if is_negative { &s[1..] } else { s };
+
+    // 按小数点分割整数和小数部分
+    if let Some(dot_pos) = abs_str.find('.') {
+        let int_part = &abs_str[..dot_pos];
+        let dec_part = &abs_str[dot_pos..];
+        for (i, c) in int_part.chars().enumerate() {
+            if i > 0 && (int_part.len() - i) % 3 == 0 {
+                result.push(',');
+            }
+            result.push(c);
+        }
+        result.push_str(dec_part);
+    } else {
+        for (i, c) in abs_str.chars().enumerate() {
+            if i > 0 && (abs_str.len() - i) % 3 == 0 {
+                result.push(',');
+            }
+            result.push(c);
+        }
+    }
+
+    if is_negative {
+        result.insert(0, '-');
+    }
+    result
+}
+
+/// 格式化数字
+fn format_number(value: f64, decimals: usize, grouping: bool) -> String {
+    let rounded = format!("{:.1$}", value, decimals);
+    if grouping {
+        add_thousands_separator(&rounded)
+    } else {
+        rounded
+    }
+}
+
+/// 获取货币符号
+fn get_currency_symbol(currency: &str) -> &str {
+    match currency {
+        "CNY" | "JPY" => "\u{00a5}", // ¥
+        "USD" => "$",
+        "EUR" => "\u{20ac}", // €
+        "GBP" => "\u{00a3}", // £
+        _ => currency,
+    }
+}
+
+/// 格式化货币
+fn format_currency(value: f64, currency: &str, decimals: usize, grouping: bool) -> String {
+    let symbol = get_currency_symbol(currency);
+    let number_str = format_number(value, decimals, grouping);
+    format!("{}{}", symbol, number_str)
+}
+
+/// 将 Unix 时间戳（秒）转换为 (年, 月, 日)
+fn timestamp_to_date(ts: i64) -> Option<(i32, u32, u32)> {
+    let days = if ts >= 0 {
+        ts / 86400
+    } else {
+        (ts + 1) / 86400 - 1
+    };
+    days_to_date(days)
+}
+
+/// 将 Epoch 天数转换为 (年, 月, 日)
+/// 使用 Howard Hinnant 的日期算法
+fn days_to_date(days: i64) -> Option<(i32, u32, u32)> {
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+
+    Some((y as i32, m as u32, d as u32))
+}
+
+/// 计算从 Unix 纪元（1970-01-01）以来的天数
+fn days_since_epoch(year: i32, month: u32, day: u32) -> i64 {
+    let y = year as i64;
+    let m = month as i64;
+    let d = day as i64;
+
+    let (adj_y, adj_m) = if m <= 2 { (y - 1, m + 12) } else { (y, m) };
+
+    // 使用 Fliegel-Van Flandern 算法的变体
+    let jdn = (1461 * (adj_y + 4800 + (adj_m - 14) / 12)) / 4
+        + (367 * (adj_m - 2 - 12 * ((adj_m - 14) / 12))) / 12
+        - (3 * ((adj_y + 4900 + (adj_m - 14) / 12) / 100)) / 4
+        + d
+        - 32075;
+
+    // JDN(1970-01-01) = 2440588
+    jdn - 2440588
+}
+
+/// 解析日期字符串，支持 ISO 8601 和 Unix 时间戳
+fn parse_date(value: &str) -> Option<(i32, u32, u32)> {
+    let trimmed = value.trim();
+
+    // 尝试解析为 Unix 时间戳（秒）
+    if let Ok(ts) = trimmed.parse::<i64>() {
+        return timestamp_to_date(ts);
+    }
+
+    // 尝试 ISO 8601: "2024-01-15" 或 "2024-01-15T..." 或 "2024-01-15 ..."
+    let date_part = trimmed
+        .split('T')
+        .next()
+        .and_then(|s| s.split_whitespace().next())
+        .unwrap_or(trimmed);
+
+    let parts: Vec<&str> = date_part.split('-').collect();
+    if parts.len() == 3 {
+        let year = parts[0].parse::<i32>().ok()?;
+        let month = parts[1].parse::<u32>().ok()?;
+        let day = parts[2].parse::<u32>().ok()?;
+        if (1..=12).contains(&month) && (1..=31).contains(&day) {
+            Some((year, month, day))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+const MONTH_NAMES: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+/// 格式化日期字符串
+fn format_date(value: &str, format: &str) -> String {
+    let parsed = parse_date(value);
+
+    match parsed {
+        Some((year, month, day)) => match format {
+            "YYYY-MM-DD" => format!("{:04}-{:02}-{:02}", year, month, day),
+            "full" => {
+                let month_name = MONTH_NAMES[month as usize - 1];
+                format!("{} {}, {}", month_name, day, year)
+            }
+            "short" => format!("{:02}/{:02}/{:04}", month, day, year),
+            "relative" => format_relative_date(year, month, day),
+            _ => format!("{:04}-{:02}-{:02}", year, month, day),
+        },
+        None => value.to_string(),
+    }
+}
+
+/// 计算相对日期字符串
+fn format_relative_date(year: i32, month: u32, day: u32) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let (now_year, now_month, now_day) = timestamp_to_date(now).unwrap_or((1970, 1, 1));
+
+    let target_days = days_since_epoch(year, month, day);
+    let now_days = days_since_epoch(now_year, now_month, now_day);
+
+    let diff = target_days - now_days;
+
+    match diff {
+        0 => "today".to_string(),
+        1 => "tomorrow".to_string(),
+        -1 => "yesterday".to_string(),
+        d if d > 1 => format!("in {} days", d),
+        d => format!("{} days ago", -d),
+    }
+}
+
+/// 根据 CLDR 复数规则选择合适的复数形式
+///
+/// 优先级：zero > one > two > few > many > other（兜底）
+fn pluralize(value: i64, args: &Value) -> String {
+    let forms: [(&str, bool); 5] = [
+        ("zero", value == 0),
+        ("one", value == 1),
+        ("two", value == 2),
+        ("few", (3..=10).contains(&value)),
+        ("many", value > 10),
+    ];
+
+    for (key, condition) in &forms {
+        if *condition {
+            if let Some(v) = args.get(*key).and_then(|v| v.as_str()) {
+                return v.to_string();
+            }
+        }
+    }
+
+    // 兜底到 "other"
+    args.get("other")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,7 +464,8 @@ mod tests {
         dispatcher.register("f1", CallableFrom::ClientOnly);
         dispatcher.register("f2", CallableFrom::RemoteOnly);
         let names = dispatcher.registered_names();
-        assert_eq!(names.len(), 2);
+        // new() 预注册 formatNumber/formatCurrency/formatDate/pluralize = 4 个
+        assert_eq!(names.len(), 6);
     }
 
     #[test]
@@ -197,5 +491,118 @@ mod tests {
         dispatcher.register("noop", CallableFrom::ClientOrRemote);
         let result = dispatcher.dispatch("noop", json!({})).unwrap();
         assert_eq!(result, Value::Null);
+    }
+
+    // --- Basic Catalog 格式化函数 ---
+
+    #[test]
+    fn test_format_number_with_grouping() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "formatNumber",
+                json!({"value": 1234567.89, "decimals": 2, "grouping": true}),
+            )
+            .unwrap();
+        assert_eq!(result, json!("1,234,567.89"));
+    }
+
+    #[test]
+    fn test_format_number_no_grouping() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "formatNumber",
+                json!({"value": 1000.5, "decimals": 1, "grouping": false}),
+            )
+            .unwrap();
+        assert_eq!(result, json!("1000.5"));
+    }
+
+    #[test]
+    fn test_format_currency_cny() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "formatCurrency",
+                json!({"value": 1234.5, "currency": "CNY", "decimals": 2}),
+            )
+            .unwrap();
+        let s = result.as_str().unwrap();
+        assert!(s.contains("\u{00a5}") || s.contains("CNY"));
+        assert!(s.contains("1,234.50") || s.contains("1234.50"));
+    }
+
+    #[test]
+    fn test_format_currency_usd() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "formatCurrency",
+                json!({"value": 99.99, "currency": "USD", "decimals": 2}),
+            )
+            .unwrap();
+        assert!(result.as_str().unwrap().contains("99.99"));
+    }
+
+    #[test]
+    fn test_format_date_iso() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "formatDate",
+                json!({"value": "2024-01-15", "format": "YYYY-MM-DD"}),
+            )
+            .unwrap();
+        assert!(result.as_str().unwrap().contains("2024"));
+    }
+
+    #[test]
+    fn test_format_date_full() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "formatDate",
+                json!({"value": "2024-01-15", "format": "full"}),
+            )
+            .unwrap();
+        let s = result.as_str().unwrap();
+        assert!(s.contains("January") || s.contains("1\u{6708}") || s.contains("2024"));
+    }
+
+    #[test]
+    fn test_pluralize_one() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "pluralize",
+                json!({"value": 1, "one": "item", "other": "items"}),
+            )
+            .unwrap();
+        assert_eq!(result, json!("item"));
+    }
+
+    #[test]
+    fn test_pluralize_many() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "pluralize",
+                json!({"value": 5, "one": "item", "other": "items"}),
+            )
+            .unwrap();
+        assert_eq!(result, json!("items"));
+    }
+
+    #[test]
+    fn test_pluralize_zero() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "pluralize",
+                json!({"value": 0, "zero": "no items", "one": "item", "other": "items"}),
+            )
+            .unwrap();
+        assert_eq!(result, json!("no items"));
     }
 }
