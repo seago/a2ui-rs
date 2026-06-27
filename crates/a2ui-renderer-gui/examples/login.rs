@@ -164,11 +164,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "variant": "primary"
     }))?;
 
-    // --- 状态文本（初始为空） ---
+    // --- 状态文本（绑定到 /login_status 路径） ---
     let status_text: Component = serde_json::from_value(json!({
         "id": "status_text",
         "component": "Text",
-        "text": ""
+        "text": { "path": "/login_status" }
     }))?;
 
     // --- 分割线 ---

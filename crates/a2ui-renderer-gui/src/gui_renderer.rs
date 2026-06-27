@@ -140,13 +140,15 @@ impl GuiRenderer {
                 Err(_) => continue,
             };
 
-            // 从组件树构建 flat widget map
+            // 从组件树构建 flat widget map（传入 data model 用于路径解析）
             let mut widget_map: HashMap<String, RenderableGuiWidget> = HashMap::new();
+            let data_model = self.data_bindings.get(surface_id);
             Self::flatten_tree_to_widget_map(
                 &tree,
                 &mapper,
                 &mut widget_map,
                 &self.custom_registry,
+                data_model,
             );
 
             // 获取 root 组件并渲染整个树
@@ -193,11 +195,12 @@ impl GuiRenderer {
         mapper: &WidgetMapper,
         widget_map: &mut HashMap<String, RenderableGuiWidget>,
         registry: &CustomComponentRegistry,
+        data_model: Option<&a2ui_renderer::DataBinding>,
     ) {
-        let widget = mapper.map_to_gui_widget(&node.component, registry);
+        let widget = mapper.map_to_gui_widget(&node.component, registry, data_model);
         widget_map.insert(node.component.id().as_str().to_string(), widget);
         for child in &node.children {
-            Self::flatten_tree_to_widget_map(child, mapper, widget_map, registry);
+            Self::flatten_tree_to_widget_map(child, mapper, widget_map, registry, data_model);
         }
     }
 }
@@ -680,7 +683,7 @@ mod tests {
             r#"{"id":"u1","component":"UnknownType"}"#,
         )
         .unwrap();
-        let w = mapper.map_to_gui_widget(&unknown, &empty_reg);
+        let w = mapper.map_to_gui_widget(&unknown, &empty_reg, None);
         assert!(
             matches!(w, RenderableGuiWidget::Placeholder { ref reason, .. } if reason.contains("unknown"))
         );
@@ -694,7 +697,7 @@ mod tests {
             r#"{"id":"c1","component":"MyChart"}"#,
         )
         .unwrap();
-        let w = mapper.map_to_gui_widget(&custom, &custom_reg);
+        let w = mapper.map_to_gui_widget(&custom, &custom_reg, None);
         assert!(
             matches!(w, RenderableGuiWidget::Placeholder { ref reason, .. } if reason.contains("custom"))
         );

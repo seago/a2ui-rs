@@ -95,17 +95,34 @@ pub enum RenderableGuiWidget {
 pub struct WidgetMapper;
 
 impl WidgetMapper {
-    /// 从组件属性中提取文本内容
-    pub fn extract_text(&self, component: &Component) -> String {
+    /// 从组件属性中提取文本内容，可选地解析 DataBinding 路径
+    /// `data_model` 为 `Some` 时，`{ "path": "/..." }` 会从数据模型中解析实际值
+    pub fn extract_text(
+        &self,
+        component: &Component,
+        data_model: Option<&a2ui_renderer::DataBinding>,
+    ) -> String {
         let props = component.properties();
         if let Some(text_val) = props.get("text") {
             if let Some(s) = text_val.as_str() {
                 return s.to_string();
             }
             if let Some(obj) = text_val.as_object() {
+                // 路径绑定：从 DataModel 中解析实际值
                 if let Some(path_val) = obj.get("path") {
                     if let Some(p) = path_val.as_str() {
-                        return format!("{{path:{}}}", p);
+                        if let Some(binding) = data_model {
+                            if let Some(resolved) = binding.get(p) {
+                                if !resolved.is_null() {
+                                    return match resolved {
+                                        serde_json::Value::String(s) => s.clone(),
+                                        other => other.to_string(),
+                                    };
+                                }
+                            }
+                        }
+                        // 数据模型不可用时回退显示路径
+                        return format!("{{{}…}}", p);
                     }
                 }
                 if let Some(call_val) = obj.get("call") {
@@ -129,25 +146,26 @@ impl WidgetMapper {
     /// 将 Component 映射为 RenderableGuiWidget
     ///
     /// `registry` 用于识别 Basic Catalog 以外的自定义组件类型。
-    /// 传入 `&CustomComponentRegistry::new()` 或使用默认空注册表。
+    /// `data_model` 用于解析 `{ "path": "/..." }` 数据绑定。
     pub fn map_to_gui_widget(
         &self,
         component: &Component,
         registry: &CustomComponentRegistry,
+        data_model: Option<&a2ui_renderer::DataBinding>,
     ) -> RenderableGuiWidget {
         let ctype = component.component_type();
         let props = component.properties();
 
         match ctype {
             "Text" => {
-                let text = self.extract_text(component);
+                let text = self.extract_text(component, data_model);
                 RenderableGuiWidget::Text {
                     id: component.id().clone(),
                     text,
                 }
             }
             "Button" => {
-                let label = self.extract_text(component);
+                let label = self.extract_text(component, data_model);
                 let child_id = props
                     .get("child")
                     .and_then(|v| v.as_str())
@@ -656,7 +674,7 @@ mod tests {
             ComponentId::new("t").unwrap(),
             DynamicValue::Literal("Hello".to_string()),
         );
-        assert_eq!(mapper.extract_text(&comp), "Hello");
+        assert_eq!(mapper.extract_text(&comp, None), "Hello");
     }
 
     #[test]
@@ -688,7 +706,7 @@ mod tests {
             ComponentId::new("t1").unwrap(),
             DynamicValue::Literal("Hello World".to_string()),
         );
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::Text { ref text, .. } if text == "Hello World")
         );
@@ -701,7 +719,7 @@ mod tests {
             r#"{"id":"btn1","component":"Button","child":"label1","text":"Click Me"}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Button { .. }));
     }
 
@@ -712,7 +730,7 @@ mod tests {
             r#"{"id":"col1","component":"Column","children":{"children":["c1","c2"]}}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::Column { ref children_ids, .. } if children_ids.len() == 2)
         );
@@ -725,7 +743,7 @@ mod tests {
             r#"{"id":"row1","component":"Row","children":{"children":["c1"]}}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Row { .. }));
     }
 
@@ -736,7 +754,7 @@ mod tests {
             r#"{"id":"img1","component":"Image","url":"https://example.com/img.png"}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::Image { ref url, .. } if url == "https://example.com/img.png")
         );
@@ -747,7 +765,7 @@ mod tests {
         let mapper = WidgetMapper;
         let comp: Component =
             serde_json::from_str(r#"{"id":"card1","component":"Card","child":"inner1"}"#).unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Card { .. }));
     }
 
@@ -758,7 +776,7 @@ mod tests {
             r#"{"id":"cb1","component":"CheckBox","checked":true,"label":"Accept"}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::CheckBox { checked: true, ref label, .. } if label == "Accept")
         );
@@ -769,7 +787,7 @@ mod tests {
         let mapper = WidgetMapper;
         let comp: Component =
             serde_json::from_str(r#"{"id":"div1","component":"Divider"}"#).unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Divider { .. }));
     }
 
@@ -778,7 +796,7 @@ mod tests {
         let mapper = WidgetMapper;
         let comp: Component =
             serde_json::from_str(r#"{"id":"icon1","component":"Icon","name":"star"}"#).unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Icon { ref name, .. } if name == "star"));
     }
 
@@ -788,7 +806,7 @@ mod tests {
         let comp: Component = serde_json::from_str(
             r#"{"id":"list1","component":"List","children":{"children":["item1","item2","item3"]}}"#
         ).unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::List { ref children_ids, .. } if children_ids.len() == 3)
         );
@@ -800,7 +818,7 @@ mod tests {
         let comp: Component = serde_json::from_str(
             r#"{"id":"tabs1","component":"Tabs","tabs":[{"title":"Tab A","child":"a"},{"title":"Tab B","child":"b"}]}"#
         ).unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::Tabs { ref tabs_data, .. } if tabs_data.len() == 2)
         );
@@ -813,7 +831,7 @@ mod tests {
             r#"{"id":"modal1","component":"Modal","content":"content1","trigger":"btn1"}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Modal { .. }));
     }
 
@@ -824,7 +842,7 @@ mod tests {
             r#"{"id":"sl1","component":"Slider","value":50,"min":0,"max":100}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(
             widget,
             RenderableGuiWidget::Slider {
@@ -843,7 +861,7 @@ mod tests {
             r#"{"id":"tf1","component":"TextField","value":"Hello","placeholder":"Enter text"}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::TextField { ref value, .. } if value == "Hello")
         );
@@ -856,7 +874,7 @@ mod tests {
             r#"{"id":"cp1","component":"ChoicePicker","options":["A","B","C"],"value":["A"]}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::ChoicePicker { ref options, .. } if options.len() == 3)
         );
@@ -868,7 +886,7 @@ mod tests {
         let comp: Component =
             serde_json::from_str(r#"{"id":"dt1","component":"DateTimeInput","label":"Pick date"}"#)
                 .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::DateTimeInput { ref label, .. } if label == "Pick date")
         );
@@ -881,7 +899,7 @@ mod tests {
             r#"{"id":"vid1","component":"Video","url":"https://example.com/video.mp4"}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::Video { ref url, .. } if url == "https://example.com/video.mp4")
         );
@@ -894,7 +912,7 @@ mod tests {
             r#"{"id":"aud1","component":"AudioPlayer","url":"https://example.com/audio.mp3"}"#,
         )
         .unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::AudioPlayer { ref url, .. } if url == "https://example.com/audio.mp3")
         );
@@ -905,7 +923,7 @@ mod tests {
         let mapper = WidgetMapper;
         let comp: Component =
             serde_json::from_str(r#"{"id":"unk1","component":"UnknownType"}"#).unwrap();
-        let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::Placeholder { ref reason, .. } if reason.contains("unknown"))
         );
@@ -984,7 +1002,7 @@ mod tests {
             let comp: Component = serde_json::from_value(json_val.clone()).unwrap_or_else(|_| {
                 panic!("Failed to deserialize component of type {}", type_name)
             });
-            let widget = mapper.map_to_gui_widget(&comp, &empty_registry());
+            let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
             // 不应该 panic — 每个类型都应该成功映射（不能是 Placeholder）
             match &widget {
                 RenderableGuiWidget::Placeholder { reason, .. } => {
