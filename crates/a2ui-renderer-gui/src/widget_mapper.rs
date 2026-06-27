@@ -13,6 +13,7 @@ pub enum RenderableGuiWidget {
         id: ComponentId,
         label: String,
         child_id: ComponentId,
+        variant: String,
     },
     Column {
         id: ComponentId,
@@ -152,10 +153,16 @@ impl WidgetMapper {
                     .and_then(|v| v.as_str())
                     .and_then(|s| ComponentId::new(s).ok())
                     .unwrap_or_else(|| ComponentId::new("__missing__").unwrap());
+                let variant = props
+                    .get("variant")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default")
+                    .to_string();
                 RenderableGuiWidget::Button {
                     id: component.id().clone(),
                     label,
                     child_id,
+                    variant,
                 }
             }
             "Column" => {
@@ -398,37 +405,44 @@ impl WidgetMapper {
                 let response = ui.add(label);
                 response_tracker.insert(id.as_str().to_string(), response);
             }
-            RenderableGuiWidget::Button { id, label, .. } => {
-                let button = egui::Button::new(egui::RichText::new(label.clone()));
+            RenderableGuiWidget::Button {
+                id,
+                label,
+                variant,
+                ..
+            } => {
+                let rich_label = if variant == "primary" {
+                    egui::RichText::new(label.clone()).color(egui::Color32::WHITE)
+                } else {
+                    egui::RichText::new(label.clone())
+                };
+                let mut button = egui::Button::new(rich_label);
+                if variant == "primary" {
+                    button = button.fill(egui::Color32::from_rgb(25, 118, 210));
+                }
                 let response = ui.add(button);
                 response_tracker.insert(id.as_str().to_string(), response);
             }
-            RenderableGuiWidget::Column { id, children_ids } => {
-                egui::Frame::default().show(ui, |ui| {
-                    ui.vertical(|ui| {
-                        ui.label(format!("[Column: {}]", id.as_str()));
-                        for child_id in children_ids {
-                            if let Some(child) = widget_map.get(child_id.as_str()) {
-                                self.render_gui_widget(child, ui, widget_map, response_tracker);
-                            } else {
-                                ui.label(format!("[missing: {}]", child_id));
-                            }
+            RenderableGuiWidget::Column {
+                children_ids, ..
+            } => {
+                ui.vertical(|ui| {
+                    for child_id in children_ids {
+                        if let Some(child) = widget_map.get(child_id.as_str()) {
+                            self.render_gui_widget(child, ui, widget_map, response_tracker);
                         }
-                    });
+                    }
                 });
             }
-            RenderableGuiWidget::Row { id, children_ids } => {
-                egui::Frame::default().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("[Row: {}]", id.as_str()));
-                        for child_id in children_ids {
-                            if let Some(child) = widget_map.get(child_id.as_str()) {
-                                self.render_gui_widget(child, ui, widget_map, response_tracker);
-                            } else {
-                                ui.label(format!("[missing: {}]", child_id));
-                            }
+            RenderableGuiWidget::Row {
+                children_ids, ..
+            } => {
+                ui.horizontal(|ui| {
+                    for child_id in children_ids {
+                        if let Some(child) = widget_map.get(child_id.as_str()) {
+                            self.render_gui_widget(child, ui, widget_map, response_tracker);
                         }
-                    });
+                    }
                 });
             }
             RenderableGuiWidget::Image { id, url } => {
@@ -449,8 +463,14 @@ impl WidgetMapper {
                 });
             }
             RenderableGuiWidget::CheckBox { id, checked, label } => {
-                let mut is_checked = *checked;
+                let state_id = egui::Id::new(("cb", id.as_str()));
+                let mut is_checked = ui
+                    .memory_mut(|mem| mem.data.get_temp::<bool>(state_id))
+                    .unwrap_or(*checked);
                 let response = ui.checkbox(&mut is_checked, label.clone());
+                if response.changed() {
+                    ui.memory_mut(|mem| mem.data.insert_temp::<bool>(state_id, is_checked));
+                }
                 response_tracker.insert(id.as_str().to_string(), response);
             }
             RenderableGuiWidget::Divider { .. } => {
@@ -496,8 +516,14 @@ impl WidgetMapper {
                 min,
                 max,
             } => {
-                let mut val = *value;
+                let state_id = egui::Id::new(("slider", id.as_str()));
+                let mut val = ui
+                    .memory_mut(|mem| mem.data.get_temp::<f64>(state_id))
+                    .unwrap_or(*value);
                 let response = ui.add(egui::Slider::new(&mut val, *min..=*max));
+                if response.changed() {
+                    ui.memory_mut(|mem| mem.data.insert_temp::<f64>(state_id, val));
+                }
                 response_tracker.insert(id.as_str().to_string(), response);
             }
             RenderableGuiWidget::TextField {
@@ -506,7 +532,10 @@ impl WidgetMapper {
                 placeholder,
                 variant,
             } => {
-                let mut text = value.clone();
+                let state_id = egui::Id::new(("tf", id.as_str()));
+                let mut text = ui
+                    .memory_mut(|mem| mem.data.get_temp::<String>(state_id))
+                    .unwrap_or_else(|| value.clone());
                 let is_password = variant == "obscured";
                 let text_edit = if is_password {
                     egui::TextEdit::singleline(&mut text).password(true)
@@ -514,6 +543,9 @@ impl WidgetMapper {
                     egui::TextEdit::singleline(&mut text)
                 };
                 let response = ui.add(text_edit.hint_text(placeholder.clone()));
+                if response.changed() {
+                    ui.memory_mut(|mem| mem.data.insert_temp::<String>(state_id, text));
+                }
                 response_tracker.insert(id.as_str().to_string(), response);
             }
             RenderableGuiWidget::ChoicePicker {
