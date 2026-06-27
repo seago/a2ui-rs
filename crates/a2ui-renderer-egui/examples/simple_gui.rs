@@ -5,7 +5,7 @@
 use a2ui_core::message::server_to_client::CreateSurface;
 use a2ui_core::prelude::*;
 use a2ui_core::ServerEnvelope;
-use a2ui_renderer_gui::{A2uiApp, GuiRenderer};
+use a2ui_renderer_egui::{A2uiApp, GuiRenderer};
 use serde_json::json;
 
 /// 加载系统中文字体，使 egui 能正确渲染中文
@@ -23,10 +23,9 @@ fn setup_chinese_fonts(cc: &eframe::CreationContext) {
     for path in &font_paths {
         if let Ok(data) = std::fs::read(path) {
             let mut fonts = egui::FontDefinitions::default();
-            fonts.font_data.insert(
-                "ChineseFont".to_owned(),
-                egui::FontData::from_owned(data),
-            );
+            fonts
+                .font_data
+                .insert("ChineseFont".to_owned(), egui::FontData::from_owned(data));
             fonts
                 .families
                 .entry(egui::FontFamily::Proportional)
@@ -106,11 +105,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
-    eframe::run_native("A2UI GUI Demo", options, Box::new(|cc| {
+    eframe::run_native(
+        "A2UI GUI Demo",
+        options,
+        Box::new(|cc| {
             setup_chinese_fonts(cc);
             Box::new(app)
-        }))
-        .map_err(|e| format!("eframe 错误: {}", e))?;
+        }),
+    )
+    .map_err(|e| format!("eframe 错误: {}", e))?;
 
     Ok(())
 }

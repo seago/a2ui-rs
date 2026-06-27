@@ -12,6 +12,9 @@ pub enum TransportError {
     #[error("Receive error: {0}")]
     ReceiveError(String),
 
+    #[error("EOF: stream ended")]
+    Eof,
+
     #[error("Core error: {0}")]
     CoreError(#[from] A2uiError),
 }

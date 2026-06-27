@@ -15,7 +15,22 @@ use a2ui_renderer::{
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::time::Duration;
+
+/// egui 示例页面的内容最大宽度
+const CONTENT_MAX_WIDTH: f32 = 720.0;
+
+/// 缓存的 egui 纹理（包装 TextureHandle 以支持 Debug）
+struct CachedTexture(egui::TextureHandle);
+
+impl std::fmt::Debug for CachedTexture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachedTexture")
+            .field("id", &self.0.id())
+            .finish()
+    }
+}
 
 /// GUI 渲染器实现
 #[derive(Debug)]
@@ -44,6 +59,8 @@ pub struct GuiRenderer {
     surface_lru: SurfaceLru,
     /// 自定义组件注册表
     custom_registry: CustomComponentRegistry,
+    /// 图片纹理缓存（URL → CachedTexture，需保持存活以免纹理被释放）
+    image_cache: HashMap<String, CachedTexture>,
 }
 
 /// 最大并发 Surface 数量（DoS 防护）
@@ -67,6 +84,7 @@ impl GuiRenderer {
             dirty_surfaces: HashSet::new(),
             surface_lru: SurfaceLru::new(MAX_SURFACES, Some(Duration::from_secs(600))),
             custom_registry: CustomComponentRegistry::new(),
+            image_cache: HashMap::new(),
         }
     }
 
@@ -117,6 +135,36 @@ impl GuiRenderer {
             .insert(action_id.into(), response_path.into());
     }
 
+    /// 加载图片到 egui 纹理缓存（如未缓存）
+    /// 返回 (TextureId, [width, height]) 用于渲染
+    fn load_image(
+        &mut self,
+        url: &str,
+        ctx: &egui::Context,
+    ) -> Option<(egui::TextureId, [usize; 2])> {
+        if let Some(cached) = self.image_cache.get(url) {
+            let raw = cached.0.size();
+            let size = [raw[0] as _, raw[1] as _];
+            return Some((cached.0.id(), size));
+        }
+
+        let response = ureq::get(url).call().ok()?;
+        let mut bytes = Vec::new();
+        response.into_reader().read_to_end(&mut bytes).ok()?;
+
+        let img = image::load_from_memory(&bytes).ok()?;
+        let rgba = img.to_rgba8();
+        let (w, h) = (rgba.width() as _, rgba.height() as _);
+        let size = [w, h];
+
+        let color_image = egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba.into_raw());
+        let handle = ctx.load_texture(url, color_image, egui::TextureOptions::default());
+        let tex_id = handle.id();
+        self.image_cache
+            .insert(url.to_string(), CachedTexture(handle));
+        Some((tex_id, size))
+    }
+
     /// 使用 egui 渲染一帧，返回用户交互生成的 action 消息
     /// 支持增量渲染：只重渲染 dirty_surfaces 中的 surface
     pub fn render_frame(
@@ -154,6 +202,18 @@ impl GuiRenderer {
             // 第二遍：回填 Button 的 label — 从 child Text 组件取文字
             Self::resolve_button_labels(&mut widget_map);
 
+            // 预加载所有 Image 组件引用的图片
+            let image_textures: HashMap<String, (egui::TextureId, [usize; 2])> = widget_map
+                .iter()
+                .filter_map(|(id, w)| {
+                    if let RenderableGuiWidget::Image { url, .. } = w {
+                        self.load_image(url, ctx).map(|tex| (id.clone(), tex))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
             // 获取 root 组件并渲染整个树
             if let Some(root_widget) = widget_map.get("root") {
                 let root_clone = root_widget.clone();
@@ -161,29 +221,35 @@ impl GuiRenderer {
                 let mut user_events: Vec<a2ui_renderer::UserEvent> = Vec::new();
 
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    // 居中：用左右等距 inner_margin 把内容挤到中间
-                    let window_w = ui.available_width();
-                    let card_w = 400.0_f32.min(window_w - 32.0);
-                    let margin = ((window_w - card_w) / 2.0).max(0.0);
+                    let available_width = ui.available_width();
+                    let content_width = (available_width * 0.92)
+                        .max(320.0)
+                        .min(CONTENT_MAX_WIDTH)
+                        .min(available_width);
+                    let left_pad = ((available_width - content_width) / 2.0).max(0.0);
 
-                    let frame = egui::Frame::default()
-                        .inner_margin(egui::Vec2::new(margin, 0.0));
-                    frame.show(ui, |ui| {
-                        mapper.render_gui_widget(
-                            &root_clone,
-                            ui,
-                            &widget_map,
-                            &mut response_tracker,
-                            &mut user_events,
+                    ui.horizontal(|ui| {
+                        ui.add_space(left_pad);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(content_width, ui.available_height()),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                mapper.render_gui_widget(
+                                    &root_clone,
+                                    ui,
+                                    &widget_map,
+                                    &mut response_tracker,
+                                    &mut user_events,
+                                    &image_textures,
+                                );
+                            },
                         );
                     });
                 });
 
                 // 处理收集到的用户事件，生成 action 消息
                 for event in user_events {
-                    if let Ok(Some(action)) =
-                        pollster::block_on(self.handle_user_event(event))
-                    {
+                    if let Ok(Some(action)) = pollster::block_on(self.handle_user_event(event)) {
                         all_actions.push(action);
                     }
                 }
@@ -409,23 +475,12 @@ impl Renderer for GuiRenderer {
 
     async fn call_function(&mut self, msg: CallFunction) -> RenderResult<FunctionResponse> {
         let function_name = msg.call.call.clone();
-
-        // callableFrom enforcement
-        if !self
-            .dispatcher
-            .can_call_from(&function_name, a2ui_renderer::CallableFrom::ClientOnly)
-        {
-            if self.dispatcher.get(&function_name).is_some() {
-                return Err(a2ui_renderer::error::RendererError::InvalidFunctionCall(
-                    function_name,
-                ));
-            }
-            return Err(a2ui_renderer::error::RendererError::FunctionNotAvailable(
-                function_name,
-            ));
-        }
-
-        let result = self.dispatcher.dispatch(&function_name, msg.call.args)?;
+        // dispatch() 内部强制执行 callableFrom 边界检查
+        let result = self.dispatcher.dispatch(
+            &function_name,
+            msg.call.args,
+            a2ui_renderer::CallableFrom::ClientOnly,
+        )?;
         Ok(FunctionResponse {
             function_call_id: msg.function_call_id,
             call: function_name,
@@ -702,8 +757,8 @@ mod tests {
         renderer
             .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
             .unwrap();
-        let result = renderer
-            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"));
+        let result =
+            renderer.register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"));
         assert!(result.is_err());
     }
 
@@ -715,10 +770,8 @@ mod tests {
         let empty_reg = a2ui_renderer::CustomComponentRegistry::new();
 
         // 未注册的组件类型 → "unknown component type"
-        let unknown: Component = serde_json::from_str(
-            r#"{"id":"u1","component":"UnknownType"}"#,
-        )
-        .unwrap();
+        let unknown: Component =
+            serde_json::from_str(r#"{"id":"u1","component":"UnknownType"}"#).unwrap();
         let w = mapper.map_to_gui_widget(&unknown, &empty_reg, None);
         assert!(
             matches!(w, RenderableGuiWidget::Placeholder { ref reason, .. } if reason.contains("unknown"))
@@ -729,10 +782,8 @@ mod tests {
         custom_reg
             .register(a2ui_renderer::CustomComponentDef::new("MyChart"))
             .unwrap();
-        let custom: Component = serde_json::from_str(
-            r#"{"id":"c1","component":"MyChart"}"#,
-        )
-        .unwrap();
+        let custom: Component =
+            serde_json::from_str(r#"{"id":"c1","component":"MyChart"}"#).unwrap();
         let w = mapper.map_to_gui_widget(&custom, &custom_reg, None);
         assert!(
             matches!(w, RenderableGuiWidget::Placeholder { ref reason, .. } if reason.contains("custom"))

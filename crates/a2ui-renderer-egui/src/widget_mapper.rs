@@ -26,6 +26,8 @@ pub enum RenderableGuiWidget {
     Image {
         id: ComponentId,
         url: String,
+        width: WidgetLength,
+        height: WidgetLength,
     },
     Card {
         id: ComponentId,
@@ -89,6 +91,13 @@ pub enum RenderableGuiWidget {
         id: ComponentId,
         reason: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WidgetLength {
+    Shrink,
+    Fill,
+    Fixed(f32),
 }
 
 /// Widget Mapper：将 A2UI 组件映射为 egui UI 指令
@@ -200,11 +209,15 @@ impl WidgetMapper {
             "Image" => {
                 let url = props
                     .get("url")
-                    .and_then(extract_string_value)
+                    .and_then(|v| resolve_dynamic_attr(v, data_model))
                     .unwrap_or_else(|| "{path:url}".to_string());
+                let width = extract_length_prop(props, "width", WidgetLength::Shrink);
+                let height = extract_length_prop(props, "height", WidgetLength::Shrink);
                 RenderableGuiWidget::Image {
                     id: component.id().clone(),
                     url,
+                    width,
+                    height,
                 }
             }
             "Card" => {
@@ -418,18 +431,16 @@ impl WidgetMapper {
         widget_map: &HashMap<String, RenderableGuiWidget>,
         response_tracker: &mut HashMap<String, egui::Response>,
         user_events: &mut Vec<a2ui_renderer::UserEvent>,
+        image_textures: &HashMap<String, (egui::TextureId, [usize; 2])>,
     ) {
         match widget {
             RenderableGuiWidget::Text { id, text } => {
-                let label = egui::Label::new(egui::RichText::new(text.clone()));
+                let label = egui::Label::new(egui::RichText::new(text.clone())).wrap(true);
                 let response = ui.add(label);
                 response_tracker.insert(id.as_str().to_string(), response);
             }
             RenderableGuiWidget::Button {
-                id,
-                label,
-                variant,
-                ..
+                id, label, variant, ..
             } => {
                 let rich_label = if variant == "primary" {
                     egui::RichText::new(label.clone()).color(egui::Color32::WHITE)
@@ -448,40 +459,104 @@ impl WidgetMapper {
                 }
                 response_tracker.insert(id.as_str().to_string(), response);
             }
-            RenderableGuiWidget::Column {
-                children_ids, ..
-            } => {
-                ui.vertical(|ui| {
-                    for child_id in children_ids {
-                        if let Some(child) = widget_map.get(child_id.as_str()) {
-                            self.render_gui_widget(child, ui, widget_map, response_tracker, user_events);
-                        }
-                    }
+            RenderableGuiWidget::Column { children_ids, .. } => {
+                let width = ui.available_width();
+                let contains_expanding_child = children_ids.iter().any(|child_id| {
+                    matches!(
+                        widget_map.get(child_id.as_str()),
+                        Some(RenderableGuiWidget::List { .. })
+                    )
                 });
+                let height = if contains_expanding_child {
+                    ui.available_height()
+                } else {
+                    0.0
+                };
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, height),
+                    egui::Layout::top_down_justified(egui::Align::Center),
+                    |ui| {
+                        ui.set_width(width);
+                        for child_id in children_ids {
+                            if let Some(child) = widget_map.get(child_id.as_str()) {
+                                self.render_gui_widget(
+                                    child,
+                                    ui,
+                                    widget_map,
+                                    response_tracker,
+                                    user_events,
+                                    image_textures,
+                                );
+                            }
+                        }
+                    },
+                );
             }
-            RenderableGuiWidget::Row {
-                children_ids, ..
-            } => {
+            RenderableGuiWidget::Row { children_ids, .. } => {
                 ui.horizontal(|ui| {
                     for child_id in children_ids {
                         if let Some(child) = widget_map.get(child_id.as_str()) {
-                            self.render_gui_widget(child, ui, widget_map, response_tracker, user_events);
+                            self.render_gui_widget(
+                                child,
+                                ui,
+                                widget_map,
+                                response_tracker,
+                                user_events,
+                                image_textures,
+                            );
                         }
                     }
                 });
             }
-            RenderableGuiWidget::Image { id, url } => {
-                let label = egui::Label::new(
-                    egui::RichText::new(format!("\u{1F5BC} Image: {}", url))
-                        .color(egui::Color32::GRAY),
-                );
-                let response = ui.add(label);
-                response_tracker.insert(id.as_str().to_string(), response);
+            RenderableGuiWidget::Image {
+                id,
+                url: _,
+                width,
+                height,
+            } => {
+                if let Some((tex_id, size)) = image_textures.get(id.as_str()) {
+                    let original = egui::vec2(size[0] as f32, size[1] as f32);
+                    let target_width = match width {
+                        WidgetLength::Fill => ui.available_width().max(1.0),
+                        WidgetLength::Fixed(value) => *value,
+                        WidgetLength::Shrink => original.x.min(ui.available_width().max(1.0)),
+                    };
+                    let target_height = match height {
+                        WidgetLength::Fixed(value) => *value,
+                        WidgetLength::Fill => ui.available_height().max(1.0),
+                        WidgetLength::Shrink => {
+                            if original.x > 0.0 {
+                                original.y * (target_width / original.x)
+                            } else {
+                                original.y
+                            }
+                        }
+                    };
+                    let img =
+                        egui::Image::from_texture(egui::load::SizedTexture::new(*tex_id, original))
+                            .fit_to_exact_size(egui::vec2(target_width, target_height))
+                            .maintain_aspect_ratio(false);
+                    let response = ui.add(img);
+                    response_tracker.insert(id.as_str().to_string(), response);
+                } else {
+                    let response = ui.label("🖼 Loading...");
+                    response_tracker.insert(id.as_str().to_string(), response);
+                }
             }
             RenderableGuiWidget::Card { child_id, .. } => {
+                let width = ui.available_width();
+                ui.set_width(width);
                 egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.set_width(width);
                     if let Some(child) = widget_map.get(child_id.as_str()) {
-                        self.render_gui_widget(child, ui, widget_map, response_tracker, user_events);
+                        self.render_gui_widget(
+                            child,
+                            ui,
+                            widget_map,
+                            response_tracker,
+                            user_events,
+                            image_textures,
+                        );
                     } else {
                         ui.label(format!("[missing: {}]", child_id));
                     }
@@ -511,15 +586,38 @@ impl WidgetMapper {
                 response_tracker.insert(id.as_str().to_string(), response);
             }
             RenderableGuiWidget::List { children_ids, .. } => {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for child_id in children_ids {
-                        if let Some(child) = widget_map.get(child_id.as_str()) {
-                            self.render_gui_widget(child, ui, widget_map, response_tracker, user_events);
-                        } else {
-                            ui.label(format!("[missing: {}]", child_id));
-                        }
-                    }
-                });
+                let viewport_height = ui.available_height().max(0.0);
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .min_scrolled_height(viewport_height)
+                    .show(ui, |ui| {
+                        let list_width = ui.available_width();
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(list_width, 0.0),
+                            egui::Layout::top_down_justified(egui::Align::Center),
+                            |ui| {
+                                ui.set_width(list_width);
+                                for (index, child_id) in children_ids.iter().enumerate() {
+                                    if index > 0 {
+                                        ui.add_space(12.0);
+                                    }
+
+                                    if let Some(child) = widget_map.get(child_id.as_str()) {
+                                        self.render_gui_widget(
+                                            child,
+                                            ui,
+                                            widget_map,
+                                            response_tracker,
+                                            user_events,
+                                            image_textures,
+                                        );
+                                    } else {
+                                        ui.label(format!("[missing: {}]", child_id));
+                                    }
+                                }
+                            },
+                        );
+                    });
             }
             RenderableGuiWidget::Tabs { tabs_data, .. } => {
                 ui.horizontal(|ui| {
@@ -630,8 +728,6 @@ impl WidgetMapper {
 fn extract_children_ids(props: &serde_json::Value) -> Vec<ComponentId> {
     props
         .get("children")
-        .and_then(|v| v.as_object())
-        .and_then(|obj| obj.get("children"))
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
@@ -642,20 +738,48 @@ fn extract_children_ids(props: &serde_json::Value) -> Vec<ComponentId> {
         .unwrap_or_default()
 }
 
-/// 从动态值中提取字符串（可能是字面量字符串或带 path/call 的对象）
-fn extract_string_value(value: &serde_json::Value) -> Option<String> {
-    if let Some(s) = value.as_str() {
-        return Some(s.to_string());
-    }
-    if let Some(obj) = value.as_object() {
-        if let Some(path) = obj.get("path").and_then(|v| v.as_str()) {
-            return Some(format!("{{path:{}}}", path));
+/// 解析动态属性值（字面量字符串或 { "path": "..." } 绑定）
+fn resolve_dynamic_attr(
+    v: &serde_json::Value,
+    data_model: Option<&a2ui_renderer::DataBinding>,
+) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Object(obj) => {
+            if let Some(p) = obj.get("path").and_then(|v| v.as_str()) {
+                if let Some(binding) = data_model {
+                    if let Some(resolved) = binding.get(p) {
+                        if !resolved.is_null() {
+                            return match resolved {
+                                serde_json::Value::String(s) => Some(s.clone()),
+                                other => Some(other.to_string()),
+                            };
+                        }
+                    }
+                }
+                Some(format!("{{{}…}}", p))
+            } else {
+                None
+            }
         }
-        if let Some(call) = obj.get("call").and_then(|v| v.as_str()) {
-            return Some(format!("{{call:{}}}", call));
-        }
+        _ => None,
     }
-    None
+}
+
+fn extract_length_prop(
+    props: &serde_json::Value,
+    key: &str,
+    default: WidgetLength,
+) -> WidgetLength {
+    match props.get(key) {
+        Some(serde_json::Value::Number(n)) => n
+            .as_f64()
+            .map(|value| WidgetLength::Fixed(value as f32))
+            .unwrap_or(default),
+        Some(serde_json::Value::String(s)) if s == "fill" => WidgetLength::Fill,
+        Some(serde_json::Value::String(s)) if s == "shrink" => WidgetLength::Shrink,
+        _ => default,
+    }
 }
 
 #[cfg(test)]
@@ -726,10 +850,9 @@ mod tests {
     #[test]
     fn test_map_column_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
-            r#"{"id":"col1","component":"Column","children":{"children":["c1","c2"]}}"#,
-        )
-        .unwrap();
+        let comp: Component =
+            serde_json::from_str(r#"{"id":"col1","component":"Column","children":["c1","c2"]}"#)
+                .unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::Column { ref children_ids, .. } if children_ids.len() == 2)
@@ -739,10 +862,8 @@ mod tests {
     #[test]
     fn test_map_row_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
-            r#"{"id":"row1","component":"Row","children":{"children":["c1"]}}"#,
-        )
-        .unwrap();
+        let comp: Component =
+            serde_json::from_str(r#"{"id":"row1","component":"Row","children":["c1"]}"#).unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Row { .. }));
     }
@@ -804,8 +925,9 @@ mod tests {
     fn test_map_list_to_gui_widget() {
         let mapper = WidgetMapper;
         let comp: Component = serde_json::from_str(
-            r#"{"id":"list1","component":"List","children":{"children":["item1","item2","item3"]}}"#
-        ).unwrap();
+            r#"{"id":"list1","component":"List","children":["item1","item2","item3"]}"#,
+        )
+        .unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::List { ref children_ids, .. } if children_ids.len() == 3)
@@ -944,12 +1066,9 @@ mod tests {
             ),
             (
                 "Column",
-                json!({"id":"c","component":"Column","children":{"children":["a","b"]}}),
+                json!({"id":"c","component":"Column","children":["a","b"]}),
             ),
-            (
-                "Row",
-                json!({"id":"r","component":"Row","children":{"children":["x"]}}),
-            ),
+            ("Row", json!({"id":"r","component":"Row","children":["x"]})),
             (
                 "Image",
                 json!({"id":"i","component":"Image","url":"http://example.com/pic.png"}),
@@ -966,7 +1085,7 @@ mod tests {
             ("Icon", json!({"id":"ic","component":"Icon","name":"home"})),
             (
                 "List",
-                json!({"id":"l","component":"List","children":{"children":["i1","i2"]}}),
+                json!({"id":"l","component":"List","children":["i1","i2"]}),
             ),
             (
                 "Tabs",

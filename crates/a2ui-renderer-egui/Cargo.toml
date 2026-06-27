@@ -1,11 +1,11 @@
 [package]
-name = "a2ui-renderer-gui"
+name = "a2ui-renderer-egui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "A2UI GUI Renderer implementation using egui"
+description = "A2UI GUI Renderer implementation using egui/eframe"
 repository = "https://github.com/yufeng108/a2ui-rs"
 
 [[test]]
@@ -22,6 +22,9 @@ serde_json = { workspace = true }
 tokio.workspace = true
 pollster = "0.3"
 tracing.workspace = true
+ureq = "2"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+
 
 [dev-dependencies]
 tracing-subscriber = "0.3"

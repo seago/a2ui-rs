@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A2UI</title>
+    <style>
+        /* A2UI Basic Styles */
+        .a2ui-body { margin: 0; padding: 16px; font-family: system-ui, sans-serif; }
+        .a2ui-column { display: flex; flex-direction: column; gap: 8px; }
+        .a2ui-row { display: flex; flex-direction: row; gap: 8px; align-items: center; }
+        .a2ui-card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 8px 0; }
+        .a2ui-button { padding: 8px 16px; border-radius: 4px; border: 1px solid #ccc; cursor: pointer; background: #f5f5f5; }
+        .a2ui-button.a2ui-primary { background: #007aff; color: white; border-color: #007aff; }
+        .a2ui-text { margin: 4px 0; }
+        .a2ui-text.a2ui-caption { font-size: 0.85em; color: #666; }
+        .a2ui-image { max-width: 100%; height: auto; }
+        .a2ui-divider { border: none; border-top: 1px solid #eee; margin: 16px 0; }
+        .a2ui-checkbox { display: flex; align-items: center; gap: 8px; }
+        .a2ui-textfield { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .a2ui-slider { width: 100%; }
+        .a2ui-list { padding-left: 24px; }
+        .a2ui-tab-headers { display: flex; gap: 4px; border-bottom: 1px solid #ddd; }
+        .a2ui-tab { padding: 8px 16px; border: none; background: none; cursor: pointer; }
+        .a2ui-tab.active { border-bottom: 2px solid #007aff; }
+        .a2ui-tab-content { display: none; padding: 16px 0; }
+        .a2ui-tab-content.active { display: block; }
+        .a2ui-modal { border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+        .a2ui-modal-header { background: #f5f5f5; padding: 12px 16px; font-weight: bold; }
+        .a2ui-modal-body { padding: 16px; }
+        .a2ui-placeholder { padding: 8px; background: #fff3cd; border: 1px dashed #ffc107; border-radius: 4px; color: #856404; }
+        .a2ui-video, .a2ui-audio { max-width: 100%; }
+    </style>
+</head>
+<body class="a2ui-body">
+    <div class="a2ui-surface" data-surface-id="demo"><div class="a2ui-column"><p class="a2ui-text a2ui-body">🌐 A2UI Web Renderer Demo</p><hr class="a2ui-divider" /><div class="a2ui-card"><p class="a2ui-text a2ui-body">这是 A2UI Web 渲染器的演示页面。所有组件均由 Rust 后端渲染为语义化 HTML，支持 XSS 安全转义。</p></div><hr class="a2ui-divider" /><div class="a2ui-row"><input type="text" class="a2ui-textfield" value="" placeholder="请输入姓名" /><input type="text" class="a2ui-textfield" value="" placeholder="请输入邮箱" /><label class="a2ui-checkbox"><input type="checkbox" checked /> </label><input type="range" class="a2ui-slider" value="75" min="0" max="100" /></div><hr class="a2ui-divider" /><div class="a2ui-row"><button class="a2ui-button a2ui-primary"></button><button class="a2ui-button a2ui-default"></button><img class="a2ui-image" src="https://via.placeholder.com/80x80.png?text=A2UI" alt="image" /></div><hr class="a2ui-divider" /><ul class="a2ui-list"><li><p class="a2ui-text a2ui-body">✅  服务端渲染 — Rust 后端直接输出 HTML</p></li><li><p class="a2ui-text a2ui-body">🔒  XSS 安全 — 所有输出经过 HTML 转义</p></li><li><p class="a2ui-text a2ui-body">🎨  语义化 HTML — 18 个组件完整映射</p></li></ul><p class="a2ui-text a2ui-body">Powered by A2UI Protocol v1.0 · a2ui-rs · 2026</p></div></div>
+</body>
+</html>

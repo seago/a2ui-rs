@@ -3,13 +3,13 @@
 //! 展示一个完整的登录表单：用户名、密码（掩码）、记住密码、登录按钮，
 //! 以及模拟的服务端登录响应流程。
 //!
-//! 运行：`cargo run --example login -p a2ui-renderer-gui`
+//! 运行：`cargo run --example login -p a2ui-renderer-egui`
 
 use a2ui_core::message::server_to_client::{CreateSurface, UpdateDataModel};
 use a2ui_core::message::{V1_0ClientMessage, V1_0ServerMessage};
 use a2ui_core::prelude::*;
 use a2ui_core::{ClientEnvelope, ServerEnvelope};
-use a2ui_renderer_gui::{A2uiApp, GuiRenderer};
+use a2ui_renderer_egui::{A2uiApp, GuiRenderer};
 use serde_json::json;
 use std::time::Duration;
 
@@ -17,13 +17,13 @@ use std::time::Duration;
 fn setup_chinese_fonts(cc: &eframe::CreationContext) {
     // macOS / Linux / Windows 常见中文字体路径
     let font_paths = [
-        "/System/Library/Fonts/PingFang.ttc",          // macOS 苹方
-        "/System/Library/Fonts/STHeiti Light.ttc",     // macOS 黑体
+        "/System/Library/Fonts/PingFang.ttc",            // macOS 苹方
+        "/System/Library/Fonts/STHeiti Light.ttc",       // macOS 黑体
         "/System/Library/Fonts/Supplemental/Songti.ttc", // macOS 宋体
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", // Linux Noto CJK
         "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", // Linux Droid
-        "C:\\Windows\\Fonts\\msyh.ttc",                 // Windows 微软雅黑
-        "C:\\Windows\\Fonts\\simsun.ttc",               // Windows 宋体
+        "C:\\Windows\\Fonts\\msyh.ttc",                  // Windows 微软雅黑
+        "C:\\Windows\\Fonts\\simsun.ttc",                // Windows 宋体
     ];
 
     for path in &font_paths {
@@ -192,11 +192,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let all_components = vec![
         root,
         title,
-        div1, div2, div3,
-        username_label, username_field,
-        password_label, password_field,
+        div1,
+        div2,
+        div3,
+        username_label,
+        username_field,
+        password_label,
+        password_field,
         remember_cb,
-        btn_label, login_btn,
+        btn_label,
+        login_btn,
         status_text,
         footer,
     ];
@@ -210,22 +215,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::thread::sleep(Duration::from_millis(200));
 
         // 1. 发送 createSurface（附带完整组件树）
-        let envelope = ServerEnvelope::V1_0(V1_0ServerMessage::CreateSurface(
-            CreateSurface {
-                surface_id: "login".into(),
-                catalog_id: "basic".into(),
-                surface_properties: Some(json!({"agentDisplayName": "A2UI Login Demo"})),
-                send_data_model: false,
-                components: Some(all_components),
-                data_model: Some(json!({
-                    "login_status": "",
-                    "credentials": {
-                        "username": "",
-                        "password": ""
-                    }
-                })),
-            },
-        ));
+        let envelope = ServerEnvelope::V1_0(V1_0ServerMessage::CreateSurface(CreateSurface {
+            surface_id: "login".into(),
+            catalog_id: "basic".into(),
+            surface_properties: Some(json!({"agentDisplayName": "A2UI Login Demo"})),
+            send_data_model: false,
+            components: Some(all_components),
+            data_model: Some(json!({
+                "login_status": "",
+                "credentials": {
+                    "username": "",
+                    "password": ""
+                }
+            })),
+        }));
         msg_tx_clone.send(envelope).ok();
     });
 
@@ -246,13 +249,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if action.name == "click" {
                 // 步骤 1：显示"正在登录..."
                 msg_tx_clone2
-                    .send(ServerEnvelope::V1_0(
-                        V1_0ServerMessage::UpdateDataModel(UpdateDataModel {
+                    .send(ServerEnvelope::V1_0(V1_0ServerMessage::UpdateDataModel(
+                        UpdateDataModel {
                             surface_id: "login".into(),
                             path: Some("/login_status".into()),
                             value: Some(json!("⏳ 正在登录...")),
-                        }),
-                    ))
+                        },
+                    )))
                     .ok();
 
                 // 步骤 2：模拟网络延迟后显示结果
@@ -273,13 +276,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "❌ 登录失败：用户名或密码错误"
                     };
 
-                    tx.send(ServerEnvelope::V1_0(
-                        V1_0ServerMessage::UpdateDataModel(UpdateDataModel {
+                    tx.send(ServerEnvelope::V1_0(V1_0ServerMessage::UpdateDataModel(
+                        UpdateDataModel {
                             surface_id: "login".into(),
                             path: Some("/login_status".into()),
                             value: Some(json!(status)),
-                        }),
-                    ))
+                        },
+                    )))
                     .ok();
                 });
             }

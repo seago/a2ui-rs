@@ -5,7 +5,7 @@
 //! ## 使用示例
 //!
 //! ```rust,ignore
-//! use a2ui_renderer_gui::{A2uiApp, GuiRenderer};
+//! use a2ui_renderer_egui::{A2uiApp, GuiRenderer};
 //!
 //! let rt = tokio::runtime::Runtime::new().unwrap();
 //! let _guard = rt.enter();
