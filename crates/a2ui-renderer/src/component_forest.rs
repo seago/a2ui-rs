@@ -340,12 +340,13 @@ impl ComponentForest {
                 }
             }
 
-            // 解析每个属性中的 DynamicValue
+            // 转换 DynamicValue：相对路径→绝对路径，@index→字面量
+            // 保留其他动态绑定（路径、函数调用）供渲染时解析
             for (key, val) in obj.iter_mut() {
                 if key == "component" || key == "id" || key == "children" || key == "child" {
                     continue;
                 }
-                *val = Self::resolve_value_json(val, scope_resolver, dispatcher);
+                *val = Self::transform_dynamic_for_template(val, scope_resolver, dispatcher);
             }
         }
 
@@ -357,8 +358,16 @@ impl ComponentForest {
         Ok(new_id)
     }
 
-    /// 递归解析 JSON 中的 DynamicValue 表达式
-    fn resolve_value_json(
+    /// 模板展开时转换 DynamicValue：将相对路径转为绝对路径，保留绑定结构
+    ///
+    /// 与 `resolve_value_json`（急切求值）不同，此函数做最小转换：
+    /// - `{"path": "name"}` → `{"path": "/items/0/name"}`（保留 DataBinding）
+    /// - `{"path": "/global"}` → 原样保留
+    /// - `{"call": "@index"}` → 急切求值为当前索引（系统上下文变量）
+    /// - `{"call": "func", "args": {...}}` → 递归转换 args 中的路径，保留 FunctionCall 结构
+    /// - 嵌套对象/数组 → 递归处理
+    /// - 字面量 → 原样保留
+    fn transform_dynamic_for_template(
         value: &Value,
         resolver: &PathResolver,
         dispatcher: &FunctionDispatcher,
@@ -366,41 +375,47 @@ impl ComponentForest {
         match value {
             Value::Object(map) => {
                 // 检测 DynamicValue::Path: {"path": "..."}
+                // 将相对路径转为绝对路径，保留 DataBinding 结构供渲染时解析
                 if let Some(Value::String(p)) = map.get("path") {
-                    return resolver.resolve(p).unwrap_or(Value::Null);
+                    let absolute = resolver.make_absolute(p);
+                    return json!({"path": absolute});
                 }
                 // 检测 DynamicValue::FunctionCall: {"call": "...", "args": {...}}
                 if let Some(Value::String(call)) = map.get("call") {
                     if call == "@index" {
+                        // @index 是系统上下文变量，只在模板展开时有效，必须急切求值
                         return resolver.resolve("@index").unwrap_or(Value::Null);
                     }
+                    // 其他函数调用：递归转换 args 中的路径绑定，保留 FunctionCall 结构
+                    let mut result = serde_json::Map::new();
+                    result.insert("call".to_string(), Value::String(call.clone()));
                     if let Some(args) = map.get("args") {
-                        // 模板展开发生在客户端，必须以 ClientOnly 身份调用
-                        if let Ok(result) = dispatcher.dispatch(
-                            call,
-                            args.clone(),
-                            crate::function_dispatcher::CallableFrom::ClientOnly,
-                        ) {
-                            return result;
-                        }
+                        result.insert(
+                            "args".to_string(),
+                            Self::transform_dynamic_for_template(args, resolver, dispatcher),
+                        );
                     }
-                    return Value::Null;
+                    return Value::Object(result);
                 }
-                // 递归处理嵌套对象
+                // 普通对象：递归处理每个值
                 let mut result = serde_json::Map::new();
                 for (k, v) in map {
-                    result.insert(k.clone(), Self::resolve_value_json(v, resolver, dispatcher));
+                    result.insert(
+                        k.clone(),
+                        Self::transform_dynamic_for_template(v, resolver, dispatcher),
+                    );
                 }
                 Value::Object(result)
             }
             Value::Array(arr) => Value::Array(
                 arr.iter()
-                    .map(|v| Self::resolve_value_json(v, resolver, dispatcher))
+                    .map(|v| Self::transform_dynamic_for_template(v, resolver, dispatcher))
                     .collect(),
             ),
             _ => value.clone(),
         }
     }
+
 
     /// 构建组件树（含循环检测和深度限制）
     pub fn build_tree(&self, surface_id: &str) -> RenderResult<ComponentTreeNode> {
@@ -595,16 +610,71 @@ mod tests {
 
         assert_eq!(new_ids.len(), 2);
 
-        // Verify resolved values
+        // 验证相对路径已被转换为绝对路径，保留了 DataBinding 结构（而非急切求值）
         let comp0 = forest
             .get("s1", &ComponentId::new("item_tmpl_0").unwrap())
             .unwrap();
-        assert_eq!(comp0.properties().get("text"), Some(&json!("a")));
+        assert_eq!(
+            comp0.properties().get("text"),
+            Some(&json!({"path": "/items/0/name"}))
+        );
 
         let comp1 = forest
             .get("s1", &ComponentId::new("item_tmpl_1").unwrap())
             .unwrap();
-        assert_eq!(comp1.properties().get("text"), Some(&json!("b")));
+        assert_eq!(
+            comp1.properties().get("text"),
+            Some(&json!({"path": "/items/1/name"}))
+        );
+    }
+
+    #[test]
+    fn test_expand_templates_preserves_reactive_binding() {
+        // 验证模板展开后的组件保留 DataBinding，DataModel 更新时能响应
+        let mut forest = ComponentForest::new();
+        let dm = DataModel::new(json!({"items": [{"name": "old_a"}, {"name": "old_b"}]}));
+        let binding = DataBinding::new(dm.clone());
+        let resolver = PathResolver::new(dm.clone());
+
+        let template = Component::text(
+            ComponentId::new("item_tmpl").unwrap(),
+            DynamicValue::Path {
+                path: "name".into(),
+            },
+        );
+        let parent: Component =
+            serde_json::from_value(json!({"component": "Column", "id": "list", "children": {"template": "item_tmpl", "path": "/items"}}))
+                .unwrap();
+
+        forest.upsert("s1", parent).unwrap();
+        forest.upsert("s1", template).unwrap();
+
+        // 展开模板
+        forest
+            .expand_templates("s1", &binding, &resolver, &FunctionDispatcher::new())
+            .unwrap();
+
+        // 验证展开后保留的是路径绑定
+        let comp = forest
+            .get("s1", &ComponentId::new("item_tmpl_0").unwrap())
+            .unwrap();
+        assert_eq!(
+            comp.properties().get("text"),
+            Some(&json!({"path": "/items/0/name"}))
+        );
+
+        // 更新 DataModel：模拟响应式传播
+        let mut new_dm = dm;
+        new_dm
+            .apply_pointer("/items/0/name", Some(json!("updated_a")))
+            .unwrap();
+
+        // 通过新的 DataModel 解析路径，验证能正确读取更新后的值
+        // （真实场景中由渲染器在渲染时完成此解析）
+        let _new_binding = DataBinding::new(new_dm.clone());
+        let new_resolver = PathResolver::new(new_dm);
+        let resolved = new_resolver.resolve("/items/0/name");
+        assert_eq!(resolved, Some(json!("updated_a")));
     }
 
     #[test]

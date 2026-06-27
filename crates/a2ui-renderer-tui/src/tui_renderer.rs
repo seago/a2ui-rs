@@ -1032,14 +1032,14 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify expanded components exist in the forest
+        // 验证展开的组件保留了路径绑定（相对路径被转为绝对路径）
         let comp0 = renderer
             .forest
             .get("s1", &ComponentId::new("item_tmpl_0").unwrap());
         assert!(comp0.is_some());
         assert_eq!(
             comp0.unwrap().properties().get("text"),
-            Some(&serde_json::json!("a"))
+            Some(&serde_json::json!({"path": "/items/0/name"}))
         );
     }
 

@@ -55,12 +55,31 @@ impl PathResolver {
         }
     }
 
-    /// 将相对路径转换为绝对路径
+    /// 将相对路径转换为绝对路径（传入明确的 base/index）
     pub fn resolve_to_absolute(&self, base: &str, relative: &str, index: usize) -> String {
         if relative.starts_with('/') {
             relative.to_string()
         } else {
             format!("{}/{}/{}", base, index, relative)
+        }
+    }
+
+    /// 将任意路径转换为绝对路径，使用当前作用域上下文
+    ///
+    /// - `"/absolute"` → 原样返回
+    /// - `"relative"` → `"/base_path/index/relative"`（集合作用域）
+    /// - `"relative"` → `"/relative"`（根作用域）
+    /// - `"@index"` → 原样返回（系统变量）
+    pub fn make_absolute(&self, path: &str) -> String {
+        if path.starts_with('/') || path == "@index" {
+            return path.to_string();
+        }
+        let base = self.current_base_path();
+        if base.is_empty() {
+            format!("/{}", path)
+        } else {
+            let idx = self.current_index().unwrap_or(0);
+            format!("{}/{}/{}", base, idx, path)
         }
     }
 
@@ -72,12 +91,12 @@ impl PathResolver {
         match dynamic {
             DynamicValue::Literal(v) => Ok(v.clone().into()),
             DynamicValue::Path { path } => self.resolve(path).ok_or_else(|| {
-                crate::error::RendererError::SurfaceNotFound(format!("path not found: {}", path))
+                crate::error::RendererError::PathError(format!("path not found: {}", path))
             }),
             DynamicValue::FunctionCall { call, .. } => {
                 if call == "@index" {
                     return self.current_index().map(|i| json!(i)).ok_or_else(|| {
-                        crate::error::RendererError::SurfaceNotFound(
+                        crate::error::RendererError::PathError(
                             "@index used outside of collection scope".to_string(),
                         )
                     });
