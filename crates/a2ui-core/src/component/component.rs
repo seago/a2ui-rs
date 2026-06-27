@@ -574,6 +574,12 @@ impl Component {
         self
     }
 
+    /// 设置 ChoicePicker 的 displayStyle (如 "chip", "list", "dropdown")
+    pub fn with_display_style(mut self, style: impl Into<String>) -> Self {
+        self.properties["displayStyle"] = Value::String(style.into());
+        self
+    }
+
     /// 创建 Slider 组件
     pub fn slider(id: ComponentId) -> Self {
         Self {
@@ -605,6 +611,24 @@ impl Component {
         self
     }
 
+    /// 设置 Slider 的 value (DynamicValue<f64>)
+    pub fn with_num_value(mut self, value: DynamicValue<f64>) -> Self {
+        self.properties["value"] = match value {
+            DynamicValue::Literal(n) => serde_json::json!(n),
+            DynamicValue::Path { path } => serde_json::json!({"path": path}),
+            DynamicValue::FunctionCall { call, args } => {
+                serde_json::json!({"call": call, "args": args})
+            }
+        };
+        self
+    }
+
+    /// 设置 Slider 的 steps
+    pub fn with_steps(mut self, steps: i64) -> Self {
+        self.properties["steps"] = serde_json::json!(steps);
+        self
+    }
+
     /// 创建 DateTimeInput 组件
     pub fn date_time_input(id: ComponentId) -> Self {
         Self {
@@ -627,6 +651,18 @@ impl Component {
     /// 设置 DateTimeInput 的 enableTime
     pub fn with_enable_time(mut self, enable: bool) -> Self {
         self.properties["enableTime"] = Value::Bool(enable);
+        self
+    }
+
+    /// 设置 DateTimeInput 的 min 日期
+    pub fn with_min_date(mut self, min: impl Into<String>) -> Self {
+        self.properties["min"] = Value::String(min.into());
+        self
+    }
+
+    /// 设置 DateTimeInput 的 max 日期
+    pub fn with_max_date(mut self, max: impl Into<String>) -> Self {
+        self.properties["max"] = Value::String(max.into());
         self
     }
 
@@ -1041,7 +1077,10 @@ mod tests {
         let json = serde_json::to_string(&comp).unwrap();
         let deserialized: Component = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.component_type(), "Image");
-        assert_eq!(deserialized.properties()["url"], "https://example.com/photo.png");
+        assert_eq!(
+            deserialized.properties()["url"],
+            "https://example.com/photo.png"
+        );
         assert_eq!(deserialized.properties()["fit"], "cover");
     }
 
@@ -1191,10 +1230,7 @@ mod tests {
             deserialized.properties()["url"],
             "https://example.com/song.mp3"
         );
-        assert_eq!(
-            deserialized.properties()["description"],
-            "Background music"
-        );
+        assert_eq!(deserialized.properties()["description"], "Background music");
     }
 
     // ---- Divider builder tests ----
@@ -1310,5 +1346,131 @@ mod tests {
         assert_eq!(p["label"], "选择日期");
         assert_eq!(p["enableDate"], true);
         assert_eq!(p["enableTime"], false);
+    }
+
+    // ---- DynamicValue convenience constructors (Task A) ----
+
+    #[test]
+    fn test_dynamic_value_convenience_constructors() {
+        // DynamicValue::literal()
+        let lit: DynamicValue<String> = DynamicValue::literal("hello");
+        assert_eq!(lit, DynamicValue::Literal("hello".to_string()));
+        assert_eq!(lit.as_str(), Some("hello"));
+
+        // DynamicValue::path()
+        let p: DynamicValue<String> = DynamicValue::path("/user/name");
+        assert_eq!(
+            p,
+            DynamicValue::Path {
+                path: "/user/name".to_string()
+            }
+        );
+        assert_eq!(p.as_path(), Some("/user/name"));
+
+        // DynamicValue::call()
+        let args = json!({"template": "Hello {name}"});
+        let call: DynamicValue<String> = DynamicValue::call("fmt", args.clone());
+        assert_eq!(
+            call,
+            DynamicValue::FunctionCall {
+                call: "fmt".to_string(),
+                args,
+            }
+        );
+        assert_eq!(call.as_function_call(), Some("fmt"));
+    }
+
+    // ---- TextField serialization (Task B) ----
+
+    #[test]
+    fn test_component_text_field_builder() {
+        let tf = Component::text_field(ComponentId::new("name").unwrap())
+            .with_label("用户名")
+            .with_placeholder("请输入")
+            .with_value(DynamicValue::literal("张三"))
+            .with_text_variant("shortText");
+        assert_eq!(tf.component_type(), "TextField");
+        let json_val = serde_json::to_value(&tf).unwrap();
+        assert_eq!(json_val["label"], "用户名");
+        assert_eq!(json_val["placeholder"], "请输入");
+        assert_eq!(json_val["value"], "张三");
+        assert_eq!(json_val["variant"], "shortText");
+    }
+
+    #[test]
+    fn test_component_text_field_path_value() {
+        let tf = Component::text_field(ComponentId::new("email").unwrap())
+            .with_value(DynamicValue::path("/user/email"));
+        let json_val = serde_json::to_value(&tf).unwrap();
+        assert_eq!(json_val["value"]["path"], "/user/email");
+    }
+
+    // ---- CheckBox builder (Task B) ----
+
+    #[test]
+    fn test_component_check_box_builder() {
+        let cb = Component::check_box(ComponentId::new("agree").unwrap())
+            .with_checked(true)
+            .with_label("同意条款");
+        assert_eq!(cb.component_type(), "CheckBox");
+        let json_val = serde_json::to_value(&cb).unwrap();
+        assert_eq!(json_val["value"], true);
+        assert_eq!(json_val["label"], "同意条款");
+    }
+
+    // ---- ChoicePicker display_style (Task B) ----
+    // 以下测试会使⽤尚未实现的 with_display_style 方法 (RED)
+
+    #[test]
+    fn test_component_choice_picker_display_style() {
+        let cp = Component::choice_picker(ComponentId::new("cp").unwrap())
+            .with_options(vec!["A".into(), "B".into()])
+            .with_selected(vec!["A".into()])
+            .with_display_style("chip");
+        assert_eq!(cp.component_type(), "ChoicePicker");
+        let json_val = serde_json::to_value(&cp).unwrap();
+        assert_eq!(json_val["options"], json!(["A", "B"]));
+        assert_eq!(json_val["value"], json!(["A"]));
+        assert_eq!(json_val["displayStyle"], "chip");
+    }
+
+    // ---- Slider steps (Task B) ----
+    // 以下测试会使用尚未实现的 with_steps / with_num_value 方法 (RED)
+
+    #[test]
+    fn test_component_slider_with_steps() {
+        let sl = Component::slider(ComponentId::new("vol").unwrap())
+            .with_min(0.0)
+            .with_max(100.0)
+            .with_num_value(DynamicValue::Literal(50.0))
+            .with_steps(10)
+            .with_label("音量");
+        assert_eq!(sl.component_type(), "Slider");
+        let json_val = serde_json::to_value(&sl).unwrap();
+        assert_eq!(json_val["min"], 0.0);
+        assert_eq!(json_val["max"], 100.0);
+        assert_eq!(json_val["value"], 50.0);
+        assert_eq!(json_val["steps"], 10);
+        assert_eq!(json_val["label"], "音量");
+    }
+
+    // ---- DateTimeInput min/max (Task B) ----
+    // 以下测试会使用尚未实现的 with_min_date / with_max_date 方法 (RED)
+
+    #[test]
+    fn test_component_date_time_input_with_min_max() {
+        let dt = Component::date_time_input(ComponentId::new("appt").unwrap())
+            .with_label("预约时间")
+            .with_enable_date(true)
+            .with_enable_time(true)
+            .with_min_date("2024-01-01")
+            .with_max_date("2024-12-31");
+        assert_eq!(dt.component_type(), "DateTimeInput");
+        let json_val = serde_json::to_value(&dt).unwrap();
+        assert_eq!(json_val["label"], "预约时间");
+        assert_eq!(json_val["enableDate"], true);
+        assert_eq!(json_val["enableTime"], true);
+        assert_eq!(json_val["min"], "2024-01-01");
+        assert_eq!(json_val["max"], "2024-12-31");
     }
 }
