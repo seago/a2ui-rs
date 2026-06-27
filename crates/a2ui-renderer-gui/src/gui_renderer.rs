@@ -151,6 +151,9 @@ impl GuiRenderer {
                 data_model,
             );
 
+            // 第二遍：回填 Button 的 label — 从 child Text 组件取文字
+            Self::resolve_button_labels(&mut widget_map);
+
             // 获取 root 组件并渲染整个树
             if let Some(root_widget) = widget_map.get("root") {
                 let root_clone = root_widget.clone();
@@ -158,20 +161,17 @@ impl GuiRenderer {
                 let mut user_events: Vec<a2ui_renderer::UserEvent> = Vec::new();
 
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    ui.with_layout(
-                        egui::Layout::top_down_justified(egui::Align::Center),
-                        |ui| {
-                            ui.vertical_centered(|ui| {
-                                mapper.render_gui_widget(
-                                    &root_clone,
-                                    ui,
-                                    &widget_map,
-                                    &mut response_tracker,
-                                    &mut user_events,
-                                );
-                            });
-                        },
-                    );
+                    // 居中并限制最大宽度，模拟登录卡片效果
+                    ui.vertical_centered(|ui| {
+                        ui.set_max_width(400.0);
+                        mapper.render_gui_widget(
+                            &root_clone,
+                            ui,
+                            &widget_map,
+                            &mut response_tracker,
+                            &mut user_events,
+                        );
+                    });
                 });
 
                 // 处理收集到的用户事件，生成 action 消息
@@ -201,6 +201,37 @@ impl GuiRenderer {
         widget_map.insert(node.component.id().as_str().to_string(), widget);
         for child in &node.children {
             Self::flatten_tree_to_widget_map(child, mapper, widget_map, registry, data_model);
+        }
+    }
+
+    /// 从 Button 的 child Text 组件中回填 label 文本
+    /// A2UI Button 的文字在 child 引用的 Text 组件里，而非自身属性
+    fn resolve_button_labels(widget_map: &mut HashMap<String, RenderableGuiWidget>) {
+        // 先收集所有 Text widget 的文字
+        let text_map: HashMap<String, String> = widget_map
+            .iter()
+            .filter_map(|(id, w)| {
+                if let RenderableGuiWidget::Text { text, .. } = w {
+                    Some((id.clone(), text.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // 更新所有 Button 的 label
+        for widget in widget_map.values_mut() {
+            if let RenderableGuiWidget::Button {
+                label, child_id, ..
+            } = widget
+            {
+                // 如果 label 是占位符格式，尝试从 child 获取文字
+                if label.starts_with('[') || label.is_empty() {
+                    if let Some(text) = text_map.get(child_id.as_str()) {
+                        *label = text.clone();
+                    }
+                }
+            }
         }
     }
 }
