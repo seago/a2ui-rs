@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+// ---- TabItem ----
+
+/// 标签项：标题 + 子组件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TabItem {
+    pub title: String,
+    pub child: ComponentId,
+}
+
 // ---- ComponentId ----
 
 /// 组件标识符，遵循 Unicode UAX #31 命名规则
@@ -91,6 +100,24 @@ pub enum DynamicValue<T = Value> {
 }
 
 impl DynamicValue<String> {
+    /// 创建字面量字符串
+    pub fn literal(s: impl Into<String>) -> Self {
+        DynamicValue::Literal(s.into())
+    }
+
+    /// 创建路径绑定
+    pub fn path(path: impl Into<String>) -> Self {
+        DynamicValue::Path { path: path.into() }
+    }
+
+    /// 创建函数调用
+    pub fn call(func: impl Into<String>, args: Value) -> Self {
+        DynamicValue::FunctionCall {
+            call: func.into(),
+            args,
+        }
+    }
+
     pub fn as_str(&self) -> Option<&str> {
         match self {
             DynamicValue::Literal(s) => Some(s.as_str()),
@@ -224,6 +251,17 @@ pub struct Component {
     properties: Value,
 }
 
+/// 将 DynamicValue<String> 按指定 key 转换为 JSON 属性对象
+fn json_dynamic_string(key: &str, value: &DynamicValue<String>) -> serde_json::Value {
+    match value {
+        DynamicValue::Literal(s) => serde_json::json!({(key): s}),
+        DynamicValue::Path { path } => serde_json::json!({(key): {"path": path}}),
+        DynamicValue::FunctionCall { call, args } => {
+            serde_json::json!({(key): {"call": call, "args": args}})
+        }
+    }
+}
+
 impl Component {
     /// 创建 Text 组件
     pub fn text(id: ComponentId, text: DynamicValue<String>) -> Self {
@@ -288,6 +326,338 @@ impl Component {
     /// 设置权重
     pub fn with_weight(mut self, weight: f64) -> Self {
         self.common.weight = Some(weight);
+        self
+    }
+
+    /// 创建 List 组件（支持 Array 和 Object 两种 ChildList 模式）
+    pub fn list(id: ComponentId, children: crate::component::child_list::ChildList) -> Self {
+        let properties = match &children {
+            crate::component::child_list::ChildList::Array { list } => {
+                let ids: Vec<String> = list.iter().map(|c| c.as_str().to_string()).collect();
+                serde_json::json!({"children": ids})
+            }
+            crate::component::child_list::ChildList::Object { template, path } => {
+                serde_json::json!({"children": {"template": template.as_str(), "path": path}})
+            }
+        };
+        Self {
+            component_type: "List".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties,
+        }
+    }
+
+    /// 创建 Card 组件
+    pub fn card(id: ComponentId, child: ComponentId) -> Self {
+        Self {
+            component_type: "Card".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: serde_json::json!({"child": child.as_str()}),
+        }
+    }
+
+    /// 创建 Tabs 组件
+    pub fn tabs(id: ComponentId, tabs: Vec<TabItem>) -> Self {
+        let tabs_json: Vec<Value> = tabs
+            .iter()
+            .map(|t| serde_json::json!({"title": t.title, "child": t.child.as_str()}))
+            .collect();
+        Self {
+            component_type: "Tabs".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: serde_json::json!({"tabs": tabs_json}),
+        }
+    }
+
+    /// 创建 Modal 组件
+    pub fn modal(id: ComponentId, content: ComponentId, trigger: ComponentId) -> Self {
+        Self {
+            component_type: "Modal".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: serde_json::json!({
+                "content": content.as_str(),
+                "trigger": trigger.as_str()
+            }),
+        }
+    }
+
+    /// 创建 Image 组件
+    pub fn image(id: ComponentId, url: DynamicValue<String>) -> Self {
+        Self {
+            component_type: "Image".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: json_dynamic_string("url", &url),
+        }
+    }
+
+    /// 设置 Image 组件的 fit 属性
+    pub fn with_fit(mut self, fit: String) -> Self {
+        self.properties["fit"] = serde_json::json!(fit);
+        self
+    }
+
+    /// 设置 Image 组件的 variant 属性
+    pub fn with_variant(mut self, variant: String) -> Self {
+        self.properties["variant"] = serde_json::json!(variant);
+        self
+    }
+
+    /// 创建 Icon 组件
+    pub fn icon(id: ComponentId, name: DynamicValue<String>) -> Self {
+        Self {
+            component_type: "Icon".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: json_dynamic_string("name", &name),
+        }
+    }
+
+    /// 创建 Video 组件
+    pub fn video(id: ComponentId, url: DynamicValue<String>) -> Self {
+        Self {
+            component_type: "Video".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: json_dynamic_string("url", &url),
+        }
+    }
+
+    /// 设置 Video 组件的 posterUrl 属性
+    pub fn with_poster_url(mut self, poster_url: String) -> Self {
+        self.properties["posterUrl"] = serde_json::json!(poster_url);
+        self
+    }
+
+    /// 创建 AudioPlayer 组件
+    pub fn audio_player(id: ComponentId, url: DynamicValue<String>) -> Self {
+        Self {
+            component_type: "AudioPlayer".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: json_dynamic_string("url", &url),
+        }
+    }
+
+    /// 设置 AudioPlayer 组件的 description 属性
+    pub fn with_description(mut self, description: String) -> Self {
+        self.properties["description"] = serde_json::json!(description);
+        self
+    }
+
+    /// 创建 TextField 组件
+    pub fn text_field(id: ComponentId) -> Self {
+        Self {
+            component_type: "TextField".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: Value::Object(Default::default()),
+        }
+    }
+
+    /// 设置 TextField 的 label
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.properties["label"] = Value::String(label.into());
+        self
+    }
+
+    /// 设置 TextField 的 placeholder
+    pub fn with_placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.properties["placeholder"] = Value::String(placeholder.into());
+        self
+    }
+
+    /// 设置 TextField 的 value (DynamicString)
+    pub fn with_value(mut self, value: DynamicValue<String>) -> Self {
+        self.properties["value"] = match &value {
+            DynamicValue::Literal(s) => Value::String(s.clone()),
+            DynamicValue::Path { path } => serde_json::json!({"path": path}),
+            DynamicValue::FunctionCall { call, args } => {
+                serde_json::json!({"call": call, "args": args})
+            }
+        };
+        self
+    }
+
+    /// 设置 TextField 的 variant (shortText/number/longText/obscured)
+    pub fn with_text_variant(mut self, variant: impl Into<String>) -> Self {
+        self.properties["variant"] = Value::String(variant.into());
+        self
+    }
+
+    /// 创建 CheckBox 组件
+    pub fn check_box(id: ComponentId) -> Self {
+        Self {
+            component_type: "CheckBox".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: Value::Object(Default::default()),
+        }
+    }
+
+    /// 设置 CheckBox 的 checked/value (bool 或 DynamicBool)
+    pub fn with_checked(mut self, checked: bool) -> Self {
+        self.properties["value"] = Value::Bool(checked);
+        self
+    }
+
+    /// 设置 CheckBox 的动态 value (DynamicBool)
+    pub fn with_value_bool(mut self, value: DynamicValue<bool>) -> Self {
+        self.properties["value"] = match value {
+            DynamicValue::Literal(b) => Value::Bool(b),
+            DynamicValue::Path { path } => serde_json::json!({"path": path}),
+            DynamicValue::FunctionCall { call, args } => {
+                serde_json::json!({"call": call, "args": args})
+            }
+        };
+        self
+    }
+
+    /// 创建 ChoicePicker 组件
+    pub fn choice_picker(id: ComponentId) -> Self {
+        Self {
+            component_type: "ChoicePicker".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: Value::Object(Default::default()),
+        }
+    }
+
+    /// 设置 ChoicePicker 的 options
+    pub fn with_options(mut self, options: Vec<String>) -> Self {
+        let arr: Vec<Value> = options.into_iter().map(Value::String).collect();
+        self.properties["options"] = Value::Array(arr);
+        self
+    }
+
+    /// 设置 ChoicePicker 的 selected values
+    pub fn with_selected(mut self, selected: Vec<String>) -> Self {
+        let arr: Vec<Value> = selected.into_iter().map(Value::String).collect();
+        self.properties["value"] = Value::Array(arr);
+        self
+    }
+
+    /// 创建 Slider 组件
+    pub fn slider(id: ComponentId) -> Self {
+        Self {
+            component_type: "Slider".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: Value::Object(Default::default()),
+        }
+    }
+
+    /// 设置 Slider 的 min
+    pub fn with_min(mut self, min: f64) -> Self {
+        self.properties["min"] = serde_json::json!(min);
+        self
+    }
+
+    /// 设置 Slider 的 max
+    pub fn with_max(mut self, max: f64) -> Self {
+        self.properties["max"] = serde_json::json!(max);
+        self
+    }
+
+    /// 设置 Slider 的 value (静态 f64)
+    pub fn with_value_f64(mut self, value: f64) -> Self {
+        self.properties["value"] = serde_json::json!(value);
+        self
+    }
+
+    /// 创建 DateTimeInput 组件
+    pub fn date_time_input(id: ComponentId) -> Self {
+        Self {
+            component_type: "DateTimeInput".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: Value::Object(Default::default()),
+        }
+    }
+
+    /// 设置 DateTimeInput 的 enableDate
+    pub fn with_enable_date(mut self, enable: bool) -> Self {
+        self.properties["enableDate"] = Value::Bool(enable);
+        self
+    }
+
+    /// 设置 DateTimeInput 的 enableTime
+    pub fn with_enable_time(mut self, enable: bool) -> Self {
+        self.properties["enableTime"] = Value::Bool(enable);
+        self
+    }
+
+    /// 创建 Divider 组件
+    ///
+    /// Divider 组件无特有属性，仅用于视觉分隔。
+    pub fn divider(id: ComponentId) -> Self {
+        Self {
+            component_type: "Divider".to_string(),
+            common: ComponentCommon {
+                id,
+                accessibility: None,
+                weight: None,
+            },
+            properties: serde_json::json!({}),
+        }
+    }
+
+    /// 设置模板子组件（ChildList::Object 模式）
+    /// 将 Column/Row 的 children 从固定列表切换为 Data Model 模板模式
+    pub fn with_template_children(
+        mut self,
+        template_id: ComponentId,
+        path: impl Into<String>,
+    ) -> Self {
+        self.properties = serde_json::json!({
+            "children": {
+                "template": template_id.as_str(),
+                "path": path.into()
+            }
+        });
         self
     }
 
@@ -500,5 +870,445 @@ mod tests {
         // 拉丁扩展字符是有效的 XID 字符
         assert!(ComponentId::new("café").is_ok());
         assert!(ComponentId::new("naïve").is_ok());
+    }
+
+    // ---- List builder tests ----
+
+    #[test]
+    fn test_component_list_array() {
+        let cl = crate::component::child_list::ChildList::array(vec![
+            ComponentId::new("item1").unwrap(),
+            ComponentId::new("item2").unwrap(),
+        ]);
+        let comp = Component::list(ComponentId::new("my_list").unwrap(), cl);
+        assert_eq!(comp.component_type(), "List");
+        let props = comp.properties();
+        assert_eq!(props["children"][0], "item1");
+        assert_eq!(props["children"][1], "item2");
+    }
+
+    #[test]
+    fn test_component_list_object() {
+        let cl = crate::component::child_list::ChildList::object(
+            ComponentId::new("tmpl").unwrap(),
+            "/items",
+        );
+        let comp = Component::list(ComponentId::new("my_list").unwrap(), cl);
+        assert_eq!(comp.component_type(), "List");
+        let props = comp.properties();
+        assert_eq!(props["children"]["template"], "tmpl");
+        assert_eq!(props["children"]["path"], "/items");
+    }
+
+    // ---- Card builder test ----
+
+    #[test]
+    fn test_component_card() {
+        let comp = Component::card(
+            ComponentId::new("my_card").unwrap(),
+            ComponentId::new("card_content").unwrap(),
+        );
+        assert_eq!(comp.component_type(), "Card");
+        let props = comp.properties();
+        assert_eq!(props["child"], "card_content");
+    }
+
+    // ---- Tabs builder tests ----
+
+    #[test]
+    fn test_component_tabs() {
+        let tabs = vec![
+            TabItem {
+                title: "Tab 1".to_string(),
+                child: ComponentId::new("tab1_content").unwrap(),
+            },
+            TabItem {
+                title: "Tab 2".to_string(),
+                child: ComponentId::new("tab2_content").unwrap(),
+            },
+        ];
+        let comp = Component::tabs(ComponentId::new("my_tabs").unwrap(), tabs);
+        assert_eq!(comp.component_type(), "Tabs");
+        let props = comp.properties();
+        assert_eq!(props["tabs"][0]["title"], "Tab 1");
+        assert_eq!(props["tabs"][0]["child"], "tab1_content");
+        assert_eq!(props["tabs"][1]["title"], "Tab 2");
+        assert_eq!(props["tabs"][1]["child"], "tab2_content");
+    }
+
+    #[test]
+    fn test_tab_item_serialize() {
+        let tab = TabItem {
+            title: "My Tab".to_string(),
+            child: ComponentId::new("tab_content").unwrap(),
+        };
+        let json = serde_json::to_value(&tab).unwrap();
+        assert_eq!(json["title"], "My Tab");
+        assert_eq!(json["child"], "tab_content");
+    }
+
+    #[test]
+    fn test_tab_item_deserialize() {
+        let json = r#"{"title":"My Tab","child":"tab_content"}"#;
+        let tab: TabItem = serde_json::from_str(json).unwrap();
+        assert_eq!(tab.title, "My Tab");
+        assert_eq!(tab.child.as_str(), "tab_content");
+    }
+
+    // ---- Modal builder test ----
+
+    #[test]
+    fn test_component_modal() {
+        let comp = Component::modal(
+            ComponentId::new("my_modal").unwrap(),
+            ComponentId::new("modal_body").unwrap(),
+            ComponentId::new("open_btn").unwrap(),
+        );
+        assert_eq!(comp.component_type(), "Modal");
+        let props = comp.properties();
+        assert_eq!(props["content"], "modal_body");
+        assert_eq!(props["trigger"], "open_btn");
+    }
+
+    // ---- Column / Row template children tests ----
+
+    #[test]
+    fn test_component_column_with_template() {
+        let comp = Component::column(ComponentId::new("col").unwrap(), vec![])
+            .with_template_children(ComponentId::new("item_template").unwrap(), "/items");
+        assert_eq!(comp.component_type(), "Column");
+        let props = comp.properties();
+        assert_eq!(props["children"]["template"], "item_template");
+        assert_eq!(props["children"]["path"], "/items");
+    }
+
+    #[test]
+    fn test_component_row_with_template() {
+        let comp = Component::row(ComponentId::new("row").unwrap(), vec![])
+            .with_template_children(ComponentId::new("item_template").unwrap(), "/data");
+        assert_eq!(comp.component_type(), "Row");
+        let props = comp.properties();
+        assert_eq!(props["children"]["template"], "item_template");
+        assert_eq!(props["children"]["path"], "/data");
+    }
+
+    // ---- Image builder tests ----
+
+    #[test]
+    fn test_component_image_minimal() {
+        let comp = Component::image(
+            ComponentId::new("img").unwrap(),
+            DynamicValue::Literal("https://example.com/photo.png".to_string()),
+        );
+        assert_eq!(comp.component_type(), "Image");
+        assert_eq!(comp.properties()["url"], "https://example.com/photo.png");
+    }
+
+    #[test]
+    fn test_component_image_with_builders() {
+        let comp = Component::image(
+            ComponentId::new("img").unwrap(),
+            DynamicValue::Literal("https://example.com/photo.png".to_string()),
+        )
+        .with_fit("cover".to_string())
+        .with_variant("rounded".to_string());
+        assert_eq!(comp.component_type(), "Image");
+        assert_eq!(comp.properties()["url"], "https://example.com/photo.png");
+        assert_eq!(comp.properties()["fit"], "cover");
+        assert_eq!(comp.properties()["variant"], "rounded");
+    }
+
+    #[test]
+    fn test_component_image_dynamic_url() {
+        let comp = Component::image(
+            ComponentId::new("img").unwrap(),
+            DynamicValue::Path {
+                path: "/user/avatar".to_string(),
+            },
+        );
+        assert_eq!(comp.component_type(), "Image");
+        assert_eq!(comp.properties()["url"]["path"], "/user/avatar");
+    }
+
+    #[test]
+    fn test_component_image_roundtrip() {
+        let comp = Component::image(
+            ComponentId::new("img").unwrap(),
+            DynamicValue::Literal("https://example.com/photo.png".to_string()),
+        )
+        .with_fit("cover".to_string())
+        .with_variant("rounded".to_string());
+        let json = serde_json::to_string(&comp).unwrap();
+        let deserialized: Component = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.component_type(), "Image");
+        assert_eq!(deserialized.properties()["url"], "https://example.com/photo.png");
+        assert_eq!(deserialized.properties()["fit"], "cover");
+    }
+
+    // ---- Icon builder tests ----
+
+    #[test]
+    fn test_component_icon() {
+        let comp = Component::icon(
+            ComponentId::new("icon").unwrap(),
+            DynamicValue::Literal("star".to_string()),
+        );
+        assert_eq!(comp.component_type(), "Icon");
+        assert_eq!(comp.properties()["name"], "star");
+    }
+
+    #[test]
+    fn test_component_icon_dynamic() {
+        let comp = Component::icon(
+            ComponentId::new("icon").unwrap(),
+            DynamicValue::Path {
+                path: "/theme/icon".to_string(),
+            },
+        );
+        assert_eq!(comp.component_type(), "Icon");
+        assert_eq!(comp.properties()["name"]["path"], "/theme/icon");
+    }
+
+    #[test]
+    fn test_component_icon_roundtrip() {
+        let comp = Component::icon(
+            ComponentId::new("icon").unwrap(),
+            DynamicValue::Literal("star".to_string()),
+        );
+        let json = serde_json::to_string(&comp).unwrap();
+        let deserialized: Component = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.component_type(), "Icon");
+        assert_eq!(deserialized.properties()["name"], "star");
+    }
+
+    // ---- Video builder tests ----
+
+    #[test]
+    fn test_component_video_minimal() {
+        let comp = Component::video(
+            ComponentId::new("vid").unwrap(),
+            DynamicValue::Literal("https://example.com/video.mp4".to_string()),
+        );
+        assert_eq!(comp.component_type(), "Video");
+        assert_eq!(comp.properties()["url"], "https://example.com/video.mp4");
+        assert!(comp.properties().get("posterUrl").is_none());
+    }
+
+    #[test]
+    fn test_component_video_with_builder() {
+        let comp = Component::video(
+            ComponentId::new("vid").unwrap(),
+            DynamicValue::Literal("https://example.com/video.mp4".to_string()),
+        )
+        .with_poster_url("https://example.com/poster.jpg".to_string());
+        assert_eq!(comp.component_type(), "Video");
+        assert_eq!(comp.properties()["url"], "https://example.com/video.mp4");
+        assert_eq!(
+            comp.properties()["posterUrl"],
+            "https://example.com/poster.jpg"
+        );
+    }
+
+    #[test]
+    fn test_component_video_dynamic_url() {
+        let comp = Component::video(
+            ComponentId::new("vid").unwrap(),
+            DynamicValue::FunctionCall {
+                call: "getUrl".to_string(),
+                args: json!({"id": "intro"}),
+            },
+        );
+        assert_eq!(comp.component_type(), "Video");
+        assert_eq!(comp.properties()["url"]["call"], "getUrl");
+        assert_eq!(comp.properties()["url"]["args"]["id"], "intro");
+    }
+
+    #[test]
+    fn test_component_video_roundtrip() {
+        let comp = Component::video(
+            ComponentId::new("vid").unwrap(),
+            DynamicValue::Literal("https://example.com/video.mp4".to_string()),
+        )
+        .with_poster_url("poster.jpg".to_string());
+        let json = serde_json::to_string(&comp).unwrap();
+        let deserialized: Component = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.component_type(), "Video");
+        assert_eq!(
+            deserialized.properties()["url"],
+            "https://example.com/video.mp4"
+        );
+        assert_eq!(deserialized.properties()["posterUrl"], "poster.jpg");
+    }
+
+    // ---- AudioPlayer builder tests ----
+
+    #[test]
+    fn test_component_audio_player_minimal() {
+        let comp = Component::audio_player(
+            ComponentId::new("audio").unwrap(),
+            DynamicValue::Literal("https://example.com/song.mp3".to_string()),
+        );
+        assert_eq!(comp.component_type(), "AudioPlayer");
+        assert_eq!(comp.properties()["url"], "https://example.com/song.mp3");
+        assert!(comp.properties().get("description").is_none());
+    }
+
+    #[test]
+    fn test_component_audio_player_with_builder() {
+        let comp = Component::audio_player(
+            ComponentId::new("audio").unwrap(),
+            DynamicValue::Literal("https://example.com/song.mp3".to_string()),
+        )
+        .with_description("A great song".to_string());
+        assert_eq!(comp.component_type(), "AudioPlayer");
+        assert_eq!(comp.properties()["url"], "https://example.com/song.mp3");
+        assert_eq!(comp.properties()["description"], "A great song");
+    }
+
+    #[test]
+    fn test_component_audio_player_dynamic_url() {
+        let comp = Component::audio_player(
+            ComponentId::new("audio").unwrap(),
+            DynamicValue::Path {
+                path: "/player/current".to_string(),
+            },
+        );
+        assert_eq!(comp.component_type(), "AudioPlayer");
+        assert_eq!(comp.properties()["url"]["path"], "/player/current");
+    }
+
+    #[test]
+    fn test_component_audio_player_roundtrip() {
+        let comp = Component::audio_player(
+            ComponentId::new("audio").unwrap(),
+            DynamicValue::Literal("https://example.com/song.mp3".to_string()),
+        )
+        .with_description("Background music".to_string());
+        let json = serde_json::to_string(&comp).unwrap();
+        let deserialized: Component = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.component_type(), "AudioPlayer");
+        assert_eq!(
+            deserialized.properties()["url"],
+            "https://example.com/song.mp3"
+        );
+        assert_eq!(
+            deserialized.properties()["description"],
+            "Background music"
+        );
+    }
+
+    // ---- Divider builder tests ----
+
+    #[test]
+    fn test_component_divider() {
+        let comp = Component::divider(ComponentId::new("div").unwrap());
+        assert_eq!(comp.component_type(), "Divider");
+        assert!(comp
+            .properties()
+            .as_object()
+            .map_or(false, |m| m.is_empty()));
+    }
+
+    #[test]
+    fn test_component_divider_roundtrip() {
+        let comp = Component::divider(ComponentId::new("div").unwrap());
+        let json = serde_json::to_string(&comp).unwrap();
+        let deserialized: Component = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.component_type(), "Divider");
+    }
+
+    // ---- TextField builder tests ----
+
+    #[test]
+    fn test_component_text_field() {
+        let comp = Component::text_field(ComponentId::new("tf").unwrap())
+            .with_label("用户名")
+            .with_placeholder("请输入")
+            .with_value(DynamicValue::<String>::path("/form/username"))
+            .with_text_variant("shortText");
+        assert_eq!(comp.component_type(), "TextField");
+        let p = comp.properties();
+        assert_eq!(p["label"], "用户名");
+        assert_eq!(p["placeholder"], "请输入");
+        assert_eq!(p["value"]["path"], "/form/username");
+        assert_eq!(p["variant"], "shortText");
+    }
+
+    #[test]
+    fn test_component_text_field_obscured() {
+        let comp = Component::text_field(ComponentId::new("pwd").unwrap())
+            .with_label("密码")
+            .with_text_variant("obscured");
+        assert_eq!(comp.properties()["variant"], "obscured");
+    }
+
+    // ---- CheckBox builder tests ----
+
+    #[test]
+    fn test_component_check_box() {
+        let comp = Component::check_box(ComponentId::new("cb").unwrap())
+            .with_label("记住密码")
+            .with_checked(true);
+        assert_eq!(comp.component_type(), "CheckBox");
+        let p = comp.properties();
+        assert_eq!(p["label"], "记住密码");
+        assert_eq!(p["value"], true);
+    }
+
+    #[test]
+    fn test_component_check_box_dynamic_value() {
+        let comp = Component::check_box(ComponentId::new("cb").unwrap())
+            .with_label("同意条款")
+            .with_value_bool(DynamicValue::<bool>::Path {
+                path: "/form/agree".to_string(),
+            });
+        let p = comp.properties();
+        assert_eq!(p["value"]["path"], "/form/agree");
+    }
+
+    // ---- ChoicePicker builder tests ----
+
+    #[test]
+    fn test_component_choice_picker() {
+        let comp = Component::choice_picker(ComponentId::new("cp").unwrap())
+            .with_options(vec!["A".into(), "B".into(), "C".into()])
+            .with_selected(vec!["A".into()]);
+        assert_eq!(comp.component_type(), "ChoicePicker");
+        let p = comp.properties();
+        assert_eq!(p["options"][0], "A");
+        assert_eq!(p["options"][2], "C");
+        assert_eq!(p["value"][0], "A");
+    }
+
+    // ---- Slider builder tests ----
+
+    #[test]
+    fn test_component_slider() {
+        let comp = Component::slider(ComponentId::new("sl").unwrap())
+            .with_min(0.0)
+            .with_max(100.0)
+            .with_value_f64(50.0)
+            .with_label("音量");
+        assert_eq!(comp.component_type(), "Slider");
+        let p = comp.properties();
+        assert_eq!(p["min"], 0.0);
+        assert_eq!(p["max"], 100.0);
+        assert_eq!(p["value"], 50.0);
+        assert_eq!(p["label"], "音量");
+    }
+
+    // ---- DateTimeInput builder tests ----
+
+    #[test]
+    fn test_component_date_time_input() {
+        let comp = Component::date_time_input(ComponentId::new("dt").unwrap())
+            .with_label("选择日期")
+            .with_enable_date(true)
+            .with_enable_time(false);
+        assert_eq!(comp.component_type(), "DateTimeInput");
+        let p = comp.properties();
+        assert_eq!(p["label"], "选择日期");
+        assert_eq!(p["enableDate"], true);
+        assert_eq!(p["enableTime"], false);
     }
 }
