@@ -1,3 +1,5 @@
+use crate::widget_mapper::RenderableGuiWidget;
+use crate::WidgetMapper;
 use a2ui_core::message::{
     client_to_server::FunctionResponse,
     server_to_client::{
@@ -6,6 +8,7 @@ use a2ui_core::message::{
     },
 };
 use a2ui_core::prelude::*;
+use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
     CatalogRegistry, ComponentForest, DataBinding, DependencyGraph, FunctionDispatcher,
     PathResolver, RenderResult, Renderer, SurfaceHandle, UserEvent,
@@ -97,6 +100,57 @@ impl GuiRenderer {
     ) {
         self.pending_responses
             .insert(action_id.into(), response_path.into());
+    }
+
+    /// 使用 egui 渲染一帧
+    /// 支持增量渲染：只重渲染 dirty_surfaces 中的 surface
+    pub fn render_frame(&mut self, ctx: &egui::Context) -> RenderResult<()> {
+        let mapper = WidgetMapper;
+
+        // 确定要渲染的 surface 列表
+        let surfaces_to_render: Vec<_> = if self.dirty_surfaces.is_empty() {
+            self.surfaces.values().cloned().collect()
+        } else {
+            self.dirty_surfaces.iter().cloned().collect()
+        };
+
+        for surface_id in &surfaces_to_render {
+            // 使用 build_tree 构建组件树
+            let tree = match self.forest.build_tree(surface_id) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+
+            // 从组件树构建 flat widget map
+            let mut widget_map: HashMap<String, RenderableGuiWidget> = HashMap::new();
+            Self::flatten_tree_to_widget_map(&tree, &mapper, &mut widget_map);
+
+            // 获取 root 组件并渲染整个树
+            if let Some(root_widget) = widget_map.get("root") {
+                let root_clone = root_widget.clone();
+                let mut response_tracker: HashMap<String, egui::Response> = HashMap::new();
+
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    mapper.render_gui_widget(&root_clone, ui, &widget_map, &mut response_tracker);
+                });
+            }
+        }
+
+        self.dirty_surfaces.clear();
+        Ok(())
+    }
+
+    /// 递归遍历组件树节点，构建 flat widget map
+    fn flatten_tree_to_widget_map(
+        node: &ComponentTreeNode,
+        mapper: &WidgetMapper,
+        widget_map: &mut HashMap<String, RenderableGuiWidget>,
+    ) {
+        let widget = mapper.map_to_gui_widget(&node.component);
+        widget_map.insert(node.component.id().as_str().to_string(), widget);
+        for child in &node.children {
+            Self::flatten_tree_to_widget_map(child, mapper, widget_map);
+        }
     }
 }
 
