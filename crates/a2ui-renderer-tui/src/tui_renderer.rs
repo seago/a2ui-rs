@@ -8,8 +8,8 @@ use a2ui_core::message::{
 };
 use a2ui_core::prelude::*;
 use a2ui_renderer::{
-    CatalogRegistry, ComponentForest, DataBinding, DependencyGraph, FunctionDispatcher,
-    PathResolver, RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
+    CatalogRegistry, ComponentForest, CustomComponentRegistry, DataBinding, DependencyGraph,
+    FunctionDispatcher, PathResolver, RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
 };
 use ratatui::{
     layout::Rect,
@@ -45,6 +45,8 @@ pub struct TuiRenderer {
     dirty_surfaces: HashSet<String>,
     /// Surface LRU 驱逐管理器
     surface_lru: SurfaceLru,
+    /// 自定义组件注册表
+    custom_registry: CustomComponentRegistry,
 }
 
 /// 最大并发 Surface 数量（DoS 防护）
@@ -67,6 +69,7 @@ impl TuiRenderer {
             send_data_model: HashMap::new(),
             dirty_surfaces: HashSet::new(),
             surface_lru: SurfaceLru::new(MAX_SURFACES, Some(Duration::from_secs(600))),
+            custom_registry: CustomComponentRegistry::new(),
         }
     }
 
@@ -97,6 +100,14 @@ impl TuiRenderer {
     /// 获取 Catalog 注册表的只读引用
     pub fn catalog_registry(&self) -> &CatalogRegistry {
         &self.catalog_registry
+    }
+
+    /// 注册自定义组件类型
+    pub fn register_custom_component(
+        &mut self,
+        def: a2ui_renderer::CustomComponentDef,
+    ) -> Result<(), String> {
+        self.custom_registry.register(def)
     }
 
     // P1-2: 注册待响应的 action_id → response_path 映射
@@ -133,7 +144,12 @@ impl TuiRenderer {
                         None => continue,
                     };
 
-                    let builder = WidgetBuilder::new(&mapper, binding, &self.forest);
+                    let builder = WidgetBuilder::new(
+                        &mapper,
+                        binding,
+                        &self.forest,
+                        &self.custom_registry,
+                    );
                     let widgets = builder.build_tree(&surface_id, area);
 
                     for widget in widgets {
@@ -1407,6 +1423,28 @@ mod tests {
         let content = buf.area();
         assert!(content.width > 0);
         assert!(content.height > 0);
+    }
+
+    // --- CustomComponentRegistry tests ---
+
+    #[test]
+    fn test_custom_component_registry() {
+        let mut renderer = TuiRenderer::new();
+        renderer
+            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
+            .unwrap();
+        assert!(renderer.custom_registry.is_registered("MyChart"));
+    }
+
+    #[test]
+    fn test_custom_component_registry_duplicate_fails() {
+        let mut renderer = TuiRenderer::new();
+        renderer
+            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
+            .unwrap();
+        let result = renderer
+            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"));
+        assert!(result.is_err());
     }
 
     // --- P4-1: Incremental rendering with DependencyGraph ---

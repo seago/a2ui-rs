@@ -1,7 +1,7 @@
 use crate::WidgetMapper;
 use a2ui_core::prelude::*;
 use a2ui_renderer::component_forest::ComponentTreeNode;
-use a2ui_renderer::{ComponentForest, DataBinding};
+use a2ui_renderer::{ComponentForest, CustomComponentRegistry, DataBinding};
 use ratatui::layout::Rect;
 
 /// 渲染目标 widget（类型抹平，用于渲染管线）
@@ -72,6 +72,7 @@ pub struct WidgetBuilder<'a> {
     mapper: &'a WidgetMapper,
     binding: &'a DataBinding,
     forest: &'a ComponentForest,
+    registry: &'a CustomComponentRegistry,
 }
 
 impl<'a> WidgetBuilder<'a> {
@@ -79,11 +80,13 @@ impl<'a> WidgetBuilder<'a> {
         mapper: &'a WidgetMapper,
         binding: &'a DataBinding,
         forest: &'a ComponentForest,
+        registry: &'a CustomComponentRegistry,
     ) -> Self {
         Self {
             mapper,
             binding,
             forest,
+            registry,
         }
     }
 
@@ -233,20 +236,29 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             _ => {
-                // 尝试提取文本
-                let text = self.mapper.extract_text(component);
-                if text.starts_with('[') && text.ends_with(']') {
-                    // 未知组件类型，渲染为占位符
+                // 先检查自定义组件注册表
+                if self.registry.is_registered(ctype) {
                     RenderableWidget::Placeholder {
                         id: component.id().clone(),
                         area,
-                        reason: format!("unknown component type: {}", ctype),
+                        reason: format!("custom component: {}", ctype),
                     }
                 } else {
-                    RenderableWidget::Paragraph {
-                        id: component.id().clone(),
-                        area,
-                        text,
+                    // 尝试提取文本
+                    let text = self.mapper.extract_text(component);
+                    if text.starts_with('[') && text.ends_with(']') {
+                        // 未知组件类型，渲染为占位符
+                        RenderableWidget::Placeholder {
+                            id: component.id().clone(),
+                            area,
+                            reason: format!("unknown component type: {}", ctype),
+                        }
+                    } else {
+                        RenderableWidget::Paragraph {
+                            id: component.id().clone(),
+                            area,
+                            text,
+                        }
                     }
                 }
             }
@@ -306,6 +318,7 @@ impl<'a> WidgetBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use a2ui_renderer::CustomComponentRegistry;
     use serde_json::json;
 
     #[test]
@@ -313,6 +326,7 @@ mod tests {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::new(json!({"title": "Hello"})));
         let mapper = WidgetMapper;
+        let reg = CustomComponentRegistry::new();
 
         // Column 作为根组件（ID 必须为 "root" 才能被 forest 识别）
         let root = Component::column(
@@ -329,7 +343,7 @@ mod tests {
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", title).unwrap();
 
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest);
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
 
         // 至少有一个 widget（root Column + title Text）
@@ -353,7 +367,8 @@ mod tests {
         );
         forest.upsert("s1", root).unwrap();
 
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest);
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
 
         // missing 组件应渲染为占位符
@@ -376,7 +391,8 @@ mod tests {
         );
         forest.upsert("s1", root).unwrap();
 
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest);
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(10, 20, 80, 24));
 
         // root widget 应获得完整区域
@@ -403,7 +419,8 @@ mod tests {
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", tf).unwrap();
 
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest);
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
 
         let tf_widget = widgets.iter().find(|w| w.id().as_str() == "name_input");
@@ -431,7 +448,8 @@ mod tests {
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", cb).unwrap();
 
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest);
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
 
         let cb_widget = widgets.iter().find(|w| w.id().as_str() == "agree");
@@ -459,7 +477,8 @@ mod tests {
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", sl).unwrap();
 
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest);
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
 
         let sl_widget = widgets.iter().find(|w| w.id().as_str() == "volume");

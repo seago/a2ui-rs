@@ -8,8 +8,8 @@ use a2ui_core::message::{
 };
 use a2ui_core::prelude::*;
 use a2ui_renderer::{
-    CatalogRegistry, ComponentForest, DataBinding, DependencyGraph, FunctionDispatcher,
-    PathResolver, RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
+    CatalogRegistry, ComponentForest, CustomComponentRegistry, DataBinding, DependencyGraph,
+    FunctionDispatcher, PathResolver, RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -52,6 +52,8 @@ pub struct WebRenderer {
     dirty_surfaces: HashSet<String>,
     /// Surface LRU 驱逐管理器
     surface_lru: SurfaceLru,
+    /// 自定义组件注册表
+    custom_registry: CustomComponentRegistry,
     /// 最近一次渲染的 HTML 输出（surface_id → HTML body）
     last_html: HashMap<String, String>,
     /// HTML 构建器
@@ -78,6 +80,7 @@ impl WebRenderer {
             send_data_model: HashMap::new(),
             dirty_surfaces: HashSet::new(),
             surface_lru: SurfaceLru::new(MAX_SURFACES, Some(Duration::from_secs(600))),
+            custom_registry: CustomComponentRegistry::new(),
             last_html: HashMap::new(),
             html_builder: HtmlBuilder::new(),
         }
@@ -112,6 +115,14 @@ impl WebRenderer {
         &self.catalog_registry
     }
 
+    /// 注册自定义组件类型
+    pub fn register_custom_component(
+        &mut self,
+        def: a2ui_renderer::CustomComponentDef,
+    ) -> Result<(), String> {
+        self.custom_registry.register(def)
+    }
+
     /// 注册待响应的 action_id → response_path 映射
     pub fn register_pending_response(
         &mut self,
@@ -141,7 +152,7 @@ impl WebRenderer {
         let binding = self.data_bindings.get(surface_id)?;
 
         // 将组件树映射为 RenderableHtmlWidget 树
-        let root_widget = Self::build_widget_tree(&tree, binding)?;
+        let root_widget = Self::build_widget_tree(&tree, binding, &self.custom_registry)?;
 
         // 渲染为 HTML
         Some(self.html_builder.render(&root_widget))
@@ -172,6 +183,7 @@ impl WebRenderer {
     fn build_widget_tree(
         node: &a2ui_renderer::component_forest::ComponentTreeNode,
         binding: &DataBinding,
+        registry: &CustomComponentRegistry,
     ) -> Option<RenderableHtmlWidget> {
         let component = &node.component;
         let ctype = component.component_type();
@@ -180,7 +192,7 @@ impl WebRenderer {
         // 递归构建子 widget
         let mut child_widgets: Vec<RenderableHtmlWidget> = Vec::new();
         for child in &node.children {
-            if let Some(widget) = Self::build_widget_tree(child, binding) {
+            if let Some(widget) = Self::build_widget_tree(child, binding, registry) {
                 child_widgets.push(widget);
             }
         }
@@ -389,10 +401,20 @@ impl WebRenderer {
                         url,
                     }
                 }
-                _ => RenderableHtmlWidget::Placeholder {
-                    id: component.id().clone(),
-                    reason: format!("unknown component type: {}", ctype),
-                },
+                _ => {
+                    // 先检查自定义组件注册表
+                    if registry.is_registered(ctype) {
+                        RenderableHtmlWidget::Placeholder {
+                            id: component.id().clone(),
+                            reason: format!("custom component: {}", ctype),
+                        }
+                    } else {
+                        RenderableHtmlWidget::Placeholder {
+                            id: component.id().clone(),
+                            reason: format!("unknown component type: {}", ctype),
+                        }
+                    }
+                }
             };
 
         Some(widget)
@@ -1092,6 +1114,92 @@ mod tests {
             })
             .await;
         assert!(result.is_ok());
+    }
+
+    // --- CustomComponentRegistry tests ---
+
+    #[test]
+    fn test_custom_component_registry() {
+        let mut renderer = WebRenderer::new();
+        renderer
+            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
+            .unwrap();
+        assert!(renderer.custom_registry.is_registered("MyChart"));
+    }
+
+    #[test]
+    fn test_custom_component_registry_duplicate_fails() {
+        let mut renderer = WebRenderer::new();
+        renderer
+            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
+            .unwrap();
+        let result = renderer
+            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"));
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_unknown_vs_custom_placeholder_in_html() {
+        let mut renderer = WebRenderer::new();
+
+        // 先注册自定义组件
+        renderer
+            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
+            .unwrap();
+
+        // 未知组件（不是 root，而是 root 的子组件）
+        let unknown_comp: Component = serde_json::from_str(
+            r#"{"id":"u1","component":"UnknownType"}"#,
+        )
+        .unwrap();
+        let root_unknown = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("u1").unwrap()],
+        );
+
+        // 自定义组件（已注册）
+        let custom_comp: Component = serde_json::from_str(
+            r#"{"id":"c1","component":"MyChart"}"#,
+        )
+        .unwrap();
+        let root_custom = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("c1").unwrap()],
+        );
+
+        // 创建 surface 测试未知组件
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![root_unknown, unknown_comp]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        // 创建 surface 测试自定义组件
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s2".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![root_custom, custom_comp]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        // 未知组件 → "unknown component type"
+        let html1 = renderer.render_surface_html("s1").unwrap();
+        assert!(html1.contains("unknown component type"));
+
+        // 注册过的自定义组件 → "custom component"
+        let html2 = renderer.render_surface_html("s2").unwrap();
+        assert!(html2.contains("custom component"));
     }
 
     // --- callableFrom enforcement tests ---

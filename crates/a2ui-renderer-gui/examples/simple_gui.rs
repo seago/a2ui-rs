@@ -48,16 +48,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             DynamicValue::Literal("Hello A2UI GUI!".to_string()),
         );
 
-        let envelope = ServerEnvelope::V1_0(
-            a2ui_core::message::V1_0ServerMessage::CreateSurface(CreateSurface {
+        let envelope = ServerEnvelope::V1_0(a2ui_core::message::V1_0ServerMessage::CreateSurface(
+            CreateSurface {
                 surface_id: "demo".into(),
                 catalog_id: "basic".into(),
                 surface_properties: Some(json!({"agentDisplayName": "A2UI Demo"})),
                 send_data_model: false,
                 components: Some(vec![root]),
                 data_model: None,
-            }),
-        );
+            },
+        ));
         msg_tx_clone.send(envelope).ok();
     });
 
@@ -76,12 +76,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
-    eframe::run_native(
-        "A2UI GUI Demo",
-        options,
-        Box::new(|_cc| Box::new(app)),
-    )
-    .map_err(|e| format!("eframe 错误: {}", e))?;
+    eframe::run_native("A2UI GUI Demo", options, Box::new(|_cc| Box::new(app)))
+        .map_err(|e| format!("eframe 错误: {}", e))?;
 
     Ok(())
 }

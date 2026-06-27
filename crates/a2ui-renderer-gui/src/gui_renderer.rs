@@ -10,8 +10,8 @@ use a2ui_core::message::{
 use a2ui_core::prelude::*;
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
-    CatalogRegistry, ComponentForest, DataBinding, DependencyGraph, FunctionDispatcher,
-    PathResolver, RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
+    CatalogRegistry, ComponentForest, CustomComponentRegistry, DataBinding, DependencyGraph,
+    FunctionDispatcher, PathResolver, RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -42,6 +42,8 @@ pub struct GuiRenderer {
     dirty_surfaces: HashSet<String>,
     /// Surface LRU 驱逐管理器
     surface_lru: SurfaceLru,
+    /// 自定义组件注册表
+    custom_registry: CustomComponentRegistry,
 }
 
 /// 最大并发 Surface 数量（DoS 防护）
@@ -64,6 +66,7 @@ impl GuiRenderer {
             send_data_model: HashMap::new(),
             dirty_surfaces: HashSet::new(),
             surface_lru: SurfaceLru::new(MAX_SURFACES, Some(Duration::from_secs(600))),
+            custom_registry: CustomComponentRegistry::new(),
         }
     }
 
@@ -94,6 +97,14 @@ impl GuiRenderer {
     /// 获取 Catalog 注册表的只读引用
     pub fn catalog_registry(&self) -> &CatalogRegistry {
         &self.catalog_registry
+    }
+
+    /// 注册自定义组件类型
+    pub fn register_custom_component(
+        &mut self,
+        def: a2ui_renderer::CustomComponentDef,
+    ) -> Result<(), String> {
+        self.custom_registry.register(def)
     }
 
     /// 注册待响应的 action_id → response_path 映射
@@ -127,7 +138,12 @@ impl GuiRenderer {
 
             // 从组件树构建 flat widget map
             let mut widget_map: HashMap<String, RenderableGuiWidget> = HashMap::new();
-            Self::flatten_tree_to_widget_map(&tree, &mapper, &mut widget_map);
+            Self::flatten_tree_to_widget_map(
+                &tree,
+                &mapper,
+                &mut widget_map,
+                &self.custom_registry,
+            );
 
             // 获取 root 组件并渲染整个树
             if let Some(root_widget) = widget_map.get("root") {
@@ -149,11 +165,12 @@ impl GuiRenderer {
         node: &ComponentTreeNode,
         mapper: &WidgetMapper,
         widget_map: &mut HashMap<String, RenderableGuiWidget>,
+        registry: &CustomComponentRegistry,
     ) {
-        let widget = mapper.map_to_gui_widget(&node.component);
+        let widget = mapper.map_to_gui_widget(&node.component, registry);
         widget_map.insert(node.component.id().as_str().to_string(), widget);
         for child in &node.children {
-            Self::flatten_tree_to_widget_map(child, mapper, widget_map);
+            Self::flatten_tree_to_widget_map(child, mapper, widget_map, registry);
         }
     }
 }
@@ -601,6 +618,59 @@ mod tests {
             .unwrap();
 
         assert!(renderer.dirty_surfaces.is_empty());
+    }
+
+    #[test]
+    fn test_custom_component_registry() {
+        let mut renderer = GuiRenderer::new();
+        renderer
+            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
+            .unwrap();
+        // 注册成功，不会 panic
+        assert!(renderer.custom_registry.is_registered("MyChart"));
+    }
+
+    #[test]
+    fn test_custom_component_registry_duplicate_fails() {
+        let mut renderer = GuiRenderer::new();
+        renderer
+            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
+            .unwrap();
+        let result = renderer
+            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_unknown_vs_custom_placeholder() {
+        use crate::widget_mapper::WidgetMapper;
+
+        let mapper = WidgetMapper;
+        let empty_reg = a2ui_renderer::CustomComponentRegistry::new();
+
+        // 未注册的组件类型 → "unknown component type"
+        let unknown: Component = serde_json::from_str(
+            r#"{"id":"u1","component":"UnknownType"}"#,
+        )
+        .unwrap();
+        let w = mapper.map_to_gui_widget(&unknown, &empty_reg);
+        assert!(
+            matches!(w, RenderableGuiWidget::Placeholder { ref reason, .. } if reason.contains("unknown"))
+        );
+
+        // 注册后的自定义组件 → "custom component"
+        let mut custom_reg = a2ui_renderer::CustomComponentRegistry::new();
+        custom_reg
+            .register(a2ui_renderer::CustomComponentDef::new("MyChart"))
+            .unwrap();
+        let custom: Component = serde_json::from_str(
+            r#"{"id":"c1","component":"MyChart"}"#,
+        )
+        .unwrap();
+        let w = mapper.map_to_gui_widget(&custom, &custom_reg);
+        assert!(
+            matches!(w, RenderableGuiWidget::Placeholder { ref reason, .. } if reason.contains("custom"))
+        );
     }
 
     #[tokio::test]

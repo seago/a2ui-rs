@@ -5,6 +5,7 @@
 
 pub mod catalog_registry;
 pub mod component_forest;
+pub mod custom_component;
 pub mod data_binding;
 pub mod dependency_graph;
 pub mod error;
@@ -15,6 +16,7 @@ pub mod renderer;
 pub mod surface_lru;
 
 pub use catalog_registry::CatalogRegistry;
+pub use custom_component::{CustomComponentDef, CustomComponentRegistry};
 pub use component_forest::ComponentForest;
 pub use data_binding::DataBinding;
 pub use dependency_graph::DependencyGraph;

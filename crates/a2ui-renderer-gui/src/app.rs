@@ -156,8 +156,16 @@ mod tests {
         let (action_tx, _action_rx) = A2uiApp::create_action_channel();
 
         let mut app = A2uiApp::new(renderer, msg_rx, action_tx);
-        assert!(app.renderer().registered_functions().iter().any(|s| s.as_str() == "test_fn"));
-        assert!(app.renderer_mut().registered_functions().iter().any(|s| s.as_str() == "test_fn"));
+        assert!(app
+            .renderer()
+            .registered_functions()
+            .iter()
+            .any(|s| s.as_str() == "test_fn"));
+        assert!(app
+            .renderer_mut()
+            .registered_functions()
+            .iter()
+            .any(|s| s.as_str() == "test_fn"));
     }
 
     #[test]
@@ -168,8 +176,8 @@ mod tests {
 
         let mut app = A2uiApp::new(renderer, msg_rx, action_tx);
 
-        let envelope = a2ui_core::ServerEnvelope::V1_0(
-            V1_0ServerMessage::CreateSurface(CreateSurface {
+        let envelope =
+            a2ui_core::ServerEnvelope::V1_0(V1_0ServerMessage::CreateSurface(CreateSurface {
                 surface_id: "test_surface".into(),
                 catalog_id: "basic".into(),
                 surface_properties: None,
@@ -179,13 +187,12 @@ mod tests {
                     DynamicValue::Literal("Hello".to_string()),
                 )]),
                 data_model: None,
-            }),
-        );
+            }));
 
         let result = app.process_envelope(envelope);
         assert!(result.is_ok());
         assert!(result.unwrap()); // had_updates = true
-        // 验证 surface 已创建
+                                  // 验证 surface 已创建
         assert_eq!(app.renderer().surfaces.len(), 1);
     }
 
@@ -200,16 +207,16 @@ mod tests {
 
         let mut app = A2uiApp::new(renderer, msg_rx, action_tx);
 
-        let envelope = a2ui_core::ServerEnvelope::V1_0(
-            V1_0ServerMessage::CallFunction(a2ui_core::message::server_to_client::CallFunction {
+        let envelope = a2ui_core::ServerEnvelope::V1_0(V1_0ServerMessage::CallFunction(
+            a2ui_core::message::server_to_client::CallFunction {
                 function_call_id: "fc1".into(),
                 want_response: true,
                 call: a2ui_core::message::server_to_client::CallFunctionPayload {
                     call: "echo".into(),
                     args: json!({"value": "test"}),
                 },
-            }),
-        );
+            },
+        ));
 
         let result = app.process_envelope(envelope);
         assert!(result.is_ok());
@@ -227,12 +234,11 @@ mod tests {
         let mut app = A2uiApp::new(renderer, msg_rx, action_tx);
 
         use a2ui_core::message::Capabilities;
-        let envelope = a2ui_core::ServerEnvelope::V1_0(
-            V1_0ServerMessage::Capabilities(Capabilities {
+        let envelope =
+            a2ui_core::ServerEnvelope::V1_0(V1_0ServerMessage::Capabilities(Capabilities {
                 version: "v1.0".into(),
                 features: vec![],
-            }),
-        );
+            }));
 
         let result = app.process_envelope(envelope);
         assert!(result.is_ok());

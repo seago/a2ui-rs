@@ -210,10 +210,7 @@ mod tests {
 
     #[test]
     fn test_surface_lru_idle_timeout() {
-        let mut lru = SurfaceLru::new(
-            10,
-            Some(std::time::Duration::from_millis(50)),
-        );
+        let mut lru = SurfaceLru::new(10, Some(std::time::Duration::from_millis(50)));
         lru.touch("s1");
         // 立即检查不会超时
         assert_eq!(lru.find_victim(1), None);

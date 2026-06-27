@@ -19,9 +19,9 @@
 //! eframe::run_native("A2UI", options, Box::new(|_cc| Box::new(app)));
 //! ```
 
+pub mod app;
 pub mod gui_renderer;
 pub mod widget_mapper;
-pub mod app;
 
 pub use app::A2uiApp;
 pub use gui_renderer::GuiRenderer;
