@@ -47,6 +47,8 @@ pub struct TuiRenderer {
     surface_lru: SurfaceLru,
     /// 自定义组件注册表
     custom_registry: CustomComponentRegistry,
+    /// 最近一帧构建的 widget 数量（render() 填充，测试用）
+    pub last_frame_widget_count: usize,
 }
 
 /// 最大并发 Surface 数量（DoS 防护）
@@ -70,6 +72,7 @@ impl TuiRenderer {
             dirty_surfaces: HashSet::new(),
             surface_lru: SurfaceLru::new(MAX_SURFACES, Some(Duration::from_secs(600))),
             custom_registry: CustomComponentRegistry::new(),
+            last_frame_widget_count: 0,
         }
     }
 
@@ -125,32 +128,18 @@ impl TuiRenderer {
     where
         B: ratatui::backend::Backend,
     {
-        // 增量渲染：只重渲染脏 surface；无脏标记时全量渲染
-        let surfaces_to_render: Vec<_> = if self.dirty_surfaces.is_empty() {
-            self.surfaces.values().cloned().collect()
-        } else {
-            self.dirty_surfaces.iter().cloned().collect()
-        };
+        // 帧准备：构建所有 surface 的 widget 树
+        let surface_widgets = self.prepare_frame().await?;
 
-        let mapper = WidgetMapper;
+        let widgets_to_draw: Vec<_> = surface_widgets
+            .into_iter()
+            .flat_map(|(_, widgets)| widgets)
+            .collect();
 
         terminal
             .draw(|frame: &mut Frame| {
-                let area = frame.buffer_mut().area().clone();
-
-                for surface_id in surfaces_to_render {
-                    let binding = match self.data_bindings.get(&surface_id) {
-                        Some(b) => b,
-                        None => continue,
-                    };
-
-                    let builder =
-                        WidgetBuilder::new(&mapper, binding, &self.forest, &self.custom_registry);
-                    let widgets = builder.build_tree(&surface_id, area);
-
-                    for widget in widgets {
-                        self.draw_widget(frame, widget);
-                    }
+                for widget in &widgets_to_draw {
+                    self.draw_widget(frame, widget.clone());
                 }
             })
             .map_err(|e| {
@@ -160,10 +149,39 @@ impl TuiRenderer {
                 ))
             })?;
 
-        // 渲染完成后清除脏标记
         self.dirty_surfaces.clear();
-
         Ok(())
+    }
+
+    /// 准备帧：构建所有 surface 的 widget 树
+    /// 返回 (surface_id, widgets) 列表
+    async fn prepare_frame(&mut self) -> RenderResult<Vec<(String, Vec<RenderableWidget>)>> {
+        let surfaces_to_render: Vec<_> = if self.dirty_surfaces.is_empty() {
+            self.surfaces.values().cloned().collect()
+        } else {
+            self.dirty_surfaces.iter().cloned().collect()
+        };
+
+        let mapper = WidgetMapper;
+        let mut all_widgets = Vec::new();
+
+        for surface_id in &surfaces_to_render {
+            let binding = match self.data_bindings.get(surface_id) {
+                Some(b) => b,
+                None => continue,
+            };
+
+            let builder =
+                WidgetBuilder::new(&mapper, binding, &self.forest, &self.custom_registry);
+            let area = Rect::new(0, 0, 80, 24);
+            let widgets = builder.build_tree(surface_id, area);
+            all_widgets.push((surface_id.clone(), widgets));
+        }
+
+        let total: usize = all_widgets.iter().map(|(_, w)| w.len()).sum();
+        self.last_frame_widget_count = total;
+
+        Ok(all_widgets)
     }
 
     /// 将单个 RenderableWidget 绘制到 Frame
@@ -452,7 +470,8 @@ impl Renderer for TuiRenderer {
     }
 
     async fn render(&mut self) -> RenderResult<()> {
-        // 简化实现：实际渲染由平台 crate 处理
+        // 帧准备：构建所有 surface 的 widget 树，验证组件引用和路径解析
+        self.prepare_frame().await?;
         Ok(())
     }
 
@@ -1612,5 +1631,41 @@ mod tests {
         let result = renderer.render_frame(&mut terminal).await;
         assert!(result.is_ok());
         assert!(renderer.dirty_surfaces.is_empty());
+    }
+
+    // ---- render() 帧准备测试 ----
+
+    #[tokio::test]
+    async fn test_render_builds_widgets_for_valid_surface() {
+        let mut renderer = TuiRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("root").unwrap(),
+            DynamicValue::Literal("Hello".to_string()),
+        );
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "basic".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let result = renderer.render().await;
+        assert!(result.is_ok());
+        // render() 应构建了至少 1 个 widget（root 组件）
+        assert!(renderer.last_frame_widget_count > 0);
+    }
+
+    #[tokio::test]
+    async fn test_render_handles_empty_state() {
+        let mut renderer = TuiRenderer::new();
+        let result = renderer.render().await;
+        assert!(result.is_ok());
+        // 无 surface 时 widget 数为 0
+        assert_eq!(renderer.last_frame_widget_count, 0);
     }
 }
