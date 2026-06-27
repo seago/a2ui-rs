@@ -11,10 +11,11 @@ use a2ui_core::prelude::*;
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
     CatalogRegistry, ComponentForest, DataBinding, DependencyGraph, FunctionDispatcher,
-    PathResolver, RenderResult, Renderer, SurfaceHandle, UserEvent,
+    PathResolver, RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 /// GUI 渲染器实现
 #[derive(Debug)]
@@ -39,6 +40,8 @@ pub struct GuiRenderer {
     send_data_model: HashMap<String, bool>,
     /// 需要增量重渲染的 surface 集合
     dirty_surfaces: HashSet<String>,
+    /// Surface LRU 驱逐管理器
+    surface_lru: SurfaceLru,
 }
 
 /// 最大并发 Surface 数量（DoS 防护）
@@ -60,6 +63,7 @@ impl GuiRenderer {
             pending_responses: HashMap::new(),
             send_data_model: HashMap::new(),
             dirty_surfaces: HashSet::new(),
+            surface_lru: SurfaceLru::new(MAX_SURFACES, Some(Duration::from_secs(600))),
         }
     }
 
@@ -163,7 +167,18 @@ impl Default for GuiRenderer {
 #[async_trait::async_trait]
 impl Renderer for GuiRenderer {
     async fn create_surface(&mut self, msg: CreateSurface) -> RenderResult<SurfaceHandle> {
-        //  enforcing surface limit
+        // LRU 驱逐：检查是否需要驱逐最久未用的 surface
+        if let Some(victim_id) = self.surface_lru.find_victim(self.surfaces.len()) {
+            // 驱逐最久未用的 surface
+            self.forest.remove_surface(&victim_id).ok();
+            self.data_bindings.remove(&victim_id);
+            self.surfaces.retain(|_, sid| sid != &victim_id);
+            self.dirty_surfaces.remove(&victim_id);
+            self.send_data_model.remove(&victim_id);
+            self.surface_lru.remove(&victim_id);
+        }
+
+        // enforcing surface limit（最后保护）
         if self.surfaces.len() >= MAX_SURFACES {
             return Err(a2ui_renderer::error::RendererError::SurfaceLimitExceeded {
                 current: self.surfaces.len(),
@@ -230,13 +245,17 @@ impl Renderer for GuiRenderer {
         }
 
         // 记录 Surface 映射
-        self.surfaces.insert(handle, surface_id);
+        self.surfaces.insert(handle, surface_id.clone());
+
+        // 记录 LRU 访问
+        self.surface_lru.touch(&surface_id);
 
         Ok(handle)
     }
 
     async fn update_components(&mut self, msg: UpdateComponents) -> RenderResult<()> {
         let surface_id = msg.surface_id.clone();
+        self.surface_lru.touch(&surface_id);
         for comp in msg.components {
             self.forest.upsert(&surface_id, comp)?;
         }
@@ -245,6 +264,7 @@ impl Renderer for GuiRenderer {
 
     async fn update_data_model(&mut self, msg: UpdateDataModel) -> RenderResult<()> {
         let surface_id = msg.surface_id.clone();
+        self.surface_lru.touch(&surface_id);
         if let Some(binding) = self.data_bindings.get_mut(&surface_id) {
             if let Some(path) = &msg.path {
                 binding.set(path, msg.value.unwrap_or(Value::Null))?;
@@ -265,6 +285,8 @@ impl Renderer for GuiRenderer {
         self.data_bindings.remove(&surface_id);
         // 移除 surface 映射
         self.surfaces.retain(|_, sid| sid != &surface_id);
+        // 移除 LRU 追踪
+        self.surface_lru.remove(&surface_id);
         Ok(())
     }
 
@@ -285,6 +307,7 @@ impl Renderer for GuiRenderer {
             // 写入 DataModel
             for (surface_id, binding) in self.data_bindings.iter_mut() {
                 if binding.as_value().pointer(&response_path).is_some() || response_path == "/" {
+                    self.surface_lru.touch(surface_id);
                     binding.set(&response_path, write_value)?;
                     // 查询依赖图，标记受影响的 surface 为脏
                     let affected = self.dependency_graph.on_data_change(&response_path);

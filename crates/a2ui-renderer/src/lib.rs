@@ -12,6 +12,7 @@ pub mod format_string;
 pub mod function_dispatcher;
 pub mod path_resolver;
 pub mod renderer;
+pub mod surface_lru;
 
 pub use catalog_registry::CatalogRegistry;
 pub use component_forest::ComponentForest;
@@ -21,3 +22,4 @@ pub use error::{RenderResult, RendererError};
 pub use function_dispatcher::{CallableFrom, FunctionDispatcher};
 pub use path_resolver::PathResolver;
 pub use renderer::{Renderer, SurfaceHandle, UserEvent};
+pub use surface_lru::SurfaceLru;
