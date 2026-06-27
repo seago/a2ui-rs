@@ -8,6 +8,36 @@ use a2ui_core::ServerEnvelope;
 use a2ui_renderer_gui::{A2uiApp, GuiRenderer};
 use serde_json::json;
 
+/// 加载系统中文字体，使 egui 能正确渲染中文
+fn setup_chinese_fonts(cc: &eframe::CreationContext) {
+    let font_paths = [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/Supplemental/Songti.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "C:\\Windows\\Fonts\\msyh.ttc",
+        "C:\\Windows\\Fonts\\simsun.ttc",
+    ];
+
+    for path in &font_paths {
+        if let Ok(data) = std::fs::read(path) {
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert(
+                "ChineseFont".to_owned(),
+                egui::FontData::from_owned(data),
+            );
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "ChineseFont".to_owned());
+            cc.egui_ctx.set_fonts(fonts);
+            return;
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化 tracing 日志
     tracing_subscriber::fmt::init();
@@ -76,7 +106,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
-    eframe::run_native("A2UI GUI Demo", options, Box::new(|_cc| Box::new(app)))
+    eframe::run_native("A2UI GUI Demo", options, Box::new(|cc| {
+            setup_chinese_fonts(cc);
+            Box::new(app)
+        }))
         .map_err(|e| format!("eframe 错误: {}", e))?;
 
     Ok(())

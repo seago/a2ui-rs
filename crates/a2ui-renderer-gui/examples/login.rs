@@ -13,6 +13,44 @@ use a2ui_renderer_gui::{A2uiApp, GuiRenderer};
 use serde_json::json;
 use std::time::Duration;
 
+/// 加载系统中文字体，使 egui 能正确渲染中文
+fn setup_chinese_fonts(cc: &eframe::CreationContext) {
+    // macOS / Linux / Windows 常见中文字体路径
+    let font_paths = [
+        "/System/Library/Fonts/PingFang.ttc",          // macOS 苹方
+        "/System/Library/Fonts/STHeiti Light.ttc",     // macOS 黑体
+        "/System/Library/Fonts/Supplemental/Songti.ttc", // macOS 宋体
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", // Linux Noto CJK
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", // Linux Droid
+        "C:\\Windows\\Fonts\\msyh.ttc",                 // Windows 微软雅黑
+        "C:\\Windows\\Fonts\\simsun.ttc",               // Windows 宋体
+    ];
+
+    for path in &font_paths {
+        if let Ok(data) = std::fs::read(path) {
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert(
+                "ChineseFont".to_owned(),
+                egui::FontData::from_owned(data).tweak(egui::FontTweak {
+                    scale: 1.0,
+                    ..Default::default()
+                }),
+            );
+            // 将中文字体放在 Proportional 家族最前面，fallback 到默认字体
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .insert(0, "ChineseFont".to_owned());
+
+            cc.egui_ctx.set_fonts(fonts);
+            tracing::info!("已加载中文字体: {}", path);
+            return;
+        }
+    }
+    tracing::warn!("未找到系统中文字体，中文将显示为乱码");
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化 tracing 日志
     tracing_subscriber::fmt::init();
@@ -261,7 +299,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eframe::run_native(
         "A2UI 登录演示",
         options,
-        Box::new(|_cc| Box::new(app)),
+        Box::new(|cc| {
+            setup_chinese_fonts(cc);
+            Box::new(app)
+        }),
     )
     .map_err(|e| format!("eframe 错误: {}", e))?;
 
