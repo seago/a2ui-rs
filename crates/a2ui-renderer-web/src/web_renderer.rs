@@ -254,18 +254,16 @@ impl WebRenderer {
                 }
                 "CheckBox" => {
                     let checked = props
-                        .get("checked")
+                        .get("value")
                         .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let checked = if !checked {
-                        props
-                            .get("value")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false)
-                    } else {
-                        true
-                    };
-                    let label = extract_text(props, binding);
+                        .unwrap_or_else(|| {
+                            props
+                                .get("checked")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                        });
+                    let label = extract_string_value(props, "label", binding)
+                        .unwrap_or_default();
                     RenderableHtmlWidget::CheckBox {
                         id: component.id().clone(),
                         checked,
@@ -358,20 +356,12 @@ impl WebRenderer {
                     let options = props
                         .get("options")
                         .and_then(|v| v.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(extract_static_string)
-                                .collect()
-                        })
+                        .map(|arr| arr.iter().filter_map(extract_static_string).collect())
                         .unwrap_or_default();
                     let selected = props
                         .get("value")
                         .and_then(|v| v.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(extract_static_string)
-                                .collect()
-                        })
+                        .map(|arr| arr.iter().filter_map(extract_static_string).collect())
                         .unwrap_or_default();
                     RenderableHtmlWidget::ChoicePicker {
                         id: component.id().clone(),
@@ -561,6 +551,8 @@ impl Renderer for WebRenderer {
         let surface_id = msg.surface_id.clone();
         self.forest.remove_surface(&surface_id)?;
         self.data_bindings.remove(&surface_id);
+        self.dirty_surfaces.remove(&surface_id);
+        self.send_data_model.remove(&surface_id);
         self.surfaces.retain(|_, sid| sid != &surface_id);
         self.last_html.remove(&surface_id);
         self.surface_lru.remove(&surface_id);
@@ -598,22 +590,12 @@ impl Renderer for WebRenderer {
 
     async fn call_function(&mut self, msg: CallFunction) -> RenderResult<FunctionResponse> {
         let function_name = msg.call.call.clone();
-
-        if !self
-            .dispatcher
-            .can_call_from(&function_name, a2ui_renderer::CallableFrom::ClientOnly)
-        {
-            if self.dispatcher.get(&function_name).is_some() {
-                return Err(a2ui_renderer::error::RendererError::InvalidFunctionCall(
-                    function_name,
-                ));
-            }
-            return Err(a2ui_renderer::error::RendererError::FunctionNotAvailable(
-                function_name,
-            ));
-        }
-
-        let result = self.dispatcher.dispatch(&function_name, msg.call.args)?;
+        // dispatch() 内部强制执行 callableFrom 边界检查
+        let result = self.dispatcher.dispatch(
+            &function_name,
+            msg.call.args,
+            a2ui_renderer::CallableFrom::ClientOnly,
+        )?;
         Ok(FunctionResponse {
             function_call_id: msg.function_call_id,
             call: function_name,
@@ -1133,8 +1115,8 @@ mod tests {
         renderer
             .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
             .unwrap();
-        let result = renderer
-            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"));
+        let result =
+            renderer.register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"));
         assert!(result.is_err());
     }
 
@@ -1148,20 +1130,16 @@ mod tests {
             .unwrap();
 
         // 未知组件（不是 root，而是 root 的子组件）
-        let unknown_comp: Component = serde_json::from_str(
-            r#"{"id":"u1","component":"UnknownType"}"#,
-        )
-        .unwrap();
+        let unknown_comp: Component =
+            serde_json::from_str(r#"{"id":"u1","component":"UnknownType"}"#).unwrap();
         let root_unknown = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("u1").unwrap()],
         );
 
         // 自定义组件（已注册）
-        let custom_comp: Component = serde_json::from_str(
-            r#"{"id":"c1","component":"MyChart"}"#,
-        )
-        .unwrap();
+        let custom_comp: Component =
+            serde_json::from_str(r#"{"id":"c1","component":"MyChart"}"#).unwrap();
         let root_custom = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("c1").unwrap()],

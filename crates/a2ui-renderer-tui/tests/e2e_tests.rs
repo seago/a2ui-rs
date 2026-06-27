@@ -53,7 +53,7 @@ fn test_tui_component_lifecycle() {
 fn test_tui_input_events() {
     let handler = a2ui_renderer_tui::InputHandler;
 
-    let click_event = handler.handle_click("btn1");
+    let click_event = handler.handle_click("btn1").expect("valid ID");
     match click_event {
         UserEvent::Click { component_id } => {
             assert_eq!(component_id.as_str(), "btn1");

@@ -29,7 +29,7 @@ impl InputHandler {
             }),
             other if !other.is_empty() && !other.starts_with("Ctrl+") => {
                 Some(UserEvent::TextInput {
-                    component_id: ComponentId::new("unknown").unwrap(),
+                    component_id: ComponentId::new("_focused").ok()?,
                     value: other.to_string(),
                 })
             }
@@ -38,26 +38,27 @@ impl InputHandler {
     }
 
     /// 处理鼠标点击
-    pub fn handle_click(&self, component_id: impl Into<String>) -> UserEvent {
-        UserEvent::Click {
-            component_id: ComponentId::new(component_id.into()).unwrap(),
-        }
+    pub fn handle_click(&self, component_id: impl Into<String>) -> Option<UserEvent> {
+        let id = ComponentId::new(component_id.into()).ok()?;
+        Some(UserEvent::Click { component_id: id })
     }
 
     /// 创建复选框切换事件
-    pub fn handle_check_toggle(&self, component_id: impl Into<String>, checked: bool) -> UserEvent {
-        UserEvent::CheckToggle {
-            component_id: ComponentId::new(component_id.into()).unwrap(),
+    pub fn handle_check_toggle(&self, component_id: impl Into<String>, checked: bool) -> Option<UserEvent> {
+        let id = ComponentId::new(component_id.into()).ok()?;
+        Some(UserEvent::CheckToggle {
+            component_id: id,
             checked,
-        }
+        })
     }
 
     /// 创建滑块变化事件
-    pub fn handle_slider_change(&self, component_id: impl Into<String>, value: f64) -> UserEvent {
-        UserEvent::SliderChange {
-            component_id: ComponentId::new(component_id.into()).unwrap(),
+    pub fn handle_slider_change(&self, component_id: impl Into<String>, value: f64) -> Option<UserEvent> {
+        let id = ComponentId::new(component_id.into()).ok()?;
+        Some(UserEvent::SliderChange {
+            component_id: id,
             value,
-        }
+        })
     }
 }
 
@@ -117,7 +118,7 @@ mod tests {
     #[test]
     fn test_handle_click() {
         let handler = InputHandler;
-        let event = handler.handle_click("btn1");
+        let event = handler.handle_click("btn1").expect("valid ID");
         match event {
             UserEvent::Click { component_id } => {
                 assert_eq!(component_id.as_str(), "btn1");
@@ -127,9 +128,15 @@ mod tests {
     }
 
     #[test]
+    fn test_handle_click_invalid_id() {
+        let handler = InputHandler;
+        assert!(handler.handle_click("123invalid").is_none());
+    }
+
+    #[test]
     fn test_handle_check_toggle() {
         let handler = InputHandler;
-        let event = handler.handle_check_toggle("cb1", true);
+        let event = handler.handle_check_toggle("cb1", true).expect("valid ID");
         match event {
             UserEvent::CheckToggle {
                 component_id,
@@ -145,7 +152,7 @@ mod tests {
     #[test]
     fn test_handle_slider_change() {
         let handler = InputHandler;
-        let event = handler.handle_slider_change("slider1", 0.75);
+        let event = handler.handle_slider_change("slider1", 0.75).expect("valid ID");
         match event {
             UserEvent::SliderChange {
                 component_id,

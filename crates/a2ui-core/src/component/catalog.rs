@@ -4,9 +4,24 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 /// A2UI Catalog：声明可用组件类型和函数定义
+///
+/// 遵循 A2UI v1.0 严格规则：顶层只允许固定的 key 集合。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct Catalog {
+    /// JSON Schema 版本声明
+    #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
+    schema: Option<String>,
+    /// Catalog 唯一标识 URI
+    #[serde(rename = "$id", skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    /// 可读标题
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    /// 描述
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
     /// Catalog 唯一标识符（建议用域名前缀的 URI）
     catalog_id: String,
     /// Markdown 格式的设计原则说明
@@ -27,6 +42,10 @@ impl Catalog {
     /// 创建最小 Catalog
     pub fn new(catalog_id: impl Into<String>) -> Self {
         Self {
+            schema: None,
+            id: None,
+            title: None,
+            description: None,
             catalog_id: catalog_id.into(),
             instructions: None,
             components: HashMap::new(),
@@ -222,5 +241,32 @@ mod tests {
         }"#;
         let catalog: Catalog = serde_json::from_str(json).unwrap();
         assert!(catalog.validate().is_ok());
+    }
+
+    #[test]
+    fn test_catalog_deny_unknown_fields() {
+        let json = r#"{
+            "catalogId": "test",
+            "unknownField": "value",
+            "components": {},
+            "functions": {}
+        }"#;
+        let result: Result<Catalog, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_catalog_with_schema_and_id() {
+        let json = r#"{
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "https://example.com/catalogs/test",
+            "title": "Test Catalog",
+            "description": "A test catalog",
+            "catalogId": "https://example.com/catalogs/test",
+            "components": {},
+            "functions": {}
+        }"#;
+        let catalog: Catalog = serde_json::from_str(json).unwrap();
+        assert_eq!(catalog.catalog_id(), "https://example.com/catalogs/test");
     }
 }

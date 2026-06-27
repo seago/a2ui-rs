@@ -1,5 +1,12 @@
 use crate::function_dispatcher::{CallableFrom, FunctionDispatcher};
 use crate::path_resolver::PathResolver;
+use std::sync::OnceLock;
+
+/// formatString 插值正则表达式（编译一次，全局复用）
+fn interpolation_regex() -> &'static regex::Regex {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(r"\$\{([^}]+)\}").expect("valid regex"))
+}
 
 /// formatString 插值解析器
 ///
@@ -8,6 +15,9 @@ use crate::path_resolver::PathResolver;
 /// - `${funcName:key=value}` — 调用注册的函数
 ///
 /// 字面量文本原样保留。
+///
+/// 注意：返回的字符串可能需要按渲染器上下文做转义（HTML/ANSI/原生）。
+/// 当前实现会做 HTML 转义，TUI/GUI 渲染器在使用时应知晓这一点。
 pub struct FormatString;
 
 impl FormatString {
@@ -17,7 +27,7 @@ impl FormatString {
         resolver: &PathResolver,
         dispatcher: &FunctionDispatcher,
     ) -> String {
-        let re = regex::Regex::new(r"\$\{([^}]+)\}").unwrap();
+        let re = interpolation_regex();
 
         re.replace_all(template, |caps: &regex::Captures| {
             let expr = caps.get(1).unwrap().as_str();
@@ -27,14 +37,14 @@ impl FormatString {
                 let func_name = &expr[..colon_pos];
                 let args_str = &expr[colon_pos + 1..];
 
-                if dispatcher.can_call_from(func_name, CallableFrom::ClientOrRemote) {
-                    let args = parse_function_args(args_str);
-                    let args_map: serde_json::Map<String, serde_json::Value> =
-                        args.into_iter().collect();
-                    let args_value = serde_json::Value::Object(args_map);
-                    if let Ok(value) = dispatcher.dispatch(func_name, args_value) {
-                        return html_escape(&value_to_string(value));
-                    }
+                let args = parse_function_args(args_str);
+                let args_map: serde_json::Map<String, serde_json::Value> =
+                    args.into_iter().collect();
+                let args_value = serde_json::Value::Object(args_map);
+                if let Ok(value) =
+                    dispatcher.dispatch(func_name, args_value, CallableFrom::ClientOrRemote)
+                {
+                    return html_escape(&value_to_string(value));
                 }
                 // 函数不可用或执行失败 → 返回空
                 return "".into();

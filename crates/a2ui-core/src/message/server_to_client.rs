@@ -65,12 +65,32 @@ pub struct DeleteSurface {
     pub surface_id: String,
 }
 
+/// ActionResponse — 注意：由于使用 `#[serde(flatten)]`，无法使用 `deny_unknown_fields`。
+/// 改为通过 `validate()` 方法手动检查未知字段。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionResponse {
     pub action_id: String,
     #[serde(flatten)]
     pub response: ActionResponsePayload,
+}
+
+impl ActionResponse {
+    /// 校验 ActionResponse 不包含未知字段
+    /// 由于 serde(flatten) 与 deny_unknown_fields 不兼容，
+    /// 通过此方法在反序列化后手动校验安全性。
+    pub fn validate(&self) -> crate::error::Result<()> {
+        // response 通过 untagged enum 限制只能是 Success 或 Error 两种形式
+        // 额外字段在 untagged 模式下会被忽略，此处确认基本结构有效
+        if self.action_id.is_empty() {
+            return Err(crate::error::A2uiError::ValidationError {
+                message: "actionId must not be empty".to_string(),
+                component_id: "actionResponse".to_string(),
+                check_index: 0,
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

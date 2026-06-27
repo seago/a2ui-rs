@@ -14,9 +14,9 @@ impl DataBinding {
         Self { data_model }
     }
 
-    /// 获取 JSON Pointer 路径的值
+    /// 获取 JSON Pointer 路径的值（安全版本，拒绝恶意路径）
     pub fn get(&self, path: &str) -> Option<&Value> {
-        self.data_model.get(path)
+        self.data_model.get_safe(path).ok().flatten()
     }
 
     /// 设置 JSON Pointer 路径的值
@@ -32,8 +32,8 @@ impl DataBinding {
     {
         match dynamic {
             DynamicValue::Literal(v) => Ok(v.clone().into()),
-            DynamicValue::Path { path } => self.data_model.get(path).cloned().ok_or_else(|| {
-                crate::error::RendererError::SurfaceNotFound(format!("path not found: {}", path))
+            DynamicValue::Path { path } => self.data_model.get_safe(path).ok().flatten().cloned().ok_or_else(|| {
+                crate::error::RendererError::BindingError(format!("path not found: {}", path))
             }),
             DynamicValue::FunctionCall { call, .. } => Err(
                 crate::error::RendererError::FunctionNotAvailable(call.clone()),

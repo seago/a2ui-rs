@@ -47,7 +47,23 @@ pub enum RendererError {
         current: usize,
         max: usize,
     },
+
+    #[error("component tree too deep: depth={depth} (max={max})")]
+    ComponentTreeTooDeep { depth: usize, max: usize },
 }
+
+impl RendererError {
+    /// 创建 ComponentTreeTooDeep 错误的便捷构造器
+    pub fn tree_too_deep(depth: usize) -> Self {
+        Self::ComponentTreeTooDeep {
+            depth,
+            max: MAX_TREE_DEPTH,
+        }
+    }
+}
+
+/// 组件树最大深度限制
+pub const MAX_TREE_DEPTH: usize = 50;
 
 pub type RenderResult<T> = Result<T, RendererError>;
 
@@ -70,6 +86,7 @@ impl RendererError {
             RendererError::PathError(_) => "Path error".to_string(),
             RendererError::SurfaceLimitExceeded { .. } => "Surface limit exceeded".to_string(),
             RendererError::ComponentLimitExceeded { .. } => "Component limit exceeded".to_string(),
+            RendererError::ComponentTreeTooDeep { .. } => "Component tree too deep".to_string(),
         }
     }
 }

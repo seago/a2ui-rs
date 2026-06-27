@@ -155,20 +155,33 @@ impl FunctionDispatcher {
         self.handlers.insert(name, handler);
     }
 
-    /// 执行函数调用
-    pub fn dispatch(&self, name: &str, args: Value) -> RenderResult<Value> {
-        let func = self
-            .functions
-            .get(name)
-            .ok_or_else(|| crate::error::RendererError::FunctionNotAvailable(name.to_string()))?;
+    /// 执行函数调用，强制执行 `callableFrom` 边界检查
+    ///
+    /// - `caller` 参数指定调用来源（`ClientOnly` / `RemoteOnly` / `ClientOrRemote`）
+    /// - `ClientOnly` 函数只能被 `ClientOnly` 调用者执行
+    /// - `RemoteOnly` 函数只能被 `RemoteOnly` 调用者执行
+    /// - `ClientOrRemote` 函数可被任意调用者执行
+    pub fn dispatch(&self, name: &str, args: Value, caller: CallableFrom) -> RenderResult<Value> {
+        // 检查函数是否存在
+        if !self.functions.contains_key(name) {
+            return Err(crate::error::RendererError::FunctionNotAvailable(
+                name.to_string(),
+            ));
+        }
+
+        // 强制执行 callableFrom 边界
+        if !self.can_call_from(name, caller) {
+            return Err(crate::error::RendererError::InvalidFunctionCall(
+                name.to_string(),
+            ));
+        }
 
         // 优先使用注册的 handler
         if let Some(handler) = self.handlers.get(name) {
             return handler(args);
         }
 
-        // 简化实现：没有 handler 时返回空值
-        let _ = func;
+        // 没有 handler 时返回空值
         Ok(Value::Null)
     }
 
@@ -448,7 +461,8 @@ mod tests {
     #[test]
     fn test_dispatch_unknown_function() {
         let dispatcher = FunctionDispatcher::new();
-        let result: RenderResult<Value> = dispatcher.dispatch("unknown", json!({}));
+        let result: RenderResult<Value> =
+            dispatcher.dispatch("unknown", json!({}), CallableFrom::ClientOnly);
         assert!(result.is_err());
     }
 
@@ -480,7 +494,11 @@ mod tests {
             }),
         );
         let result = dispatcher
-            .dispatch("upper", json!({"value": "hello"}))
+            .dispatch(
+                "upper",
+                json!({"value": "hello"}),
+                CallableFrom::ClientOrRemote,
+            )
             .unwrap();
         assert_eq!(result, json!("HELLO"));
     }
@@ -489,7 +507,9 @@ mod tests {
     fn test_dispatch_without_handler_returns_null() {
         let mut dispatcher = FunctionDispatcher::new();
         dispatcher.register("noop", CallableFrom::ClientOrRemote);
-        let result = dispatcher.dispatch("noop", json!({})).unwrap();
+        let result = dispatcher
+            .dispatch("noop", json!({}), CallableFrom::ClientOrRemote)
+            .unwrap();
         assert_eq!(result, Value::Null);
     }
 
@@ -502,6 +522,7 @@ mod tests {
             .dispatch(
                 "formatNumber",
                 json!({"value": 1234567.89, "decimals": 2, "grouping": true}),
+                CallableFrom::ClientOnly,
             )
             .unwrap();
         assert_eq!(result, json!("1,234,567.89"));
@@ -514,6 +535,7 @@ mod tests {
             .dispatch(
                 "formatNumber",
                 json!({"value": 1000.5, "decimals": 1, "grouping": false}),
+                CallableFrom::ClientOnly,
             )
             .unwrap();
         assert_eq!(result, json!("1000.5"));
@@ -526,6 +548,7 @@ mod tests {
             .dispatch(
                 "formatCurrency",
                 json!({"value": 1234.5, "currency": "CNY", "decimals": 2}),
+                CallableFrom::ClientOnly,
             )
             .unwrap();
         let s = result.as_str().unwrap();
@@ -540,6 +563,7 @@ mod tests {
             .dispatch(
                 "formatCurrency",
                 json!({"value": 99.99, "currency": "USD", "decimals": 2}),
+                CallableFrom::ClientOnly,
             )
             .unwrap();
         assert!(result.as_str().unwrap().contains("99.99"));
@@ -552,6 +576,7 @@ mod tests {
             .dispatch(
                 "formatDate",
                 json!({"value": "2024-01-15", "format": "YYYY-MM-DD"}),
+                CallableFrom::ClientOnly,
             )
             .unwrap();
         assert!(result.as_str().unwrap().contains("2024"));
@@ -564,6 +589,7 @@ mod tests {
             .dispatch(
                 "formatDate",
                 json!({"value": "2024-01-15", "format": "full"}),
+                CallableFrom::ClientOnly,
             )
             .unwrap();
         let s = result.as_str().unwrap();
@@ -577,6 +603,7 @@ mod tests {
             .dispatch(
                 "pluralize",
                 json!({"value": 1, "one": "item", "other": "items"}),
+                CallableFrom::ClientOnly,
             )
             .unwrap();
         assert_eq!(result, json!("item"));
@@ -589,6 +616,7 @@ mod tests {
             .dispatch(
                 "pluralize",
                 json!({"value": 5, "one": "item", "other": "items"}),
+                CallableFrom::ClientOnly,
             )
             .unwrap();
         assert_eq!(result, json!("items"));
@@ -601,8 +629,72 @@ mod tests {
             .dispatch(
                 "pluralize",
                 json!({"value": 0, "zero": "no items", "one": "item", "other": "items"}),
+                CallableFrom::ClientOnly,
             )
             .unwrap();
         assert_eq!(result, json!("no items"));
+    }
+
+    // --- dispatch 内部 callableFrom 强制执行测试 ---
+
+    #[test]
+    fn test_dispatch_enforces_client_only_boundary() {
+        let mut dispatcher = FunctionDispatcher::new();
+        dispatcher.register("client_func", CallableFrom::ClientOnly);
+        // ClientOnly 调用者可以执行
+        assert!(dispatcher
+            .dispatch("client_func", json!({}), CallableFrom::ClientOnly)
+            .is_ok());
+        // RemoteOnly 调用者被拒绝
+        assert!(matches!(
+            dispatcher.dispatch("client_func", json!({}), CallableFrom::RemoteOnly),
+            Err(crate::error::RendererError::InvalidFunctionCall(_))
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_enforces_remote_only_boundary() {
+        let mut dispatcher = FunctionDispatcher::new();
+        dispatcher.register("remote_func", CallableFrom::RemoteOnly);
+        // ClientOnly 调用者被拒绝
+        assert!(matches!(
+            dispatcher.dispatch("remote_func", json!({}), CallableFrom::ClientOnly),
+            Err(crate::error::RendererError::InvalidFunctionCall(_))
+        ));
+        // RemoteOnly 调用者可以执行
+        assert!(dispatcher
+            .dispatch("remote_func", json!({}), CallableFrom::RemoteOnly)
+            .is_ok());
+    }
+
+    #[test]
+    fn test_dispatch_client_or_remote_works_from_both_sides() {
+        let mut dispatcher = FunctionDispatcher::new();
+        dispatcher.register("both", CallableFrom::ClientOrRemote);
+        assert!(dispatcher
+            .dispatch("both", json!({}), CallableFrom::ClientOnly)
+            .is_ok());
+        assert!(dispatcher
+            .dispatch("both", json!({}), CallableFrom::RemoteOnly)
+            .is_ok());
+        assert!(dispatcher
+            .dispatch("both", json!({}), CallableFrom::ClientOrRemote)
+            .is_ok());
+    }
+
+    #[test]
+    fn test_client_or_remote_caller_cannot_bypass_restrictions() {
+        // 安全测试：ClientOrRemote 调用者不能调用 ClientOnly 或 RemoteOnly 函数
+        let mut dispatcher = FunctionDispatcher::new();
+        dispatcher.register("client_func", CallableFrom::ClientOnly);
+        dispatcher.register("remote_func", CallableFrom::RemoteOnly);
+        dispatcher.register("both_func", CallableFrom::ClientOrRemote);
+
+        // ClientOrRemote 调用者不能调用 ClientOnly 函数
+        assert!(!dispatcher.can_call_from("client_func", CallableFrom::ClientOrRemote));
+        // ClientOrRemote 调用者不能调用 RemoteOnly 函数
+        assert!(!dispatcher.can_call_from("remote_func", CallableFrom::ClientOrRemote));
+        // ClientOrRemote 调用者只能调用 ClientOrRemote 函数
+        assert!(dispatcher.can_call_from("both_func", CallableFrom::ClientOrRemote));
     }
 }

@@ -144,12 +144,8 @@ impl TuiRenderer {
                         None => continue,
                     };
 
-                    let builder = WidgetBuilder::new(
-                        &mapper,
-                        binding,
-                        &self.forest,
-                        &self.custom_registry,
-                    );
+                    let builder =
+                        WidgetBuilder::new(&mapper, binding, &self.forest, &self.custom_registry);
                     let widgets = builder.build_tree(&surface_id, area);
 
                     for widget in widgets {
@@ -396,6 +392,8 @@ impl Renderer for TuiRenderer {
         let surface_id = msg.surface_id.clone();
         self.forest.remove_surface(&surface_id)?;
         self.data_bindings.remove(&surface_id);
+        self.dirty_surfaces.remove(&surface_id);
+        self.send_data_model.remove(&surface_id);
         // 移除 surface 映射
         self.surfaces.retain(|_, sid| sid != &surface_id);
         // 移除 LRU 追踪
@@ -440,28 +438,12 @@ impl Renderer for TuiRenderer {
 
     async fn call_function(&mut self, msg: CallFunction) -> RenderResult<FunctionResponse> {
         let function_name = msg.call.call.clone();
-
-        // P0-4: callableFrom enforcement
-        // 检查函数是否已注册且允许从客户端调用
-        if !self
-            .dispatcher
-            .can_call_from(&function_name, a2ui_renderer::CallableFrom::ClientOnly)
-        {
-            // 区分"未注册"和"不可调用"
-            if self.dispatcher.get(&function_name).is_some() {
-                // 函数已注册但 callableFrom 为 RemoteOnly → 拒绝
-                return Err(a2ui_renderer::error::RendererError::InvalidFunctionCall(
-                    function_name,
-                ));
-            }
-            // 函数未注册
-            return Err(a2ui_renderer::error::RendererError::FunctionNotAvailable(
-                function_name,
-            ));
-        }
-
-        // 函数已注册且允许客户端执行，尝试调度
-        let result = self.dispatcher.dispatch(&function_name, msg.call.args)?;
+        // dispatch() 内部强制执行 callableFrom 边界检查
+        let result = self.dispatcher.dispatch(
+            &function_name,
+            msg.call.args,
+            a2ui_renderer::CallableFrom::ClientOnly,
+        )?;
         Ok(FunctionResponse {
             function_call_id: msg.function_call_id,
             call: function_name,
@@ -1442,8 +1424,8 @@ mod tests {
         renderer
             .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
             .unwrap();
-        let result = renderer
-            .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"));
+        let result =
+            renderer.register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"));
         assert!(result.is_err());
     }
 

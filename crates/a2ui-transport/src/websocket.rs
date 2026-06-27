@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
 use thiserror::Error;
+use tokio_tungstenite::tungstenite::protocol::Message;
 
 #[derive(Debug, Error)]
 pub enum WebSocketError {
@@ -51,10 +52,12 @@ impl WebSocketTransport {
 #[async_trait]
 impl Transport for WebSocketTransport {
     async fn connect(&mut self) -> TransportResult<()> {
+        tracing::info!("connecting to websocket: {}", self.url);
         let (ws, _) = tokio_tungstenite::connect_async(&self.url)
             .await
             .map_err(|e| WebSocketError::ConnectionError(format!("{}", e)))?;
         self.ws = Some(ws);
+        tracing::info!("websocket connected: {}", self.url);
         Ok(())
     }
 
@@ -69,8 +72,7 @@ impl Transport for WebSocketTransport {
             ServerEnvelope::V1_0(V1_0ServerMessage::Capabilities(server_caps)) => Ok(server_caps),
             _ => Err(TransportError::ConnectionError(
                 "expected capabilities message during handshake".to_string(),
-            )
-            .into()),
+            )),
         }
     }
 
@@ -99,9 +101,39 @@ impl Transport for WebSocketTransport {
             .await
             .ok_or_else(|| WebSocketError::ReceiveError("connection closed".into()))?
             .map_err(|e| WebSocketError::ReceiveError(format!("{}", e)))?;
-        let text = msg
-            .into_text()
-            .map_err(|e| WebSocketError::ReceiveError(format!("expected text frame: {}", e)))?;
+
+        // 支持 Text 和 Binary 帧（Binary 帧也尝试按 UTF-8 JSON 解析）
+        let text = match msg {
+            Message::Text(s) => s,
+            Message::Binary(data) => {
+                String::from_utf8(data).map_err(|e| {
+                    WebSocketError::ReceiveError(format!(
+                        "binary frame contains non-UTF-8 data: {}",
+                        e
+                    ))
+                })?
+            }
+            Message::Ping(_) | Message::Pong(_) => {
+                // Ping/Pong 已在 tungestenite 层面自动处理，这里不会出现
+                return Err(WebSocketError::ReceiveError(
+                    "unexpected control frame".into(),
+                )
+                .into());
+            }
+            Message::Close(_) => {
+                return Err(WebSocketError::ReceiveError(
+                    "peer closed connection".into(),
+                )
+                .into());
+            }
+            _ => {
+                return Err(WebSocketError::ReceiveError(
+                    "unexpected frame type".into(),
+                )
+                .into());
+            }
+        };
+
         let envelope: ServerEnvelope = serde_json::from_str(&text)
             .map_err(|e| WebSocketError::ReceiveError(format!("deserialization: {}", e)))?;
         Ok(envelope)
@@ -109,7 +141,9 @@ impl Transport for WebSocketTransport {
 
     async fn close(&mut self) -> TransportResult<()> {
         if let Some(mut ws) = self.ws.take() {
-            let _ = ws.close(None).await;
+            if let Err(e) = ws.close(None).await {
+                tracing::warn!("websocket close error: {}", e);
+            }
         }
         Ok(())
     }
@@ -231,7 +265,7 @@ mod tests {
                     if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
                         // 接收客户端发送的 capabilities 消息
                         while let Some(Ok(msg)) = ws.next().await {
-                            let text = msg.into_text().unwrap();
+                            let _text = msg.into_text().unwrap();
                             // 回复服务端 capabilities
                             let response =
                                 r#"{"version":"v1.0","capabilities":{"version":"1.0","features":["basic"]}}"#;

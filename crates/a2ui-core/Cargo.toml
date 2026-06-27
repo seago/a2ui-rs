@@ -12,6 +12,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
+unicode-ident = "1"
 
 [features]
 embed-assets = []

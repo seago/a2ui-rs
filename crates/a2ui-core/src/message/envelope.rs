@@ -15,8 +15,8 @@ impl ServerEnvelope {
         Ok(serde_json::from_str(json)?)
     }
 
-    pub fn to_value(&self) -> Value {
-        serde_json::to_value(self).unwrap()
+    pub fn to_value(&self) -> Result<Value> {
+        Ok(serde_json::to_value(self)?)
     }
 }
 
@@ -33,7 +33,7 @@ impl ClientEnvelope {
         Ok(serde_json::from_str(json)?)
     }
 
-    pub fn to_value(&self) -> Value {
-        serde_json::to_value(self).unwrap()
+    pub fn to_value(&self) -> Result<Value> {
+        Ok(serde_json::to_value(self)?)
     }
 }

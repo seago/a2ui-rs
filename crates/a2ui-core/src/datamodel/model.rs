@@ -39,9 +39,10 @@ impl DataModel {
         Ok(self.value.pointer(pointer))
     }
 
-    /// 获取可变引用
-    pub fn get_mut(&mut self, pointer: &str) -> Option<&mut Value> {
-        self.value.pointer_mut(pointer)
+    /// 获取可变引用（包含路径安全检查）
+    pub fn get_mut(&mut self, pointer: &str) -> Result<Option<&mut Value>> {
+        self.validate_pointer(pointer)?;
+        Ok(self.value.pointer_mut(pointer))
     }
 
     /// 应用 JSON Pointer 路径更新（upsert 语义），包含路径安全检查
@@ -63,12 +64,10 @@ impl DataModel {
         self.validate_pointer(pointer)?;
 
         // 处理删除
-        if value.is_none() {
+        let Some(new_value) = value else {
             self._delete_at_pointer(pointer);
             return Ok(());
-        }
-
-        let new_value = value.unwrap();
+        };
         if let Some(target) = self.value.pointer_mut(pointer) {
             *target = new_value;
         } else {
@@ -136,6 +135,18 @@ impl DataModel {
         Ok(())
     }
 
+    /// 判断路径段是否为数组索引（纯数字）
+    fn is_array_index(segment: &str) -> Option<usize> {
+        // 拒绝空字符串和含有前导零的多位数字（如 "01"）
+        if segment.is_empty() {
+            return None;
+        }
+        if segment.len() > 1 && segment.starts_with('0') {
+            return None;
+        }
+        segment.parse::<usize>().ok()
+    }
+
     /// 手动实现删除操作（serde_json 不支持直接删除）
     fn _delete_at_pointer(&mut self, pointer: &str) {
         let segments: Vec<&str> = pointer.trim_start_matches('/').split('/').collect();
@@ -151,25 +162,50 @@ impl DataModel {
                 // 直接子节点（根对象下）
                 if let Value::Object(ref mut map) = self.value {
                     map.remove(&unescaped);
+                } else if let Value::Array(ref mut arr) = self.value {
+                    if let Some(idx) = Self::is_array_index(&unescaped) {
+                        if idx < arr.len() {
+                            arr.remove(idx);
+                        }
+                    }
                 }
             } else {
                 // 导航到父对象
                 let mut current = &mut self.value;
                 for segment in &segments[..segments.len() - 1] {
-                    let key = segment.replace("~1", "/").replace("~0", "~");
-                    match current {
+                    // 使用 borrow checker 友好的方式
+                    let child = match current {
                         Value::Object(ref mut map) => {
-                            if let Some(val) = map.get_mut(&key) {
-                                current = val;
+                            let key = segment.replace("~1", "/").replace("~0", "~");
+                            map.get_mut(&key)
+                        }
+                        Value::Array(ref mut arr) => {
+                            let key = segment.replace("~1", "/").replace("~0", "~");
+                            if let Some(idx) = Self::is_array_index(&key) {
+                                arr.get_mut(idx)
                             } else {
-                                return; // 父路径不存在
+                                None
                             }
                         }
-                        _ => return,
+                        _ => None,
+                    };
+                    match child {
+                        Some(val) => current = val,
+                        None => return, // 父路径不存在
                     }
                 }
-                if let Value::Object(ref mut map) = current {
-                    map.remove(&unescaped);
+                match current {
+                    Value::Object(ref mut map) => {
+                        map.remove(&unescaped);
+                    }
+                    Value::Array(ref mut arr) => {
+                        if let Some(idx) = Self::is_array_index(&unescaped) {
+                            if idx < arr.len() {
+                                arr.remove(idx);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -188,17 +224,53 @@ impl DataModel {
 
             if i == segments.len() - 1 {
                 // 最后一段：设置值
-                if let Value::Object(ref mut map) = current {
-                    map.insert(unescaped, value.clone());
+                match current {
+                    Value::Object(ref mut map) => {
+                        map.insert(unescaped, value.clone());
+                    }
+                    Value::Array(ref mut arr) => {
+                        if let Some(idx) = Self::is_array_index(&unescaped) {
+                            if idx < arr.len() {
+                                arr[idx] = value.clone();
+                            }
+                        }
+                    }
+                    _ => return,
                 }
             } else {
-                // 中间段：确保是 Object
+                // 中间段：确保路径存在
                 match current {
                     Value::Object(ref mut map) => {
                         if !map.contains_key(&unescaped) {
-                            map.insert(unescaped.clone(), Value::Object(Default::default()));
+                            // 检查下一段是否为数组索引来决定创建 Object 还是 Array
+                            let next_is_array = segments
+                                .get(i + 1)
+                                .and_then(|s| Self::is_array_index(&s.replace("~1", "/").replace("~0", "~")))
+                                .is_some();
+                            let child = if next_is_array {
+                                Value::Array(vec![])
+                            } else {
+                                Value::Object(Default::default())
+                            };
+                            map.insert(unescaped.clone(), child);
                         }
-                        current = map.get_mut(&unescaped).unwrap();
+                        // 安全地获取子节点引用
+                        if let Some(child) = map.get_mut(&unescaped) {
+                            current = child;
+                        } else {
+                            return;
+                        }
+                    }
+                    Value::Array(ref mut arr) => {
+                        if let Some(idx) = Self::is_array_index(&unescaped) {
+                            if let Some(child) = arr.get_mut(idx) {
+                                current = child;
+                            } else {
+                                return;
+                            }
+                        } else {
+                            return;
+                        }
                     }
                     _ => return,
                 }
@@ -349,5 +421,34 @@ mod tests {
         let mut dm = DataModel::new(json!({"a/b": "value"}));
         dm.apply_pointer("/a~1b", Some(json!("updated"))).unwrap();
         assert_eq!(dm.get("/a~1b"), Some(&json!("updated")));
+    }
+
+    // --- Array index support tests ---
+
+    #[test]
+    fn test_apply_pointer_through_array_index() {
+        let mut dm = DataModel::new(json!({"arr": [{"name": "Alice"}, {"name": "Bob"}]}));
+        dm.apply_pointer("/arr/0/name", Some(json!("Charlie")))
+            .unwrap();
+        assert_eq!(dm.get("/arr/0/name"), Some(&json!("Charlie")));
+        // Bob 不受影响
+        assert_eq!(dm.get("/arr/1/name"), Some(&json!("Bob")));
+    }
+
+    #[test]
+    fn test_create_path_with_array_index() {
+        let mut dm = DataModel::new(json!({"arr": [{"id": 1}, {"id": 2}]}));
+        dm.apply_pointer("/arr/0/name", Some(json!("first")))
+            .unwrap();
+        assert_eq!(dm.get("/arr/0/name"), Some(&json!("first")));
+        assert_eq!(dm.get("/arr/0/id"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn test_delete_at_array_index() {
+        let mut dm = DataModel::new(json!({"arr": ["a", "b", "c"]}));
+        dm.apply_pointer("/arr/1", None).unwrap();
+        assert_eq!(dm.get("/arr/0"), Some(&json!("a")));
+        assert_eq!(dm.get("/arr/1"), Some(&json!("c"))); // b 被删除，c 前移
     }
 }

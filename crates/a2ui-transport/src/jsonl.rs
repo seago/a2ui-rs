@@ -7,6 +7,9 @@ use a2ui_core::{
 };
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
+/// JSONL 单行最大字节数（防止内存耗尽 DoS 攻击）
+const MAX_LINE_LENGTH: usize = 1_048_576; // 1 MiB
+
 #[async_trait::async_trait]
 impl<R, W> Transport for JsonlTransport<R, W>
 where
@@ -28,8 +31,7 @@ where
             ServerEnvelope::V1_0(V1_0ServerMessage::Capabilities(server_caps)) => Ok(server_caps),
             _ => Err(TransportError::ConnectionError(
                 "expected capabilities message during handshake".to_string(),
-            )
-            .into()),
+            )),
         }
     }
 
@@ -48,18 +50,41 @@ where
     }
 
     async fn receive(&mut self) -> TransportResult<ServerEnvelope> {
-        let mut line = String::new();
-        self.reader
-            .read_line(&mut line)
-            .await
-            .map_err(|e| crate::TransportError::ReceiveError(format!("read error: {}", e)))?;
-        let envelope: ServerEnvelope = serde_json::from_str(&line).map_err(|e| {
-            crate::TransportError::ReceiveError(format!("deserialization error: {}", e))
-        })?;
-        Ok(envelope)
+        loop {
+            let mut line = String::new();
+            let n = self
+                .reader
+                .read_line(&mut line)
+                .await
+                .map_err(|e| crate::TransportError::ReceiveError(format!("read error: {}", e)))?;
+            if n == 0 {
+                return Err(crate::TransportError::Eof);
+            }
+            // 检查行长度限制（防止 OOM DoS）
+            if line.len() > MAX_LINE_LENGTH {
+                return Err(crate::TransportError::ReceiveError(format!(
+                    "line too long: {} bytes (max: {})",
+                    line.len(),
+                    MAX_LINE_LENGTH
+                )));
+            }
+            // 跳过空行（仅有换行符的行）
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let envelope: ServerEnvelope = serde_json::from_str(trimmed).map_err(|e| {
+                crate::TransportError::ReceiveError(format!("deserialization error: {}", e))
+            })?;
+            return Ok(envelope);
+        }
     }
 
     async fn close(&mut self) -> TransportResult<()> {
+        self.writer
+            .flush()
+            .await
+            .map_err(|e| crate::TransportError::SendError(format!("flush on close: {}", e)))?;
         Ok(())
     }
 }
@@ -85,6 +110,8 @@ where
     }
 
     /// 读取一行 JSONL 数据（不经过 Transport trait，直接操作 reader）
+    ///
+    /// 返回去除尾随换行符的字符串。EOF 时返回 `Ok(None)`。
     pub async fn receive_line(&mut self) -> TransportResult<Option<String>> {
         let mut line = String::new();
         let n = self
@@ -94,6 +121,21 @@ where
             .map_err(|e| TransportError::ReceiveError(format!("read error: {}", e)))?;
         if n == 0 {
             return Ok(None);
+        }
+        // 检查行长度限制
+        if line.len() > MAX_LINE_LENGTH {
+            return Err(TransportError::ReceiveError(format!(
+                "line too long: {} bytes (max: {})",
+                line.len(),
+                MAX_LINE_LENGTH
+            )));
+        }
+        // 去除尾随换行符
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
         }
         Ok(Some(line))
     }
@@ -198,6 +240,18 @@ mod tests {
             };
             let result = transport.handshake(client_caps).await;
             assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn test_receive_eof_returns_eof_error() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let input = Builder::new().read(b"").build();
+            let mut output = Vec::new();
+            let mut transport = JsonlTransport::new(input, &mut output);
+            let result = Transport::receive(&mut transport).await;
+            assert!(matches!(result, Err(TransportError::Eof)));
         });
     }
 }

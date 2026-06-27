@@ -64,14 +64,14 @@ impl AsRef<str> for ComponentId {
     }
 }
 
-/// Unicode XID_Start 检查（简化版，覆盖 ASCII + 常见 Unicode）
+/// Unicode XID_Start 检查，使用 unicode-ident crate 实现严格 UAX #31 验证
 fn is_xid_start(c: char) -> bool {
-    c == '_' || c.is_ascii_alphabetic() || (c as u32) > 0x7F
+    c == '_' || unicode_ident::is_xid_start(c)
 }
 
-/// Unicode XID_Continue 检查
+/// Unicode XID_Continue 检查，使用 unicode-ident crate 实现严格 UAX #31 验证
 fn is_xid_continue(c: char) -> bool {
-    is_xid_start(c) || c.is_ascii_alphanumeric() || (c as u32) > 0x7F
+    c == '_' || unicode_ident::is_xid_continue(c)
 }
 
 // ---- DynamicValue ----
@@ -267,7 +267,7 @@ impl Component {
                 accessibility: None,
                 weight: None,
             },
-            properties: serde_json::json!({"children": {"children": ids}}),
+            properties: serde_json::json!({"children": ids}),
         }
     }
 
@@ -281,7 +281,7 @@ impl Component {
                 accessibility: None,
                 weight: None,
             },
-            properties: serde_json::json!({"children": {"children": ids}}),
+            properties: serde_json::json!({"children": ids}),
         }
     }
 
@@ -475,5 +475,30 @@ mod tests {
         assert_eq!(ComponentType::Text.as_str(), "Text");
         assert_eq!(ComponentType::Button.as_str(), "Button");
         assert_eq!(ComponentType::Column.as_str(), "Column");
+    }
+
+    #[test]
+    fn test_component_id_rejects_zero_width_space() {
+        // U+200B 零宽空格不是 XID_Continue，应被拒绝
+        assert!(ComponentId::new("my\u{200B}button").is_err());
+    }
+
+    #[test]
+    fn test_component_id_rejects_math_symbol() {
+        // U+2200 ∀ 数学符号不是 XID_Continue，应被拒绝
+        assert!(ComponentId::new("my∀button").is_err());
+    }
+
+    #[test]
+    fn test_component_id_allows_chinese() {
+        // 中文字符是 XID_Continue，应被接受
+        assert!(ComponentId::new("按钮").is_ok());
+    }
+
+    #[test]
+    fn test_component_id_allows_unicode_letters() {
+        // 拉丁扩展字符是有效的 XID 字符
+        assert!(ComponentId::new("café").is_ok());
+        assert!(ComponentId::new("naïve").is_ok());
     }
 }
