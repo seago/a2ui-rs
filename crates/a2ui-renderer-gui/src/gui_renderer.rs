@@ -161,9 +161,14 @@ impl GuiRenderer {
                 let mut user_events: Vec<a2ui_renderer::UserEvent> = Vec::new();
 
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    // 居中并限制最大宽度，模拟登录卡片效果
-                    ui.vertical_centered(|ui| {
-                        ui.set_max_width(400.0);
+                    // 居中：用左右等距 inner_margin 把内容挤到中间
+                    let window_w = ui.available_width();
+                    let card_w = 400.0_f32.min(window_w - 32.0);
+                    let margin = ((window_w - card_w) / 2.0).max(0.0);
+
+                    let frame = egui::Frame::default()
+                        .inner_margin(egui::Vec2::new(margin, 0.0));
+                    frame.show(ui, |ui| {
                         mapper.render_gui_widget(
                             &root_clone,
                             ui,
