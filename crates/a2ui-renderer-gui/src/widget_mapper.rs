@@ -504,11 +504,16 @@ impl WidgetMapper {
                 id,
                 value,
                 placeholder,
-                variant: _,
+                variant,
             } => {
                 let mut text = value.clone();
-                let response =
-                    ui.add(egui::TextEdit::singleline(&mut text).hint_text(placeholder.clone()));
+                let is_password = variant == "obscured";
+                let text_edit = if is_password {
+                    egui::TextEdit::singleline(&mut text).password(true)
+                } else {
+                    egui::TextEdit::singleline(&mut text)
+                };
+                let response = ui.add(text_edit.hint_text(placeholder.clone()));
                 response_tracker.insert(id.as_str().to_string(), response);
             }
             RenderableGuiWidget::ChoicePicker {
