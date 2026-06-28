@@ -1,3 +1,4 @@
+use crate::focus_manager::FocusManager;
 use crate::{widget_builder::RenderableWidget, WidgetBuilder, WidgetMapper};
 use a2ui_core::message::{
     client_to_server::FunctionResponse,
@@ -35,8 +36,8 @@ pub struct TuiRenderer {
     dispatcher: FunctionDispatcher,
     /// Catalog 注册表（用于 catalogId 信任链校验）
     catalog_registry: CatalogRegistry,
-    /// 当前聚焦的组件
-    focused_component: Option<ComponentId>,
+    /// 焦点管理器
+    pub focus_manager: FocusManager,
     /// P1-2: action_id → response_path 映射（responsePath 写回用）
     pending_responses: HashMap<String, String>,
     /// P2-2: Surface 的 sendDataModel 标记（为 true 时 action 附带完整 data model）
@@ -66,7 +67,7 @@ impl TuiRenderer {
             dependency_graph: DependencyGraph::new(),
             dispatcher: FunctionDispatcher::new(),
             catalog_registry: CatalogRegistry::with_defaults(),
-            focused_component: None,
+            focus_manager: FocusManager::new(),
             pending_responses: HashMap::new(),
             send_data_model: HashMap::new(),
             dirty_surfaces: HashSet::new(),
@@ -180,6 +181,17 @@ impl TuiRenderer {
 
         let total: usize = all_widgets.iter().map(|(_, w)| w.len()).sum();
         self.last_frame_widget_count = total;
+
+        // 收集所有可聚焦组件 ID
+        let mut focusable_ids = Vec::new();
+        for (surface_id, _) in &all_widgets {
+            for comp in self.forest.components_of(surface_id) {
+                if mapper.is_focusable(comp) {
+                    focusable_ids.push(comp.id().clone());
+                }
+            }
+        }
+        self.focus_manager.set_focusable(focusable_ids);
 
         Ok(all_widgets)
     }
@@ -501,22 +513,33 @@ impl Renderer for TuiRenderer {
                 Ok(Some(action))
             }
             UserEvent::KeyPress { key } => {
-                if key == "Enter" || key == " " {
-                    if let Some(ref comp_id) = self.focused_component {
-                        let mut action = ActionMessage::event("activate", "").with_context(
-                            "source",
-                            DynamicValue::Literal(Value::String(comp_id.as_str().to_string())),
-                        );
-                        if let Some(surface_id) = surface_for(comp_id) {
-                            if let Some(binding) = self.data_bindings.get(&surface_id) {
-                                action = action.with_context(
-                                    "dataModel",
-                                    DynamicValue::Literal(binding.as_value().clone()),
-                                );
-                            }
-                        }
-                        return Ok(Some(action));
+                match key.as_str() {
+                    "Tab" | "Down" => {
+                        self.focus_manager.next();
+                        return Ok(None);
                     }
+                    "Up" => {
+                        self.focus_manager.previous();
+                        return Ok(None);
+                    }
+                    "Enter" | " " => {
+                        if let Some(comp_id) = self.focus_manager.current().cloned() {
+                            let mut action = ActionMessage::event("activate", "").with_context(
+                                "source",
+                                DynamicValue::Literal(Value::String(comp_id.as_str().to_string())),
+                            );
+                            if let Some(surface_id) = surface_for(&comp_id) {
+                                if let Some(binding) = self.data_bindings.get(&surface_id) {
+                                    action = action.with_context(
+                                        "dataModel",
+                                        DynamicValue::Literal(binding.as_value().clone()),
+                                    );
+                                }
+                            }
+                            return Ok(Some(action));
+                        }
+                    }
+                    _ => {}
                 }
                 Ok(None)
             }
@@ -612,7 +635,7 @@ mod tests {
         );
         let _msg = CreateSurface {
             surface_id: "s1".to_string(),
-            catalog_id: "basic".to_string(),
+            catalog_id: "a2ui://catalogs/basic/v1".to_string(),
             surface_properties: None,
             send_data_model: false,
             components: Some(vec![comp]),
@@ -648,7 +671,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp_a, comp_b]),
@@ -686,7 +709,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp_a, comp_b]),
@@ -722,7 +745,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -755,7 +778,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![root, title]),
@@ -788,7 +811,7 @@ mod tests {
             renderer
                 .create_surface(CreateSurface {
                     surface_id: format!("s{}", i),
-                    catalog_id: "basic".into(),
+                    catalog_id: "a2ui://catalogs/basic/v1".into(),
                     surface_properties: None,
                     send_data_model: false,
                     components: Some(vec![comp.clone()]),
@@ -802,7 +825,7 @@ mod tests {
         let result = renderer
             .create_surface(CreateSurface {
                 surface_id: "overflow".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -831,7 +854,7 @@ mod tests {
         let result = renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(components),
@@ -859,7 +882,7 @@ mod tests {
         let result = renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(components),
@@ -989,7 +1012,7 @@ mod tests {
         let result = renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1010,7 +1033,7 @@ mod tests {
         let result = renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1042,7 +1065,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![parent, template]),
@@ -1082,7 +1105,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![parent, template]),
@@ -1113,7 +1136,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1151,7 +1174,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1192,7 +1215,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1229,7 +1252,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: true,
                 components: Some(vec![comp]),
@@ -1266,7 +1289,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1296,7 +1319,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: true,
                 components: Some(vec![comp]),
@@ -1345,7 +1368,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![tf]),
@@ -1376,7 +1399,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![cb]),
@@ -1407,7 +1430,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![sl]),
@@ -1462,7 +1485,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1499,7 +1522,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1533,7 +1556,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1574,7 +1597,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1616,7 +1639,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1645,7 +1668,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1667,5 +1690,53 @@ mod tests {
         assert!(result.is_ok());
         // 无 surface 时 widget 数为 0
         assert_eq!(renderer.last_frame_widget_count, 0);
+    }
+
+    // ---- FocusManager integration tests ----
+
+    #[tokio::test]
+    async fn test_focus_manager_collects_focusable_after_render() {
+        let mut renderer = TuiRenderer::new();
+        let btn: Component = serde_json::from_str(
+            r#"{"id":"btn","component":"Button","child":"lbl","text":"Click"}"#,
+        ).unwrap();
+        let tf: Component = serde_json::from_str(
+            r#"{"id":"tf","component":"TextField","value":"","placeholder":"Enter"}"#,
+        ).unwrap();
+        let root: Component = serde_json::from_str(
+            r#"{"id":"root","component":"Column","children":["btn","tf"]}"#,
+        ).unwrap();
+        renderer.create_surface(CreateSurface {
+            surface_id: "s1".into(), catalog_id: "basic".into(),
+            surface_properties: None, send_data_model: false,
+            components: Some(vec![root, btn, tf]),
+            data_model: None,
+        }).await.unwrap();
+
+        renderer.render().await.unwrap();
+        // 焦点管理器应收集了 2 个可聚焦组件（Button + TextField）
+        assert!(renderer.focus_manager.focusable_count() >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_tab_key_navigates_focus() {
+        let mut renderer = TuiRenderer::new();
+        let btn: Component = serde_json::from_str(
+            r#"{"id":"btn","component":"Button","child":"lbl","text":"OK"}"#,
+        ).unwrap();
+        let root: Component = serde_json::from_str(
+            r#"{"id":"root","component":"Column","children":["btn"]}"#,
+        ).unwrap();
+        renderer.create_surface(CreateSurface {
+            surface_id: "s1".into(), catalog_id: "basic".into(),
+            surface_properties: None, send_data_model: false,
+            components: Some(vec![root, btn]),
+            data_model: None,
+        }).await.unwrap();
+        renderer.render().await.unwrap();
+
+        // Tab 键应切换焦点
+        let result = renderer.handle_user_event(UserEvent::KeyPress { key: "Tab".into() }).await;
+        assert!(result.is_ok());
     }
 }

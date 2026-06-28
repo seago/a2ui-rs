@@ -98,6 +98,14 @@ impl ComponentForest {
             .map(|s| s.as_str())
     }
 
+    /// 获取指定 Surface 中的所有组件
+    pub fn components_of(&self, surface_id: &str) -> Vec<&Component> {
+        self.surfaces
+            .get(surface_id)
+            .map(|s| s.components.values().collect())
+            .unwrap_or_default()
+    }
+
     /// 获取指定 Surface 的组件
     pub fn get(&self, surface_id: &str, component_id: &ComponentId) -> Option<&Component> {
         self.surfaces.get(surface_id)?.components.get(component_id)
