@@ -228,8 +228,21 @@ impl<'a> WidgetBuilder<'a> {
         let props = component.properties();
         let mut ids = Vec::new();
 
-        // 检查 children 属性
+        // 检查 children 属性 — 支持两种格式：
+        // 1. 数组格式: {"children": ["id1", "id2"]}（Component::column() 生成）
+        // 2. 对象格式: {"children": {"children": [...]}}（旧版兼容）
         if let Some(children_val) = props.get("children") {
+            // 数组格式
+            if let Some(children_arr) = children_val.as_array() {
+                for id_val in children_arr {
+                    if let Some(id_str) = id_val.as_str() {
+                        if let Ok(id) = ComponentId::new(id_str) {
+                            ids.push(id);
+                        }
+                    }
+                }
+            }
+            // 对象格式（兼容）
             if let Some(children_obj) = children_val.as_object() {
                 if let Some(ids_val) = children_obj.get("children") {
                     if let Some(ids_arr) = ids_val.as_array() {
