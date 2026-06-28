@@ -396,4 +396,40 @@ mod tests {
         let def = a2ui_renderer::CustomComponentDef::new("MyWidget");
         assert!(renderer.register_custom_component(def).is_ok());
     }
+
+    #[tokio::test]
+    async fn test_create_surface_with_path_binding() {
+        let mut renderer = IcedRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("root").unwrap(),
+            DynamicValue::Path { path: "/user/name".into() },
+        );
+        let result = renderer.create_surface(CreateSurface {
+            surface_id: "s1".into(), catalog_id: "a2ui://catalogs/basic/v1".into(),
+            surface_properties: None, send_data_model: false,
+            components: Some(vec![comp]),
+            data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+        }).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_update_data_model_changes_value() {
+        let mut renderer = IcedRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("root").unwrap(),
+            DynamicValue::Path { path: "/data".into() },
+        );
+        renderer.create_surface(CreateSurface {
+            surface_id: "s1".into(), catalog_id: "a2ui://catalogs/basic/v1".into(),
+            surface_properties: None, send_data_model: false,
+            components: Some(vec![comp]),
+            data_model: Some(serde_json::json!({"data": "old"})),
+        }).await.unwrap();
+
+        let result = renderer.update_data_model(UpdateDataModel {
+            surface_id: "s1".into(), path: Some("/data".into()), value: Some(json!("new")),
+        }).await;
+        assert!(result.is_ok());
+    }
 }
