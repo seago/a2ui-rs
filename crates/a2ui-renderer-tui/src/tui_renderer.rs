@@ -65,7 +65,7 @@ impl TuiRenderer {
             data_bindings: HashMap::new(),
             dependency_graph: DependencyGraph::new(),
             dispatcher: FunctionDispatcher::new(),
-            catalog_registry: CatalogRegistry::new(),
+            catalog_registry: CatalogRegistry::with_defaults(),
             focused_component: None,
             pending_responses: HashMap::new(),
             send_data_model: HashMap::new(),
@@ -476,12 +476,13 @@ impl Renderer for TuiRenderer {
     }
 
     async fn handle_user_event(&mut self, event: UserEvent) -> RenderResult<Option<ActionMessage>> {
-        // P2-2: 查找 sendDataModel 标记的 surface（如果有）
-        let send_data_surface = self
-            .send_data_model
-            .iter()
-            .find(|(_, &enabled)| enabled)
-            .map(|(sid, _)| sid.clone());
+        // 确定性地查找 event 所属的 surface: 使用 component_id 反向索引
+        let surface_for = |comp_id: &ComponentId| -> Option<String> {
+            self.forest
+                .surface_of(comp_id)
+                .filter(|sid| self.send_data_model.get(*sid).copied().unwrap_or(false))
+                .map(String::from)
+        };
 
         match event {
             UserEvent::Click { component_id } => {
@@ -489,9 +490,8 @@ impl Renderer for TuiRenderer {
                     "source",
                     DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
                 );
-                // P2-2: 附加 data model
-                if let Some(ref surface_id) = send_data_surface {
-                    if let Some(binding) = self.data_bindings.get(surface_id) {
+                if let Some(surface_id) = surface_for(&component_id) {
+                    if let Some(binding) = self.data_bindings.get(&surface_id) {
                         action = action.with_context(
                             "dataModel",
                             DynamicValue::Literal(binding.as_value().clone()),
@@ -507,8 +507,8 @@ impl Renderer for TuiRenderer {
                             "source",
                             DynamicValue::Literal(Value::String(comp_id.as_str().to_string())),
                         );
-                        if let Some(ref surface_id) = send_data_surface {
-                            if let Some(binding) = self.data_bindings.get(surface_id) {
+                        if let Some(surface_id) = surface_for(comp_id) {
+                            if let Some(binding) = self.data_bindings.get(&surface_id) {
                                 action = action.with_context(
                                     "dataModel",
                                     DynamicValue::Literal(binding.as_value().clone()),
@@ -530,8 +530,8 @@ impl Renderer for TuiRenderer {
                         DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
                     )
                     .with_context("value", DynamicValue::Literal(Value::String(value)));
-                if let Some(ref surface_id) = send_data_surface {
-                    if let Some(binding) = self.data_bindings.get(surface_id) {
+                if let Some(surface_id) = surface_for(&component_id) {
+                    if let Some(binding) = self.data_bindings.get(&surface_id) {
                         action = action.with_context(
                             "dataModel",
                             DynamicValue::Literal(binding.as_value().clone()),
@@ -553,8 +553,8 @@ impl Renderer for TuiRenderer {
                         "checked",
                         DynamicValue::Literal(Value::String(checked.to_string())),
                     );
-                if let Some(ref surface_id) = send_data_surface {
-                    if let Some(binding) = self.data_bindings.get(surface_id) {
+                if let Some(surface_id) = surface_for(&component_id) {
+                    if let Some(binding) = self.data_bindings.get(&surface_id) {
                         action = action.with_context(
                             "dataModel",
                             DynamicValue::Literal(binding.as_value().clone()),
@@ -576,8 +576,8 @@ impl Renderer for TuiRenderer {
                         "value",
                         DynamicValue::Literal(Value::String(value.to_string())),
                     );
-                if let Some(ref surface_id) = send_data_surface {
-                    if let Some(binding) = self.data_bindings.get(surface_id) {
+                if let Some(surface_id) = surface_for(&component_id) {
+                    if let Some(binding) = self.data_bindings.get(&surface_id) {
                         action = action.with_context(
                             "dataModel",
                             DynamicValue::Literal(binding.as_value().clone()),
@@ -1000,9 +1000,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_catalog_trust_chain_skipped_when_empty() {
+    async fn test_catalog_trust_chain_accepts_registered_catalog() {
         let mut renderer = TuiRenderer::new();
-        // 未注册任何 Catalog → 应接受任意 catalogId（向后兼容）
+        // Basic Catalog 已自动注册 → 使用已注册的 catalogId 应成功
         let comp = Component::text(
             ComponentId::new("root").unwrap(),
             DynamicValue::Literal("Hello".to_string()),
@@ -1010,7 +1010,7 @@ mod tests {
         let result = renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "any-catalog".into(),
+                catalog_id: "basic".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1240,7 +1240,7 @@ mod tests {
 
         let result = renderer
             .handle_user_event(UserEvent::Click {
-                component_id: ComponentId::new("btn").unwrap(),
+                component_id: ComponentId::new("root").unwrap(),
             })
             .await
             .unwrap();
@@ -1277,7 +1277,7 @@ mod tests {
 
         let result = renderer
             .handle_user_event(UserEvent::Click {
-                component_id: ComponentId::new("btn").unwrap(),
+                component_id: ComponentId::new("root").unwrap(),
             })
             .await
             .unwrap();
@@ -1318,7 +1318,7 @@ mod tests {
         // 触发 action 时应包含最新 DataModel
         let result = renderer
             .handle_user_event(UserEvent::Click {
-                component_id: ComponentId::new("btn").unwrap(),
+                component_id: ComponentId::new("root").unwrap(),
             })
             .await
             .unwrap();

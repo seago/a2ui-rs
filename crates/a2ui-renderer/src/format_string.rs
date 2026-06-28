@@ -16,8 +16,8 @@ fn interpolation_regex() -> &'static regex::Regex {
 ///
 /// 字面量文本原样保留。
 ///
-/// 注意：返回的字符串可能需要按渲染器上下文做转义（HTML/ANSI/原生）。
-/// 当前实现会做 HTML 转义，TUI/GUI 渲染器在使用时应知晓这一点。
+/// 注意：返回的字符串是原始文本，**不进行任何上下文转义**。
+/// 调用方（渲染器）应根据自身上下文（HTML/ANSI/原生）自行进行适当转义。
 pub struct FormatString;
 
 impl FormatString {
@@ -44,7 +44,7 @@ impl FormatString {
                 if let Ok(value) =
                     dispatcher.dispatch(func_name, args_value, CallableFrom::ClientOrRemote)
                 {
-                    return html_escape(&value_to_string(value));
+                    return value_to_string(value);
                 }
                 // 函数不可用或执行失败 → 返回空
                 return "".into();
@@ -52,7 +52,7 @@ impl FormatString {
 
             // 否则解析为 JSON Pointer 路径
             match resolver.resolve(expr) {
-                Some(value) => html_escape(&value_to_string(value)),
+                Some(value) => value_to_string(value),
                 None => "".into(),
             }
         })
@@ -165,41 +165,50 @@ mod tests {
         assert_eq!(result, "");
     }
 
-    // --- P2-1: formatString HTML escaping ---
+    // --- P2-1: formatString HTML escaping (removed from resolve; now renderer's responsibility) ---
 
     #[test]
-    fn test_resolve_escapes_html_in_path_value() {
+    fn test_resolve_passes_html_raw() {
         let dm = a2ui_core::DataModel::new(json!({"name": "<script>alert(1)</script>"}));
         let resolver = PathResolver::new(dm);
         let dispatcher = FunctionDispatcher::new();
         let result = FormatString::resolve("Hello, ${name}!", &resolver, &dispatcher);
-        assert_eq!(result, "Hello, &lt;script&gt;alert(1)&lt;/script&gt;!");
+        assert_eq!(result, "Hello, <script>alert(1)</script>!");
     }
 
     #[test]
-    fn test_resolve_escapes_ampersand() {
+    fn test_resolve_passes_ampersand_raw() {
         let dm = a2ui_core::DataModel::new(json!({"brand": "A&T"}));
         let resolver = PathResolver::new(dm);
         let dispatcher = FunctionDispatcher::new();
         let result = FormatString::resolve("${brand}", &resolver, &dispatcher);
-        assert_eq!(result, "A&amp;T");
+        assert_eq!(result, "A&T");
     }
 
     #[test]
-    fn test_resolve_escapes_quotes() {
+    fn test_resolve_passes_quotes_raw() {
         let dm = a2ui_core::DataModel::new(json!({"msg": "say \"hello\""}));
         let resolver = PathResolver::new(dm);
         let dispatcher = FunctionDispatcher::new();
         let result = FormatString::resolve("${msg}", &resolver, &dispatcher);
-        assert_eq!(result, "say &quot;hello&quot;");
+        assert_eq!(result, "say \"hello\"");
     }
 
     #[test]
-    fn test_resolve_no_escape_on_safe_text() {
-        let dm = a2ui_core::DataModel::new(json!({"name": "Alice"}));
+    fn test_format_string_no_html_escape() {
+        // Verify resolve() returns raw &, not &amp;
+        let dm = a2ui_core::DataModel::new(json!({"text": "A & B"}));
         let resolver = PathResolver::new(dm);
-        let dispatcher = FunctionDispatcher::new();
-        let result = FormatString::resolve("Hello, ${name}!", &resolver, &dispatcher);
-        assert_eq!(result, "Hello, Alice!");
+        let result = FormatString::resolve("${text}", &resolver, &FunctionDispatcher::new());
+        assert_eq!(result, "A & B");
+        assert!(!result.contains("&amp;"));
+    }
+
+    #[test]
+    fn test_format_string_preserves_unicode() {
+        let dm = a2ui_core::DataModel::new(json!({"name": "你好"}));
+        let resolver = PathResolver::new(dm);
+        let result = FormatString::resolve("${name}", &resolver, &FunctionDispatcher::new());
+        assert_eq!(result, "你好");
     }
 }

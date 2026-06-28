@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "a2ui://catalogs/basic/v1",
-  "catalogId": "a2ui://catalogs/basic/v1",
+  "catalogId": "basic",
   "instructions": "# A2UI Basic Catalog\n\nStandard component set for A2UI Protocol v1.0.",
   "components": {
     "Text": {"type":"object","required":["text"],"properties":{"text":{"anyOf":[{"type":"string"},{"$ref":"#/$defs/dynamicString"}]}}},

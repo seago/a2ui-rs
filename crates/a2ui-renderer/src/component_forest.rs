@@ -29,9 +29,20 @@ impl ComponentTreeNode {
 
 /// 组件森林：管理所有 Surface 的组件树
 /// 使用邻接表模型：flat list + ID map，延迟构建树
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ComponentForest {
     surfaces: HashMap<String, ComponentSurface>,
+    /// 反向索引: component_id → surface_id（O(1) 确定性查找）
+    component_to_surface: HashMap<ComponentId, String>,
+}
+
+impl Default for ComponentForest {
+    fn default() -> Self {
+        Self {
+            surfaces: HashMap::new(),
+            component_to_surface: HashMap::new(),
+        }
+    }
 }
 
 /// 单个 Surface 的组件存储
@@ -48,7 +59,10 @@ struct ComponentSurface {
 impl ComponentForest {
     /// 创建新的空组件森林
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            surfaces: HashMap::new(),
+            component_to_surface: HashMap::new(),
+        }
     }
 
     /// 向指定 Surface 添加或更新组件
@@ -69,9 +83,19 @@ impl ComponentForest {
             surface.root = comp_id.clone();
         }
 
-        surface.components.insert(comp_id, component);
-        surface.tree = None; // 失效缓存
+        surface.components.insert(comp_id.clone(), component);
+        // 维护反向索引
+        self.component_to_surface
+            .insert(comp_id, surface_id.to_string());
+        surface.tree = None;
         Ok(())
+    }
+
+    /// 通过 component_id 查找所属的 surface_id
+    pub fn surface_of(&self, component_id: &ComponentId) -> Option<&str> {
+        self.component_to_surface
+            .get(component_id)
+            .map(|s| s.as_str())
     }
 
     /// 获取指定 Surface 的组件
@@ -87,6 +111,12 @@ impl ComponentForest {
 
     /// 移除整个 Surface
     pub fn remove_surface(&mut self, surface_id: &str) -> RenderResult<()> {
+        // 清理反向索引
+        if let Some(surface) = self.surfaces.get(surface_id) {
+            for comp_id in surface.components.keys() {
+                self.component_to_surface.remove(comp_id);
+            }
+        }
         self.surfaces.remove(surface_id);
         Ok(())
     }
@@ -780,5 +810,41 @@ mod tests {
 
         let result = forest.expand_templates("s1", &binding, &resolver, &FunctionDispatcher::new());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_surface_of_returns_correct_surface() {
+        let mut forest = ComponentForest::new();
+        let c1 = Component::text(
+            ComponentId::new("c1").unwrap(),
+            DynamicValue::Literal("S1".to_string()),
+        );
+        let c2 = Component::text(
+            ComponentId::new("c2").unwrap(),
+            DynamicValue::Literal("S2".to_string()),
+        );
+        forest.upsert("s1", c1).unwrap();
+        forest.upsert("s2", c2).unwrap();
+        assert_eq!(forest.surface_of(&ComponentId::new("c1").unwrap()), Some("s1"));
+        assert_eq!(forest.surface_of(&ComponentId::new("c2").unwrap()), Some("s2"));
+    }
+
+    #[test]
+    fn test_surface_of_nonexistent() {
+        let forest = ComponentForest::new();
+        assert_eq!(forest.surface_of(&ComponentId::new("noexist").unwrap()), None);
+    }
+
+    #[test]
+    fn test_remove_surface_cleans_reverse_index() {
+        let mut forest = ComponentForest::new();
+        let c = Component::text(
+            ComponentId::new("c1").unwrap(),
+            DynamicValue::Literal("X".to_string()),
+        );
+        forest.upsert("s1", c).unwrap();
+        assert!(forest.surface_of(&ComponentId::new("c1").unwrap()).is_some());
+        forest.remove_surface("s1").unwrap();
+        assert!(forest.surface_of(&ComponentId::new("c1").unwrap()).is_none());
     }
 }
