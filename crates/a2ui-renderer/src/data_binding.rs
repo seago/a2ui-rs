@@ -32,9 +32,15 @@ impl DataBinding {
     {
         match dynamic {
             DynamicValue::Literal(v) => Ok(v.clone().into()),
-            DynamicValue::Path { path } => self.data_model.get_safe(path).ok().flatten().cloned().ok_or_else(|| {
-                crate::error::RendererError::BindingError(format!("path not found: {}", path))
-            }),
+            DynamicValue::Path { path } => self
+                .data_model
+                .get_safe(path)
+                .ok()
+                .flatten()
+                .cloned()
+                .ok_or_else(|| {
+                    crate::error::RendererError::BindingError(format!("path not found: {}", path))
+                }),
             DynamicValue::FunctionCall { call, .. } => Err(
                 crate::error::RendererError::FunctionNotAvailable(call.clone()),
             ),

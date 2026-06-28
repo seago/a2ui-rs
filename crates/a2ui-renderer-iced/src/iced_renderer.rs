@@ -402,14 +402,20 @@ mod tests {
         let mut renderer = IcedRenderer::new();
         let comp = Component::text(
             ComponentId::new("root").unwrap(),
-            DynamicValue::Path { path: "/user/name".into() },
+            DynamicValue::Path {
+                path: "/user/name".into(),
+            },
         );
-        let result = renderer.create_surface(CreateSurface {
-            surface_id: "s1".into(), catalog_id: "a2ui://catalogs/basic/v1".into(),
-            surface_properties: None, send_data_model: false,
-            components: Some(vec![comp]),
-            data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
-        }).await;
+        let result = renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+            })
+            .await;
         assert!(result.is_ok());
     }
 
@@ -418,18 +424,29 @@ mod tests {
         let mut renderer = IcedRenderer::new();
         let comp = Component::text(
             ComponentId::new("root").unwrap(),
-            DynamicValue::Path { path: "/data".into() },
+            DynamicValue::Path {
+                path: "/data".into(),
+            },
         );
-        renderer.create_surface(CreateSurface {
-            surface_id: "s1".into(), catalog_id: "a2ui://catalogs/basic/v1".into(),
-            surface_properties: None, send_data_model: false,
-            components: Some(vec![comp]),
-            data_model: Some(serde_json::json!({"data": "old"})),
-        }).await.unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: Some(serde_json::json!({"data": "old"})),
+            })
+            .await
+            .unwrap();
 
-        let result = renderer.update_data_model(UpdateDataModel {
-            surface_id: "s1".into(), path: Some("/data".into()), value: Some(json!("new")),
-        }).await;
+        let result = renderer
+            .update_data_model(UpdateDataModel {
+                surface_id: "s1".into(),
+                path: Some("/data".into()),
+                value: Some(json!("new")),
+            })
+            .await;
         assert!(result.is_ok());
     }
 }

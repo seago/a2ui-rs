@@ -2,6 +2,17 @@ use crate::GuiRenderer;
 use a2ui_core::message::V1_0ServerMessage;
 use a2ui_core::ServerEnvelope;
 use a2ui_renderer::{RenderResult, Renderer};
+use std::time::Duration;
+
+/// 空闲时的低频轮询间隔。
+/// egui 本身不会因为 mpsc 收到消息自动唤醒，所以空闲时仍需周期性检查。
+const IDLE_REPAINT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RepaintPolicy {
+    Immediate,
+    After(Duration),
+}
 
 /// A2UI eframe 应用
 ///
@@ -99,14 +110,26 @@ impl A2uiApp {
             },
         }
     }
+
+    fn next_repaint_policy(had_updates: bool, emitted_actions: usize) -> RepaintPolicy {
+        if had_updates || emitted_actions > 0 {
+            RepaintPolicy::Immediate
+        } else {
+            RepaintPolicy::After(IDLE_REPAINT_POLL_INTERVAL)
+        }
+    }
 }
 
 impl eframe::App for A2uiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let mut had_updates = false;
+
         // 1. 处理所有待处理的 A2UI 消息
         while let Ok(envelope) = self.message_rx.try_recv() {
             match self.process_envelope(envelope) {
-                Ok(true) => {}
+                Ok(true) => {
+                    had_updates = true;
+                }
                 Ok(false) => {} // 能力协商等不需要重绘
                 Err(e) => {
                     tracing::error!("处理消息失败: {}", e);
@@ -115,8 +138,10 @@ impl eframe::App for A2uiApp {
         }
 
         // 2. 渲染当前帧，获取用户交互产生的 action
+        let mut emitted_actions = 0usize;
         match self.renderer.render_frame(ctx) {
             Ok(actions) => {
+                emitted_actions = actions.len();
                 for action in actions {
                     let envelope = a2ui_core::ClientEnvelope::V1_0(
                         a2ui_core::message::V1_0ClientMessage::Action(action),
@@ -129,8 +154,13 @@ impl eframe::App for A2uiApp {
             }
         }
 
-        // 3. 持续请求重绘（egui 即时模式需要）
-        ctx.request_repaint();
+        // 3. 按需重绘：
+        // - 有消息更新或用户 action 时立即刷新
+        // - 空闲时低频轮询消息队列，避免持续满帧占用 CPU
+        match Self::next_repaint_policy(had_updates, emitted_actions) {
+            RepaintPolicy::Immediate => ctx.request_repaint(),
+            RepaintPolicy::After(duration) => ctx.request_repaint_after(duration),
+        }
     }
 }
 
@@ -247,5 +277,29 @@ mod tests {
         let result = app.process_envelope(envelope);
         assert!(result.is_ok());
         assert!(!result.unwrap()); // had_updates = false (Capabilities 不需要重绘)
+    }
+
+    #[test]
+    fn test_next_repaint_policy_immediate_on_updates() {
+        assert_eq!(
+            A2uiApp::next_repaint_policy(true, 0),
+            RepaintPolicy::Immediate
+        );
+    }
+
+    #[test]
+    fn test_next_repaint_policy_immediate_on_actions() {
+        assert_eq!(
+            A2uiApp::next_repaint_policy(false, 1),
+            RepaintPolicy::Immediate
+        );
+    }
+
+    #[test]
+    fn test_next_repaint_policy_idle_poll_when_quiet() {
+        assert_eq!(
+            A2uiApp::next_repaint_policy(false, 0),
+            RepaintPolicy::After(IDLE_REPAINT_POLL_INTERVAL)
+        );
     }
 }

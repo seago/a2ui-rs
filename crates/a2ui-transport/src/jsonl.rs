@@ -53,11 +53,10 @@ where
     async fn receive(&mut self) -> TransportResult<ServerEnvelope> {
         loop {
             let mut line = String::new();
-            let n = self
-                .reader
-                .read_line(&mut line)
-                .await
-                .map_err(|e| crate::TransportError::ReceiveError(format!("read error: {}", e)))?;
+            let n =
+                self.reader.read_line(&mut line).await.map_err(|e| {
+                    crate::TransportError::ReceiveError(format!("read error: {}", e))
+                })?;
             if n == 0 {
                 return Err(crate::TransportError::Eof);
             }

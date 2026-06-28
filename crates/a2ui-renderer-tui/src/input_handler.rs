@@ -44,7 +44,11 @@ impl InputHandler {
     }
 
     /// 创建复选框切换事件
-    pub fn handle_check_toggle(&self, component_id: impl Into<String>, checked: bool) -> Option<UserEvent> {
+    pub fn handle_check_toggle(
+        &self,
+        component_id: impl Into<String>,
+        checked: bool,
+    ) -> Option<UserEvent> {
         let id = ComponentId::new(component_id.into()).ok()?;
         Some(UserEvent::CheckToggle {
             component_id: id,
@@ -53,7 +57,11 @@ impl InputHandler {
     }
 
     /// 创建滑块变化事件
-    pub fn handle_slider_change(&self, component_id: impl Into<String>, value: f64) -> Option<UserEvent> {
+    pub fn handle_slider_change(
+        &self,
+        component_id: impl Into<String>,
+        value: f64,
+    ) -> Option<UserEvent> {
         let id = ComponentId::new(component_id.into()).ok()?;
         Some(UserEvent::SliderChange {
             component_id: id,
@@ -152,7 +160,9 @@ mod tests {
     #[test]
     fn test_handle_slider_change() {
         let handler = InputHandler;
-        let event = handler.handle_slider_change("slider1", 0.75).expect("valid ID");
+        let event = handler
+            .handle_slider_change("slider1", 0.75)
+            .expect("valid ID");
         match event {
             UserEvent::SliderChange {
                 component_id,

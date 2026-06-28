@@ -285,7 +285,13 @@ impl ComponentForest {
     ) -> RenderResult<ComponentId> {
         let mut visited = HashSet::new();
         self.clone_and_resolve_subtree_inner(
-            surface_id, comp_id, suffix, scope_resolver, dispatcher, 0, &mut visited,
+            surface_id,
+            comp_id,
+            suffix,
+            scope_resolver,
+            dispatcher,
+            0,
+            &mut visited,
         )
     }
 
@@ -316,20 +322,22 @@ impl ComponentForest {
 
         // 获取原始组件
         let original = {
-            let surface = self.surfaces.get(surface_id).ok_or_else(|| {
-                RendererError::SurfaceNotFound(surface_id.to_string())
-            })?;
-            surface.components.get(comp_id).cloned().ok_or_else(|| {
-                RendererError::ComponentNotFound(comp_id.clone())
-            })?
+            let surface = self
+                .surfaces
+                .get(surface_id)
+                .ok_or_else(|| RendererError::SurfaceNotFound(surface_id.to_string()))?;
+            surface
+                .components
+                .get(comp_id)
+                .cloned()
+                .ok_or_else(|| RendererError::ComponentNotFound(comp_id.clone()))?
         };
 
         let new_id_str = format!("{}_{}", comp_id.as_str(), suffix);
 
         // 序列化为 JSON，解析动态值，设置新 ID
-        let mut comp_json = serde_json::to_value(&original).map_err(|e| {
-            RendererError::CoreError(a2ui_core::A2uiError::Deserialization(e))
-        })?;
+        let mut comp_json = serde_json::to_value(&original)
+            .map_err(|e| RendererError::CoreError(a2ui_core::A2uiError::Deserialization(e)))?;
 
         if let Some(obj) = comp_json.as_object_mut() {
             obj.remove("id");
@@ -355,8 +363,13 @@ impl ComponentForest {
                             }
                         };
                         let new_child_id = self.clone_and_resolve_subtree_inner(
-                            surface_id, &child_id, suffix, scope_resolver, dispatcher,
-                            depth + 1, visited,
+                            surface_id,
+                            &child_id,
+                            suffix,
+                            scope_resolver,
+                            dispatcher,
+                            depth + 1,
+                            visited,
                         )?;
                         new_children.push(Value::String(new_child_id.as_str().to_string()));
                     }
@@ -368,8 +381,13 @@ impl ComponentForest {
             if let Some(child_val) = obj.get("child").and_then(|v| v.as_str()) {
                 if let Ok(child_id) = ComponentId::new(child_val) {
                     let new_child_id = self.clone_and_resolve_subtree_inner(
-                        surface_id, &child_id, suffix, scope_resolver, dispatcher,
-                        depth + 1, visited,
+                        surface_id,
+                        &child_id,
+                        suffix,
+                        scope_resolver,
+                        dispatcher,
+                        depth + 1,
+                        visited,
                     )?;
                     obj.insert(
                         "child".to_string(),
@@ -388,9 +406,8 @@ impl ComponentForest {
             }
         }
 
-        let new_comp: Component = serde_json::from_value(comp_json).map_err(|e| {
-            RendererError::CoreError(a2ui_core::A2uiError::Deserialization(e))
-        })?;
+        let new_comp: Component = serde_json::from_value(comp_json)
+            .map_err(|e| RendererError::CoreError(a2ui_core::A2uiError::Deserialization(e)))?;
         let new_id = ComponentId::new(&new_id_str)?;
         self.upsert(surface_id, new_comp)?;
         Ok(new_id)
@@ -454,7 +471,6 @@ impl ComponentForest {
         }
     }
 
-
     /// 构建组件树（含循环检测和深度限制）
     pub fn build_tree(&self, surface_id: &str) -> RenderResult<ComponentTreeNode> {
         let surface = self
@@ -502,9 +518,8 @@ impl ComponentForest {
                 if let Some(id_str) = id_val.as_str() {
                     if let Ok(child_id) = ComponentId::new(id_str) {
                         if let Some(child_comp) = all.get(&child_id) {
-                            let child_node = self.build_node_with_depth(
-                                child_comp, all, depth + 1, visited,
-                            )?;
+                            let child_node =
+                                self.build_node_with_depth(child_comp, all, depth + 1, visited)?;
                             node.children.push(child_node);
                         }
                     }
@@ -516,9 +531,8 @@ impl ComponentForest {
         if let Some(child_str) = props.get("child").and_then(|v| v.as_str()) {
             if let Ok(child_id) = ComponentId::new(child_str) {
                 if let Some(child_comp) = all.get(&child_id) {
-                    let child_node = self.build_node_with_depth(
-                        child_comp, all, depth + 1, visited,
-                    )?;
+                    let child_node =
+                        self.build_node_with_depth(child_comp, all, depth + 1, visited)?;
                     node.children.push(child_node);
                 }
             }
@@ -833,14 +847,23 @@ mod tests {
         );
         forest.upsert("s1", c1).unwrap();
         forest.upsert("s2", c2).unwrap();
-        assert_eq!(forest.surface_of(&ComponentId::new("c1").unwrap()), Some("s1"));
-        assert_eq!(forest.surface_of(&ComponentId::new("c2").unwrap()), Some("s2"));
+        assert_eq!(
+            forest.surface_of(&ComponentId::new("c1").unwrap()),
+            Some("s1")
+        );
+        assert_eq!(
+            forest.surface_of(&ComponentId::new("c2").unwrap()),
+            Some("s2")
+        );
     }
 
     #[test]
     fn test_surface_of_nonexistent() {
         let forest = ComponentForest::new();
-        assert_eq!(forest.surface_of(&ComponentId::new("noexist").unwrap()), None);
+        assert_eq!(
+            forest.surface_of(&ComponentId::new("noexist").unwrap()),
+            None
+        );
     }
 
     #[test]
@@ -851,8 +874,12 @@ mod tests {
             DynamicValue::Literal("X".to_string()),
         );
         forest.upsert("s1", c).unwrap();
-        assert!(forest.surface_of(&ComponentId::new("c1").unwrap()).is_some());
+        assert!(forest
+            .surface_of(&ComponentId::new("c1").unwrap())
+            .is_some());
         forest.remove_surface("s1").unwrap();
-        assert!(forest.surface_of(&ComponentId::new("c1").unwrap()).is_none());
+        assert!(forest
+            .surface_of(&ComponentId::new("c1").unwrap())
+            .is_none());
     }
 }

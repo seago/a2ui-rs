@@ -128,10 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             surface_properties: Some(json!({"agentDisplayName": "A2UI TUI Demo"})),
             send_data_model: false,
             components: Some(vec![
-                root,
-                title, subtitle, div1, div2,
-                tf, cb, sl, btn_label, btn,
-                item1, item2, item3,
+                root, title, subtitle, div1, div2, tf, cb, sl, btn_label, btn, item1, item2, item3,
                 footer,
             ]),
             data_model: None,

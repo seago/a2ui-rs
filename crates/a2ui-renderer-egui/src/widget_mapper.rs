@@ -1,5 +1,5 @@
 use a2ui_core::prelude::*;
-use a2ui_renderer::CustomComponentRegistry;
+use a2ui_renderer::{ComponentStyle, CustomComponentRegistry, StyleColor, StyleSpacing};
 use std::collections::HashMap;
 
 /// GUI 渲染目标 widget（用于 egui 即时模式渲染）
@@ -8,6 +8,7 @@ pub enum RenderableGuiWidget {
     Text {
         id: ComponentId,
         text: String,
+        style: ComponentStyle,
     },
     Button {
         id: ComponentId,
@@ -18,20 +19,24 @@ pub enum RenderableGuiWidget {
     Column {
         id: ComponentId,
         children_ids: Vec<ComponentId>,
+        style: ComponentStyle,
     },
     Row {
         id: ComponentId,
         children_ids: Vec<ComponentId>,
+        style: ComponentStyle,
     },
     Image {
         id: ComponentId,
         url: String,
         width: WidgetLength,
         height: WidgetLength,
+        style: ComponentStyle,
     },
     Card {
         id: ComponentId,
         child_id: ComponentId,
+        style: ComponentStyle,
     },
     CheckBox {
         id: ComponentId,
@@ -44,10 +49,12 @@ pub enum RenderableGuiWidget {
     Icon {
         id: ComponentId,
         name: String,
+        style: ComponentStyle,
     },
     List {
         id: ComponentId,
         children_ids: Vec<ComponentId>,
+        style: ComponentStyle,
     },
     Tabs {
         id: ComponentId,
@@ -171,6 +178,7 @@ impl WidgetMapper {
                 RenderableGuiWidget::Text {
                     id: component.id().clone(),
                     text,
+                    style: ComponentStyle::from_component_props(props),
                 }
             }
             "Button" => {
@@ -197,6 +205,7 @@ impl WidgetMapper {
                 RenderableGuiWidget::Column {
                     id: component.id().clone(),
                     children_ids,
+                    style: ComponentStyle::from_component_props(props),
                 }
             }
             "Row" => {
@@ -204,6 +213,7 @@ impl WidgetMapper {
                 RenderableGuiWidget::Row {
                     id: component.id().clone(),
                     children_ids,
+                    style: ComponentStyle::from_component_props(props),
                 }
             }
             "Image" => {
@@ -218,6 +228,7 @@ impl WidgetMapper {
                     url,
                     width,
                     height,
+                    style: ComponentStyle::from_component_props(props),
                 }
             }
             "Card" => {
@@ -229,6 +240,7 @@ impl WidgetMapper {
                 RenderableGuiWidget::Card {
                     id: component.id().clone(),
                     child_id,
+                    style: ComponentStyle::from_component_props(props),
                 }
             }
             "CheckBox" => {
@@ -268,6 +280,7 @@ impl WidgetMapper {
                 RenderableGuiWidget::Icon {
                     id: component.id().clone(),
                     name,
+                    style: ComponentStyle::from_component_props(props),
                 }
             }
             "List" => {
@@ -275,6 +288,7 @@ impl WidgetMapper {
                 RenderableGuiWidget::List {
                     id: component.id().clone(),
                     children_ids,
+                    style: ComponentStyle::from_component_props(props),
                 }
             }
             "Tabs" => {
@@ -434,8 +448,9 @@ impl WidgetMapper {
         image_textures: &HashMap<String, (egui::TextureId, [usize; 2])>,
     ) {
         match widget {
-            RenderableGuiWidget::Text { id, text } => {
-                let label = egui::Label::new(egui::RichText::new(text.clone())).wrap(true);
+            RenderableGuiWidget::Text { id, text, style } => {
+                let rich_text = apply_text_style(egui::RichText::new(text.clone()), style);
+                let label = egui::Label::new(rich_text).wrap(true);
                 let response = ui.add(label);
                 response_tracker.insert(id.as_str().to_string(), response);
             }
@@ -459,37 +474,77 @@ impl WidgetMapper {
                 }
                 if response.has_focus() {
                     ui.painter().rect_stroke(
-                        response.rect.expand(2.0), 2.0,
+                        response.rect.expand(2.0),
+                        2.0,
                         egui::Stroke::new(1.0, egui::Color32::from_rgb(25, 118, 210)),
                     );
                 }
                 response_tracker.insert(id.as_str().to_string(), response);
             }
-            RenderableGuiWidget::Column { children_ids, .. } => {
+            RenderableGuiWidget::Column {
+                children_ids,
+                style,
+                ..
+            } => {
                 let width = ui.available_width();
-                let height = ui.available_height();
-                ui.allocate_ui_with_layout(
-                    egui::vec2(width, height),
-                    egui::Layout::top_down_justified(egui::Align::Center),
-                    |ui| {
-                        ui.set_width(width);
-                        for child_id in children_ids {
-                            if let Some(child) = widget_map.get(child_id.as_str()) {
-                                self.render_gui_widget(
-                                    child,
-                                    ui,
-                                    widget_map,
-                                    response_tracker,
-                                    user_events,
-                                    image_textures,
-                                );
+                let contains_expanding_child = children_ids.iter().any(|child_id| {
+                    matches!(
+                        widget_map.get(child_id.as_str()),
+                        Some(RenderableGuiWidget::List { .. })
+                    )
+                });
+
+                if contains_expanding_child {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(width, ui.available_height()),
+                        egui::Layout::top_down_justified(egui::Align::Center),
+                        |ui| {
+                            ui.set_width(width);
+                            if let Some(spacing) = style.spacing {
+                                ui.spacing_mut().item_spacing = to_egui_spacing(spacing);
                             }
+                            for child_id in children_ids {
+                                if let Some(child) = widget_map.get(child_id.as_str()) {
+                                    self.render_gui_widget(
+                                        child,
+                                        ui,
+                                        widget_map,
+                                        response_tracker,
+                                        user_events,
+                                        image_textures,
+                                    );
+                                }
+                            }
+                        },
+                    );
+                } else {
+                    ui.set_width(width);
+                    if let Some(spacing) = style.spacing {
+                        ui.spacing_mut().item_spacing = to_egui_spacing(spacing);
+                    }
+                    for child_id in children_ids {
+                        if let Some(child) = widget_map.get(child_id.as_str()) {
+                            self.render_gui_widget(
+                                child,
+                                ui,
+                                widget_map,
+                                response_tracker,
+                                user_events,
+                                image_textures,
+                            );
                         }
-                    },
-                );
+                    }
+                }
             }
-            RenderableGuiWidget::Row { children_ids, .. } => {
+            RenderableGuiWidget::Row {
+                children_ids,
+                style,
+                ..
+            } => {
                 ui.horizontal(|ui| {
+                    if let Some(spacing) = style.spacing {
+                        ui.spacing_mut().item_spacing = to_egui_spacing(spacing);
+                    }
                     for child_id in children_ids {
                         if let Some(child) = widget_map.get(child_id.as_str()) {
                             self.render_gui_widget(
@@ -509,6 +564,7 @@ impl WidgetMapper {
                 url: _,
                 width,
                 height,
+                style,
             } => {
                 if let Some((tex_id, size)) = image_textures.get(id.as_str()) {
                     let original = egui::vec2(size[0] as f32, size[1] as f32);
@@ -528,22 +584,47 @@ impl WidgetMapper {
                             }
                         }
                     };
-                    let img =
-                        egui::Image::from_texture(egui::load::SizedTexture::new(*tex_id, original))
-                            .fit_to_exact_size(egui::vec2(target_width, target_height))
-                            .maintain_aspect_ratio(false);
-                    let response = ui.add(img);
+                    let target_size = egui::vec2(target_width, target_height);
+                    let (rect, response) =
+                        ui.allocate_exact_size(target_size, egui::Sense::hover());
+                    if ui.is_rect_visible(rect) {
+                        let uv = cover_uv(original, target_size);
+                        let mut image = egui::Image::from_texture(egui::load::SizedTexture::new(
+                            *tex_id, original,
+                        ))
+                        .uv(uv);
+                        if let Some(radius) = style.radius {
+                            image = image.rounding(radius);
+                        }
+                        image.paint_at(ui, rect);
+                    }
                     response_tracker.insert(id.as_str().to_string(), response);
                 } else {
                     let response = ui.label("🖼 Loading...");
                     response_tracker.insert(id.as_str().to_string(), response);
                 }
             }
-            RenderableGuiWidget::Card { child_id, .. } => {
+            RenderableGuiWidget::Card {
+                child_id, style, ..
+            } => {
                 let width = ui.available_width();
                 ui.set_width(width);
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.set_width(width);
+                let mut frame = egui::Frame::none();
+                if let Some(fill) = style.fill {
+                    frame = frame.fill(to_egui_color(fill));
+                }
+                if let Some(padding) = style.padding {
+                    frame = frame.inner_margin(egui::Margin::same(padding));
+                }
+                if let Some(radius) = style.radius {
+                    frame = frame.rounding(radius);
+                }
+                frame.show(ui, |ui| {
+                    let inner_width = ui.available_width();
+                    ui.set_width(inner_width);
+                    if let Some(spacing) = style.spacing {
+                        ui.spacing_mut().item_spacing = to_egui_spacing(spacing);
+                    }
                     if let Some(child) = widget_map.get(child_id.as_str()) {
                         self.render_gui_widget(
                             child,
@@ -576,60 +657,75 @@ impl WidgetMapper {
             RenderableGuiWidget::Divider { .. } => {
                 ui.separator();
             }
-            RenderableGuiWidget::Icon { id, name } => {
-                let label = egui::Label::new(egui::RichText::new(name.clone()).size(24.0));
+            RenderableGuiWidget::Icon { id, name, style } => {
+                let mut rich_text = egui::RichText::new(name.clone());
+                if style.font_size.is_none() {
+                    rich_text = rich_text.size(24.0);
+                }
+                let rich_text = apply_text_style(rich_text, style);
+                let label = egui::Label::new(rich_text);
                 let response = ui.add(label);
                 response_tracker.insert(id.as_str().to_string(), response);
             }
-            RenderableGuiWidget::List { children_ids, .. } => {
-                let viewport_height = ui.available_height().max(0.0);
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .min_scrolled_height(viewport_height)
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        for (index, child_id) in children_ids.iter().enumerate() {
-                            if index > 0 {
-                                ui.add_space(12.0);
-                            }
-                            if let Some(child) = widget_map.get(child_id.as_str()) {
-                                self.render_gui_widget(
-                                    child,
-                                    ui,
-                                    widget_map,
-                                    response_tracker,
-                                    user_events,
-                                    image_textures,
-                                );
-                            } else {
-                                ui.label(format!("[missing: {}]", child_id));
-                            }
-                        }
-                    });
-            }
-            RenderableGuiWidget::Tabs {
-                id, tabs_data, ..
+            RenderableGuiWidget::List {
+                id,
+                children_ids,
+                style,
+                ..
             } => {
+                let viewport_rect = ui.available_rect_before_wrap();
+                ui.allocate_ui_at_rect(viewport_rect, |ui| {
+                    ui.set_min_size(viewport_rect.size());
+                    ui.set_width(viewport_rect.width());
+                    egui::ScrollArea::vertical()
+                        .id_source(id.as_str())
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            if let Some(spacing) = style.spacing {
+                                ui.spacing_mut().item_spacing = to_egui_spacing(spacing);
+                            }
+                            ui.add_space(8.0);
+                            for (index, child_id) in children_ids.iter().enumerate() {
+                                if index > 0 {
+                                    ui.add_space(style.spacing.map(|s| s.y).unwrap_or(16.0));
+                                }
+                                if let Some(child) = widget_map.get(child_id.as_str()) {
+                                    self.render_gui_widget(
+                                        child,
+                                        ui,
+                                        widget_map,
+                                        response_tracker,
+                                        user_events,
+                                        image_textures,
+                                    );
+                                } else {
+                                    ui.label(format!("[missing: {}]", child_id));
+                                }
+                            }
+                            ui.add_space(8.0);
+                        });
+                });
+            }
+            RenderableGuiWidget::Tabs { id, tabs_data, .. } => {
                 if tabs_data.is_empty() {
                     return;
                 }
                 // 用 egui memory 存储活动 tab 索引
                 let state_id = ui.make_persistent_id(format!("tabs_{}", id.as_str()));
-                let mut active = ui
-                    .memory_mut(|mem| *mem.data.get_temp_mut_or::<usize>(state_id, 0));
+                let mut active =
+                    ui.memory_mut(|mem| *mem.data.get_temp_mut_or::<usize>(state_id, 0));
                 if active >= tabs_data.len() {
                     active = 0;
                 }
 
                 ui.horizontal(|ui| {
                     for (i, (title, _)) in tabs_data.iter().enumerate() {
-                        let btn = egui::Button::new(
-                            if i == active {
-                                egui::RichText::new(title.clone()).strong()
-                            } else {
-                                egui::RichText::new(title.clone())
-                            },
-                        );
+                        let btn = egui::Button::new(if i == active {
+                            egui::RichText::new(title.clone()).strong()
+                        } else {
+                            egui::RichText::new(title.clone())
+                        });
                         if ui.add(btn).clicked() {
                             active = i;
                             ui.memory_mut(|mem| mem.data.insert_temp::<usize>(state_id, active));
@@ -642,8 +738,12 @@ impl WidgetMapper {
                 if let Some((_, child_id)) = tabs_data.get(active) {
                     if let Some(child) = widget_map.get(child_id.as_str()) {
                         self.render_gui_widget(
-                            child, ui, widget_map, response_tracker,
-                            user_events, image_textures,
+                            child,
+                            ui,
+                            widget_map,
+                            response_tracker,
+                            user_events,
+                            image_textures,
                         );
                     }
                 }
@@ -655,14 +755,18 @@ impl WidgetMapper {
                 ..
             } => {
                 let modal_id = ui.make_persistent_id(format!("modal_{}", id.as_str()));
-                let mut open = ui
-                    .memory_mut(|mem| *mem.data.get_temp_mut_or::<bool>(modal_id, false));
+                let mut open =
+                    ui.memory_mut(|mem| *mem.data.get_temp_mut_or::<bool>(modal_id, false));
 
                 // 渲染 trigger
                 if let Some(trigger) = widget_map.get(trigger_id.as_str()) {
                     self.render_gui_widget(
-                        trigger, ui, widget_map, response_tracker,
-                        user_events, image_textures,
+                        trigger,
+                        ui,
+                        widget_map,
+                        response_tracker,
+                        user_events,
+                        image_textures,
                     );
                     // 检查 trigger 是否被点击
                     if let Some(resp) = response_tracker.get(trigger_id.as_str()) {
@@ -680,8 +784,12 @@ impl WidgetMapper {
                         .show(ui.ctx(), |ui| {
                             if let Some(content) = widget_map.get(content_id.as_str()) {
                                 self.render_gui_widget(
-                                    content, ui, widget_map, response_tracker,
-                                    user_events, image_textures,
+                                    content,
+                                    ui,
+                                    widget_map,
+                                    response_tracker,
+                                    user_events,
+                                    image_textures,
                                 );
                             }
                         });
@@ -835,6 +943,46 @@ fn extract_length_prop(
     }
 }
 
+fn apply_text_style(mut text: egui::RichText, style: &ComponentStyle) -> egui::RichText {
+    if let Some(size) = style.font_size {
+        text = text.size(size);
+    }
+    if style.strong {
+        text = text.strong();
+    }
+    if let Some(color) = style.color {
+        text = text.color(to_egui_color(color));
+    }
+    text
+}
+
+fn to_egui_color(color: StyleColor) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a)
+}
+
+fn to_egui_spacing(spacing: StyleSpacing) -> egui::Vec2 {
+    egui::vec2(spacing.x, spacing.y)
+}
+
+fn cover_uv(image_size: egui::Vec2, target_size: egui::Vec2) -> egui::Rect {
+    if image_size.x <= 0.0 || image_size.y <= 0.0 || target_size.x <= 0.0 || target_size.y <= 0.0 {
+        return egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
+    }
+
+    let image_aspect = image_size.x / image_size.y;
+    let target_aspect = target_size.x / target_size.y;
+
+    if image_aspect > target_aspect {
+        let visible_width = target_aspect / image_aspect;
+        let inset = (1.0 - visible_width) / 2.0;
+        egui::Rect::from_min_max(egui::pos2(inset, 0.0), egui::pos2(1.0 - inset, 1.0))
+    } else {
+        let visible_height = image_aspect / target_aspect;
+        let inset = (1.0 - visible_height) / 2.0;
+        egui::Rect::from_min_max(egui::pos2(0.0, inset), egui::pos2(1.0, 1.0 - inset))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -842,6 +990,76 @@ mod tests {
 
     fn empty_registry() -> CustomComponentRegistry {
         CustomComponentRegistry::new()
+    }
+
+    fn style_contract_props(component: &str) -> serde_json::Value {
+        json!({
+            "id": "styled",
+            "component": component,
+            "text": "Styled",
+            "name": "star",
+            "url": "https://example.com/image.png",
+            "child": "child",
+            "children": ["child"],
+            "style": {
+                "fontSize": 18,
+                "strong": true,
+                "color": "#112233",
+                "fill": "#44556680",
+                "padding": 9,
+                "spacing": {"x": 7, "y": 11},
+                "radius": 5
+            }
+        })
+    }
+
+    fn expected_contract_style() -> ComponentStyle {
+        ComponentStyle {
+            font_size: Some(18.0),
+            strong: true,
+            color: Some(StyleColor {
+                r: 17,
+                g: 34,
+                b: 51,
+                a: 255,
+            }),
+            fill: Some(StyleColor {
+                r: 68,
+                g: 85,
+                b: 102,
+                a: 128,
+            }),
+            padding: Some(9.0),
+            spacing: Some(StyleSpacing { x: 7.0, y: 11.0 }),
+            radius: Some(5.0),
+        }
+    }
+
+    #[test]
+    fn test_supported_style_components_keep_shared_contract_style() {
+        let mapper = WidgetMapper;
+        let expected = expected_contract_style();
+
+        for component_type in ["Text", "Icon", "Row", "Column", "List", "Card", "Image"] {
+            let comp: Component =
+                serde_json::from_value(style_contract_props(component_type)).unwrap();
+            let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
+            let actual = match widget {
+                RenderableGuiWidget::Text { style, .. }
+                | RenderableGuiWidget::Icon { style, .. }
+                | RenderableGuiWidget::Row { style, .. }
+                | RenderableGuiWidget::Column { style, .. }
+                | RenderableGuiWidget::List { style, .. }
+                | RenderableGuiWidget::Card { style, .. }
+                | RenderableGuiWidget::Image { style, .. } => style,
+                other => panic!("{component_type} mapped to unexpected widget: {other:?}"),
+            };
+
+            assert_eq!(
+                actual, expected,
+                "{component_type} should keep shared style"
+            );
+        }
     }
 
     #[test]
@@ -890,6 +1108,35 @@ mod tests {
     }
 
     #[test]
+    fn test_map_text_style_to_gui_widget() {
+        let mapper = WidgetMapper;
+        let comp: Component = serde_json::from_value(json!({
+            "id": "title",
+            "component": "Text",
+            "text": "Styled",
+            "style": {
+                "fontSize": 22,
+                "strong": true,
+                "color": "#1976d2"
+            }
+        }))
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
+        assert!(matches!(
+            widget,
+            RenderableGuiWidget::Text {
+                style: ComponentStyle {
+                    font_size: Some(22.0),
+                    strong: true,
+                    color: Some(color),
+                    ..
+                },
+                ..
+            } if color == (StyleColor { r: 25, g: 118, b: 210, a: 255 })
+        ));
+    }
+
+    #[test]
     fn test_map_button_to_gui_widget() {
         let mapper = WidgetMapper;
         let comp: Component = serde_json::from_str(
@@ -922,6 +1169,29 @@ mod tests {
     }
 
     #[test]
+    fn test_map_row_style_to_gui_widget() {
+        let mapper = WidgetMapper;
+        let comp: Component = serde_json::from_value(json!({
+            "id": "row1",
+            "component": "Row",
+            "children": ["c1"],
+            "style": {"spacing": {"x": 6, "y": 0}}
+        }))
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
+        assert!(matches!(
+            widget,
+            RenderableGuiWidget::Row {
+                style: ComponentStyle {
+                    spacing: Some(spacing),
+                    ..
+                },
+                ..
+            } if spacing == (StyleSpacing { x: 6.0, y: 0.0 })
+        ));
+    }
+
+    #[test]
     fn test_map_image_to_gui_widget() {
         let mapper = WidgetMapper;
         let comp: Component = serde_json::from_str(
@@ -935,12 +1205,65 @@ mod tests {
     }
 
     #[test]
+    fn test_map_image_style_to_gui_widget() {
+        let mapper = WidgetMapper;
+        let comp: Component = serde_json::from_value(json!({
+            "id": "img1",
+            "component": "Image",
+            "url": "https://example.com/img.png",
+            "style": {"radius": 10}
+        }))
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
+        assert!(matches!(
+            widget,
+            RenderableGuiWidget::Image {
+                style: ComponentStyle {
+                    radius: Some(10.0),
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn test_map_card_to_gui_widget() {
         let mapper = WidgetMapper;
         let comp: Component =
             serde_json::from_str(r#"{"id":"card1","component":"Card","child":"inner1"}"#).unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Card { .. }));
+    }
+
+    #[test]
+    fn test_map_card_style_to_gui_widget() {
+        let mapper = WidgetMapper;
+        let comp: Component = serde_json::from_value(json!({
+            "id": "card1",
+            "component": "Card",
+            "child": "inner1",
+            "style": {
+                "fill": "#fafafa",
+                "padding": 12,
+                "spacing": {"x": 0, "y": 10}
+            }
+        }))
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
+        assert!(matches!(
+            widget,
+            RenderableGuiWidget::Card {
+                style: ComponentStyle {
+                    fill: Some(fill),
+                    padding: Some(12.0),
+                    spacing: Some(spacing),
+                    ..
+                },
+                ..
+            } if fill == (StyleColor { r: 250, g: 250, b: 250, a: 255 })
+                && spacing == (StyleSpacing { x: 0.0, y: 10.0 })
+        ));
     }
 
     #[test]

@@ -1,8 +1,14 @@
 use a2ui_core::prelude::*;
+use a2ui_renderer::{ComponentStyle, StyleColor, StyleSpacing};
 
 /// HTML 渲染 widget
 #[derive(Debug, Clone)]
 pub enum RenderableHtmlWidget {
+    /// 带共享样式的组件包装
+    Styled {
+        widget: Box<RenderableHtmlWidget>,
+        style: ComponentStyle,
+    },
     /// 文本组件
     Text {
         id: ComponentId,
@@ -120,6 +126,7 @@ impl HtmlBuilder {
     /// ```
     pub fn render(&self, widget: &RenderableHtmlWidget) -> String {
         match widget {
+            RenderableHtmlWidget::Styled { widget, style } => self.render_styled(widget, style),
             RenderableHtmlWidget::Text { text, variant, .. } => match variant.as_str() {
                 "caption" => {
                     format!(
@@ -286,6 +293,85 @@ impl HtmlBuilder {
         }
     }
 
+    fn render_styled(&self, widget: &RenderableHtmlWidget, style: &ComponentStyle) -> String {
+        match widget {
+            RenderableHtmlWidget::Text { text, variant, .. } => {
+                let style_attr = style_attr(style, StyleTarget::Text);
+                match variant.as_str() {
+                    "caption" => format!(
+                        "<span class=\"a2ui-text a2ui-caption\"{}>{}</span>",
+                        style_attr,
+                        html_escape(text)
+                    ),
+                    _ => format!(
+                        "<p class=\"a2ui-text a2ui-body\"{}>{}</p>",
+                        style_attr,
+                        html_escape(text)
+                    ),
+                }
+            }
+            RenderableHtmlWidget::Column { children, .. } => {
+                let inner: String = children.iter().map(|c| self.render(c)).collect();
+                format!(
+                    "<div class=\"a2ui-column\"{}>{}</div>",
+                    style_attr(style, StyleTarget::Column),
+                    inner
+                )
+            }
+            RenderableHtmlWidget::Row { children, .. } => {
+                let inner: String = children.iter().map(|c| self.render(c)).collect();
+                format!(
+                    "<div class=\"a2ui-row\"{}>{}</div>",
+                    style_attr(style, StyleTarget::Row),
+                    inner
+                )
+            }
+            RenderableHtmlWidget::Image { url, .. } => {
+                format!(
+                    "<img class=\"a2ui-image\" src=\"{}\" alt=\"image\"{} />",
+                    html_attr(url),
+                    style_attr(style, StyleTarget::Image)
+                )
+            }
+            RenderableHtmlWidget::Card { child, .. } => {
+                let inner = self.render(child);
+                format!(
+                    "<div class=\"a2ui-card\"{}>{}</div>",
+                    style_attr(style, StyleTarget::Card),
+                    inner
+                )
+            }
+            RenderableHtmlWidget::Icon { name, .. } => {
+                format!(
+                    "<span class=\"a2ui-icon a2ui-icon-{}\" aria-label=\"{}\"{}></span>",
+                    html_attr(name),
+                    html_attr(name),
+                    style_attr(style, StyleTarget::Icon)
+                )
+            }
+            RenderableHtmlWidget::List { children, .. } => {
+                let items: String = children
+                    .iter()
+                    .map(|c| format!("<li>{}</li>", self.render(c)))
+                    .collect();
+                format!(
+                    "<ul class=\"a2ui-list\"{}>{}</ul>",
+                    style_attr(style, StyleTarget::List),
+                    items
+                )
+            }
+            _ => {
+                let inner = self.render(widget);
+                let style_attr = style_attr(style, StyleTarget::Generic);
+                if style_attr.is_empty() {
+                    inner
+                } else {
+                    format!("<div class=\"a2ui-styled\"{}>{}</div>", style_attr, inner)
+                }
+            }
+        }
+    }
+
     /// 渲染完整的 HTML 页面包装
     ///
     /// 将 HTML body 内容嵌入到完整的 HTML5 文档中，包含 A2UI 基础样式。
@@ -389,10 +475,133 @@ fn html_attr(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+#[derive(Debug, Clone, Copy)]
+enum StyleTarget {
+    Text,
+    Icon,
+    Row,
+    Column,
+    List,
+    Card,
+    Image,
+    Generic,
+}
+
+fn style_attr(style: &ComponentStyle, target: StyleTarget) -> String {
+    let mut declarations = Vec::new();
+
+    match target {
+        StyleTarget::Text | StyleTarget::Icon => {
+            push_text_style(&mut declarations, style);
+        }
+        StyleTarget::Row | StyleTarget::Column | StyleTarget::List => {
+            if let Some(spacing) = style.spacing {
+                push_gap_style(&mut declarations, spacing);
+                if matches!(target, StyleTarget::List) {
+                    declarations.push("display:flex".to_string());
+                    declarations.push("flex-direction:column".to_string());
+                }
+            }
+        }
+        StyleTarget::Card | StyleTarget::Image => {
+            push_box_style(&mut declarations, style);
+        }
+        StyleTarget::Generic => {
+            push_text_style(&mut declarations, style);
+            push_box_style(&mut declarations, style);
+            if let Some(spacing) = style.spacing {
+                push_gap_style(&mut declarations, spacing);
+            }
+        }
+    }
+
+    if declarations.is_empty() {
+        String::new()
+    } else {
+        format!(" style=\"{}\"", html_attr(&declarations.join(";")))
+    }
+}
+
+fn push_text_style(declarations: &mut Vec<String>, style: &ComponentStyle) {
+    if let Some(font_size) = style.font_size {
+        declarations.push(format!("font-size:{}", format_px(font_size)));
+    }
+    if style.strong {
+        declarations.push("font-weight:700".to_string());
+    }
+    if let Some(color) = style.color {
+        declarations.push(format!("color:{}", format_css_color(color)));
+    }
+}
+
+fn push_box_style(declarations: &mut Vec<String>, style: &ComponentStyle) {
+    if let Some(fill) = style.fill {
+        declarations.push(format!("background-color:{}", format_css_color(fill)));
+    }
+    if let Some(padding) = style.padding {
+        declarations.push(format!("padding:{}", format_px(padding)));
+    }
+    if let Some(radius) = style.radius {
+        declarations.push(format!("border-radius:{}", format_px(radius)));
+    }
+}
+
+fn push_gap_style(declarations: &mut Vec<String>, spacing: StyleSpacing) {
+    declarations.push(format!(
+        "gap:{} {}",
+        format_px(spacing.y),
+        format_px(spacing.x)
+    ));
+}
+
+fn format_css_color(color: StyleColor) -> String {
+    if color.a == 255 {
+        format!("#{:02x}{:02x}{:02x}", color.r, color.g, color.b)
+    } else {
+        format!(
+            "rgba({},{},{},{:.3})",
+            color.r,
+            color.g,
+            color.b,
+            color.a as f32 / 255.0
+        )
+    }
+}
+
+fn format_px(value: f32) -> String {
+    if value.fract() == 0.0 {
+        format!("{}px", value as i32)
+    } else {
+        format!("{value}px")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use a2ui_core::ComponentId;
+
+    fn contract_style() -> ComponentStyle {
+        ComponentStyle {
+            font_size: Some(18.0),
+            strong: true,
+            color: Some(StyleColor {
+                r: 17,
+                g: 34,
+                b: 51,
+                a: 255,
+            }),
+            fill: Some(StyleColor {
+                r: 68,
+                g: 85,
+                b: 102,
+                a: 128,
+            }),
+            padding: Some(9.0),
+            spacing: Some(StyleSpacing { x: 7.0, y: 11.0 }),
+            radius: Some(5.0),
+        }
+    }
 
     #[test]
     fn test_render_text_body() {
@@ -415,6 +624,23 @@ mod tests {
         assert!(html.contains("Caption text"));
         assert!(html.contains("<span"));
         assert!(html.contains("a2ui-caption"));
+    }
+
+    #[test]
+    fn test_render_styled_text_css() {
+        let html = HtmlBuilder.render(&RenderableHtmlWidget::Styled {
+            widget: Box::new(RenderableHtmlWidget::Text {
+                id: ComponentId::new("t1").unwrap(),
+                text: "Styled text".to_string(),
+                variant: "body".to_string(),
+            }),
+            style: contract_style(),
+        });
+
+        assert!(html.contains("style=\""));
+        assert!(html.contains("font-size:18px"));
+        assert!(html.contains("font-weight:700"));
+        assert!(html.contains("color:#112233"));
     }
 
     #[test]
@@ -474,6 +700,20 @@ mod tests {
     }
 
     #[test]
+    fn test_render_styled_layout_css() {
+        let html = HtmlBuilder.render(&RenderableHtmlWidget::Styled {
+            widget: Box::new(RenderableHtmlWidget::Row {
+                id: ComponentId::new("row1").unwrap(),
+                children: vec![],
+            }),
+            style: contract_style(),
+        });
+
+        assert!(html.contains("a2ui-row"));
+        assert!(html.contains("gap:11px 7px"));
+    }
+
+    #[test]
     fn test_render_row() {
         let html = HtmlBuilder.render(&RenderableHtmlWidget::Row {
             id: ComponentId::new("row1").unwrap(),
@@ -518,6 +758,25 @@ mod tests {
         });
         assert!(html.contains("a2ui-card"));
         assert!(html.contains("Card content"));
+    }
+
+    #[test]
+    fn test_render_styled_box_css() {
+        let html = HtmlBuilder.render(&RenderableHtmlWidget::Styled {
+            widget: Box::new(RenderableHtmlWidget::Card {
+                id: ComponentId::new("card1").unwrap(),
+                child: Box::new(RenderableHtmlWidget::Text {
+                    id: ComponentId::new("inner").unwrap(),
+                    text: "Card content".to_string(),
+                    variant: "body".to_string(),
+                }),
+            }),
+            style: contract_style(),
+        });
+
+        assert!(html.contains("background-color:rgba(68,85,102,0.502)"));
+        assert!(html.contains("padding:9px"));
+        assert!(html.contains("border-radius:5px"));
     }
 
     #[test]
@@ -583,6 +842,21 @@ mod tests {
         assert!(html.contains("<li>"));
         assert!(html.contains("Item A"));
         assert!(html.contains("Item B"));
+    }
+
+    #[test]
+    fn test_render_styled_list_css() {
+        let html = HtmlBuilder.render(&RenderableHtmlWidget::Styled {
+            widget: Box::new(RenderableHtmlWidget::List {
+                id: ComponentId::new("list1").unwrap(),
+                children: vec![],
+            }),
+            style: contract_style(),
+        });
+
+        assert!(html.contains("display:flex"));
+        assert!(html.contains("flex-direction:column"));
+        assert!(html.contains("gap:11px 7px"));
     }
 
     #[test]

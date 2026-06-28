@@ -21,6 +21,8 @@ fn test_tui_full_flow() {
 
     // 验证结构
     assert!(renderer.surfaces.is_empty());
+    assert_eq!(msg.surface_id, "s1");
+    assert_eq!(msg.components.as_ref().map(Vec::len), Some(1));
 }
 
 #[test]
@@ -44,6 +46,7 @@ fn test_tui_component_lifecycle() {
     );
 
     // 验证组件树结构
+    assert!(renderer.surfaces.is_empty());
     assert_eq!(root.id().as_str(), "root");
     assert_eq!(text1.id().as_str(), "text1");
     assert_eq!(text2.id().as_str(), "text2");

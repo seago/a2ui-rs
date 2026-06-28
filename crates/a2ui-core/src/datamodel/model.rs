@@ -245,7 +245,9 @@ impl DataModel {
                             // 检查下一段是否为数组索引来决定创建 Object 还是 Array
                             let next_is_array = segments
                                 .get(i + 1)
-                                .and_then(|s| Self::is_array_index(&s.replace("~1", "/").replace("~0", "~")))
+                                .and_then(|s| {
+                                    Self::is_array_index(&s.replace("~1", "/").replace("~0", "~"))
+                                })
                                 .is_some();
                             let child = if next_is_array {
                                 Value::Array(vec![])

@@ -1,4 +1,6 @@
+use crate::widget_builder::component_style_to_tui;
 use a2ui_core::prelude::*;
+use a2ui_renderer::{resolve_dynamic_string_prop, ComponentStyle};
 use ratatui::{
     layout::Constraint,
     style::{Color, Style},
@@ -12,39 +14,28 @@ impl WidgetMapper {
     /// 将 A2UI 组件映射为 ratatui Paragraph（简化实现）
     pub fn map_to_paragraph(&self, component: &Component) -> Paragraph<'static> {
         let text = self.extract_text(component);
-        let style = Style::default();
+        let style = self.component_style(component);
 
         Paragraph::new(text).style(style)
     }
 
     /// 从组件属性中提取文本内容
     pub fn extract_text(&self, component: &Component) -> String {
-        let props = component.properties();
-        if let Some(text_val) = props.get("text") {
-            if let Some(s) = text_val.as_str() {
-                return s.to_string();
-            }
-            if let Some(obj) = text_val.as_object() {
-                if let Some(path_val) = obj.get("path") {
-                    if let Some(p) = path_val.as_str() {
-                        return format!("{{path:{}}}", p);
-                    }
-                }
-                if let Some(call_val) = obj.get("call") {
-                    if let Some(c) = call_val.as_str() {
-                        return format!("{{call:{}}}", c);
-                    }
-                }
-            }
-        }
-        format!("[{}]", component.component_type())
+        resolve_dynamic_string_prop(
+            component.properties(),
+            "text",
+            None,
+            &format!("[{}]", component.component_type()),
+        )
     }
 
     /// 获取组件类型对应的样式
     pub fn component_style(&self, component: &Component) -> Style {
         match component.component_type() {
             "Button" => Style::default().fg(Color::Cyan),
-            "Text" => Style::default(),
+            "Text" | "Icon" => component_style_to_tui(&ComponentStyle::from_component_props(
+                component.properties(),
+            )),
             "TextField" => Style::default(),
             "CheckBox" => Style::default(),
             "Divider" => Style::default().fg(Color::Gray),
@@ -72,6 +63,7 @@ impl WidgetMapper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Modifier;
 
     #[test]
     fn test_extract_text_literal() {
@@ -141,6 +133,48 @@ mod tests {
         );
         let style = mapper.component_style(&comp);
         assert_eq!(style, Style::default());
+    }
+
+    #[test]
+    fn test_component_style_text_uses_shared_style_contract() {
+        let mapper = WidgetMapper;
+        let comp: Component = serde_json::from_value(serde_json::json!({
+            "id": "t",
+            "component": "Text",
+            "text": "hi",
+            "style": {
+                "strong": true,
+                "color": "#112233",
+                "fill": "#445566",
+                "padding": 9,
+                "radius": 5
+            }
+        }))
+        .unwrap();
+
+        let style = mapper.component_style(&comp);
+        assert_eq!(style.fg, Some(Color::Rgb(17, 34, 51)));
+        assert_eq!(style.bg, None);
+        assert!(style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn test_component_style_icon_uses_shared_style_contract() {
+        let mapper = WidgetMapper;
+        let comp: Component = serde_json::from_value(serde_json::json!({
+            "id": "i",
+            "component": "Icon",
+            "name": "star",
+            "style": {
+                "strong": true,
+                "color": "#112233"
+            }
+        }))
+        .unwrap();
+
+        let style = mapper.component_style(&comp);
+        assert_eq!(style.fg, Some(Color::Rgb(17, 34, 51)));
+        assert!(style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]

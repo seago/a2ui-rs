@@ -1,6 +1,7 @@
 use crate::app::{Message, UserAction};
 use crate::iced_renderer::IcedRenderer;
 use a2ui_renderer::component_forest::ComponentTreeNode;
+use a2ui_renderer::{ComponentStyle, StyleColor};
 use iced::widget::text;
 use iced::widget::text::Shaping;
 
@@ -55,7 +56,11 @@ fn build_text(
 ) -> iced::Element<'static, Message> {
     let props = node.component.properties();
     let content = resolve_dynamic_string(props, "text", "[Text]", renderer, surface_id);
-    text(content).shaping(Shaping::Advanced).into()
+    apply_text_style(
+        text(content).shaping(Shaping::Advanced),
+        &ComponentStyle::from_component_props(props),
+    )
+    .into()
 }
 
 fn build_divider() -> iced::Element<'static, Message> {
@@ -64,7 +69,11 @@ fn build_divider() -> iced::Element<'static, Message> {
 
 fn build_icon(props: &serde_json::Value) -> iced::Element<'static, Message> {
     let name = extract_string_prop(props, "name", "?");
-    text(name).size(24).shaping(Shaping::Advanced).into()
+    let style = ComponentStyle::from_component_props(props);
+    let label = text(name)
+        .size(style.font_size.unwrap_or(24.0))
+        .shaping(Shaping::Advanced);
+    apply_text_style(label, &style).into()
 }
 
 fn build_placeholder(ctype: &str, props: &serde_json::Value) -> iced::Element<'static, Message> {
@@ -87,8 +96,9 @@ fn build_column(
         .iter()
         .map(|child| build_element_tree(child, renderer, surface_id))
         .collect();
+    let style = ComponentStyle::from_component_props(node.component.properties());
     iced::widget::column(children)
-        .spacing(8)
+        .spacing(style.spacing.map(|spacing| spacing.y).unwrap_or(8.0))
         .width(iced::Length::Fill)
         .into()
 }
@@ -103,8 +113,9 @@ fn build_row(
         .iter()
         .map(|child| build_element_tree(child, renderer, surface_id))
         .collect();
+    let style = ComponentStyle::from_component_props(node.component.properties());
     iced::widget::row(children)
-        .spacing(8)
+        .spacing(style.spacing.map(|spacing| spacing.x).unwrap_or(8.0))
         .width(iced::Length::Fill)
         .into()
 }
@@ -116,10 +127,25 @@ fn build_card(
 ) -> iced::Element<'static, Message> {
     if let Some(child) = node.children.first() {
         let child_el = build_element_tree(child, renderer, surface_id);
-        iced::widget::container(child_el)
-            .padding(16)
-            .width(iced::Length::Fill)
-            .into()
+        let style = ComponentStyle::from_component_props(node.component.properties());
+        let mut container = iced::widget::container(child_el)
+            .padding(style.padding.unwrap_or(16.0))
+            .width(iced::Length::Fill);
+
+        if style.fill.is_some() || style.radius.is_some() {
+            let fill = style.fill;
+            let radius = style.radius.unwrap_or(0.0);
+            container = container.style(move |_theme| iced::widget::container::Style {
+                background: fill.map(|color| iced::Background::Color(to_iced_color(color))),
+                border: iced::Border {
+                    radius: radius.into(),
+                    ..iced::Border::default()
+                },
+                ..iced::widget::container::Style::default()
+            });
+        }
+
+        container.into()
     } else {
         text("[Card: empty]").shaping(Shaping::Advanced).into()
     }
@@ -135,8 +161,9 @@ fn build_list(
         .iter()
         .map(|child| build_element_tree(child, renderer, surface_id))
         .collect();
+    let style = ComponentStyle::from_component_props(node.component.properties());
     let content = iced::widget::column(children)
-        .spacing(4)
+        .spacing(style.spacing.map(|spacing| spacing.y).unwrap_or(4.0))
         .width(iced::Length::Fill)
         .clip(true);
 
@@ -263,8 +290,9 @@ fn build_image(
     renderer: &IcedRenderer,
 ) -> iced::Element<'static, Message> {
     let url = extract_string_prop(props, "url", "");
+    let style = ComponentStyle::from_component_props(props);
     if url.is_empty() {
-        return text("[Image: no URL]").shaping(Shaping::Advanced).into();
+        return apply_text_style(text("[Image: no URL]").shaping(Shaping::Advanced), &style).into();
     }
 
     if let Some(bytes) = renderer.load_image_bytes(&url) {
@@ -275,16 +303,33 @@ fn build_image(
             .height(height)
             .content_fit(iced::ContentFit::Cover);
 
-        iced::widget::container(image)
+        let mut container = iced::widget::container(image)
             .width(width)
             .height(height)
-            .clip(true)
-            .into()
+            .clip(true);
+
+        if style.fill.is_some() || style.radius.is_some() {
+            let fill = style.fill;
+            let radius = style.radius.unwrap_or(0.0);
+            container = container.style(move |_theme| iced::widget::container::Style {
+                background: fill.map(|color| iced::Background::Color(to_iced_color(color))),
+                border: iced::Border {
+                    radius: radius.into(),
+                    ..iced::Border::default()
+                },
+                ..iced::widget::container::Style::default()
+            });
+        }
+
+        container.into()
     } else {
-        text(format!("[Image: {}]", url))
-            .shaping(Shaping::Advanced)
-            .color(iced::Color::from_rgb(0.6, 0.6, 0.6))
-            .into()
+        apply_text_style(
+            text(format!("[Image: {}]", url))
+                .shaping(Shaping::Advanced)
+                .color(iced::Color::from_rgb(0.6, 0.6, 0.6)),
+            &style,
+        )
+        .into()
     }
 }
 
@@ -427,6 +472,23 @@ fn extract_length_prop(
     }
 }
 
+fn apply_text_style(
+    mut label: iced::widget::Text<'static, iced::Theme, iced::Renderer>,
+    style: &ComponentStyle,
+) -> iced::widget::Text<'static, iced::Theme, iced::Renderer> {
+    if let Some(size) = style.font_size {
+        label = label.size(size);
+    }
+    if let Some(color) = style.color {
+        label = label.color(to_iced_color(color));
+    }
+    label
+}
+
+fn to_iced_color(color: StyleColor) -> iced::Color {
+    iced::Color::from_rgba8(color.r, color.g, color.b, color.a as f32 / 255.0)
+}
+
 fn resolve_button_label(
     node: &ComponentTreeNode,
     renderer: &IcedRenderer,
@@ -515,6 +577,113 @@ mod tests {
 
         let label = resolve_button_label(&node, &renderer, surface_id);
         assert_eq!(label, "Click Me");
+    }
+
+    #[test]
+    fn test_styled_widgets_build_without_panic() {
+        let renderer = IcedRenderer::new();
+        let surface_id = "styled";
+        let image_url = "cached://image";
+        renderer
+            .image_cache
+            .borrow_mut()
+            .insert(image_url.to_string(), vec![137, 80, 78, 71]);
+        let style = json!({
+            "fontSize": 18,
+            "strong": true,
+            "color": "#112233",
+            "fill": "#44556680",
+            "padding": 9,
+            "spacing": {"x": 7, "y": 11},
+            "radius": 5
+        });
+
+        let text_node = ComponentTreeNode::new(
+            serde_json::from_value(json!({
+                "component": "Text",
+                "id": "styled_text",
+                "text": "Styled",
+                "style": style.clone()
+            }))
+            .unwrap(),
+        );
+        let icon_node = ComponentTreeNode::new(
+            serde_json::from_value(json!({
+                "component": "Icon",
+                "id": "styled_icon",
+                "name": "star",
+                "style": style.clone()
+            }))
+            .unwrap(),
+        );
+        let row_node = ComponentTreeNode::new(
+            serde_json::from_value(json!({
+                "component": "Row",
+                "id": "styled_row",
+                "children": ["styled_text", "styled_icon"],
+                "style": style.clone()
+            }))
+            .unwrap(),
+        )
+        .with_children(vec![text_node, icon_node]);
+        let image_node = ComponentTreeNode::new(
+            serde_json::from_value(json!({
+                "component": "Image",
+                "id": "styled_image",
+                "url": image_url,
+                "width": 120,
+                "height": 80,
+                "style": style.clone()
+            }))
+            .unwrap(),
+        );
+        let card_node = ComponentTreeNode::new(
+            serde_json::from_value(json!({
+                "component": "Card",
+                "id": "styled_card",
+                "child": "styled_row",
+                "style": style.clone()
+            }))
+            .unwrap(),
+        )
+        .with_children(vec![row_node]);
+        let column_node = ComponentTreeNode::new(
+            serde_json::from_value(json!({
+                "component": "Column",
+                "id": "styled_column",
+                "children": ["styled_card", "styled_image"],
+                "style": style.clone()
+            }))
+            .unwrap(),
+        )
+        .with_children(vec![card_node, image_node]);
+        let list_node = ComponentTreeNode::new(
+            serde_json::from_value(json!({
+                "component": "List",
+                "id": "styled_list",
+                "children": ["styled_column"],
+                "style": style
+            }))
+            .unwrap(),
+        )
+        .with_children(vec![column_node]);
+
+        let _el = build_element_tree(&list_node, &renderer, surface_id);
+    }
+
+    #[test]
+    fn test_style_color_converts_to_iced_rgba() {
+        let color = to_iced_color(StyleColor {
+            r: 17,
+            g: 34,
+            b: 51,
+            a: 128,
+        });
+
+        assert!((color.r - 17.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.g - 34.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.b - 51.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.a - 128.0 / 255.0).abs() < f32::EPSILON);
     }
 
     #[test]

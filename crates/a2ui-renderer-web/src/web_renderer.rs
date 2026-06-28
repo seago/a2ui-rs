@@ -8,8 +8,9 @@ use a2ui_core::message::{
 };
 use a2ui_core::prelude::*;
 use a2ui_renderer::{
-    CatalogRegistry, ComponentForest, CustomComponentRegistry, DataBinding, DependencyGraph,
-    FunctionDispatcher, PathResolver, RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
+    CatalogRegistry, ComponentForest, ComponentStyle, CustomComponentRegistry, DataBinding,
+    DependencyGraph, FunctionDispatcher, PathResolver, RenderResult, Renderer, SurfaceHandle,
+    SurfaceLru, UserEvent,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -253,17 +254,17 @@ impl WebRenderer {
                     }
                 }
                 "CheckBox" => {
-                    let checked = props
-                        .get("value")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or_else(|| {
-                            props
-                                .get("checked")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false)
-                        });
-                    let label = extract_string_value(props, "label", binding)
-                        .unwrap_or_default();
+                    let checked =
+                        props
+                            .get("value")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or_else(|| {
+                                props
+                                    .get("checked")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false)
+                            });
+                    let label = extract_string_value(props, "label", binding).unwrap_or_default();
                     RenderableHtmlWidget::CheckBox {
                         id: component.id().clone(),
                         checked,
@@ -406,6 +407,16 @@ impl WebRenderer {
                     }
                 }
             };
+
+        let style = ComponentStyle::from_component_props(props);
+        let widget = if supports_web_style(ctype) && style != ComponentStyle::default() {
+            RenderableHtmlWidget::Styled {
+                widget: Box::new(widget),
+                style,
+            }
+        } else {
+            widget
+        };
 
         Some(widget)
     }
@@ -783,6 +794,13 @@ fn extract_static_string(value: &Value) -> Option<String> {
     }
 }
 
+fn supports_web_style(component_type: &str) -> bool {
+    matches!(
+        component_type,
+        "Text" | "Icon" | "Row" | "Column" | "List" | "Card" | "Image"
+    )
+}
+
 /// 从组件的 properties 中递归提取所有 JSON Pointer 路径
 fn extract_paths(component: &Component) -> Vec<String> {
     let mut paths = Vec::new();
@@ -882,6 +900,105 @@ mod tests {
         let html = renderer.render_surface_html("s1");
         assert!(html.is_some());
         assert!(html.unwrap().contains("Hello World"));
+    }
+
+    #[tokio::test]
+    async fn test_web_renderer_applies_shared_style_contract() {
+        let mut renderer = WebRenderer::new();
+        let style = json!({
+            "fontSize": 18,
+            "strong": true,
+            "color": "#112233",
+            "fill": "#44556680",
+            "padding": 9,
+            "spacing": {"x": 7, "y": 11},
+            "radius": 5
+        });
+        let components: Vec<Component> = vec![
+            serde_json::from_value(json!({
+                "id": "root",
+                "component": "Column",
+                "children": ["title", "icon", "row", "card", "list"],
+                "style": style.clone()
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "title",
+                "component": "Text",
+                "text": "Styled",
+                "style": style.clone()
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "icon",
+                "component": "Icon",
+                "name": "star",
+                "style": style.clone()
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "row",
+                "component": "Row",
+                "children": ["image"],
+                "style": style.clone()
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "image",
+                "component": "Image",
+                "url": "https://example.com/image.png",
+                "style": style.clone()
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "card",
+                "component": "Card",
+                "child": "card_text",
+                "style": style.clone()
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "card_text",
+                "component": "Text",
+                "text": "Card text"
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "list",
+                "component": "List",
+                "children": ["list_text"],
+                "style": style
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "list_text",
+                "component": "Text",
+                "text": "List text"
+            }))
+            .unwrap(),
+        ];
+
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "styled".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(components),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let html = renderer.render_surface_html("styled").unwrap();
+
+        assert!(html.contains("font-size:18px"));
+        assert!(html.contains("font-weight:700"));
+        assert!(html.contains("color:#112233"));
+        assert!(html.contains("background-color:rgba(68,85,102,0.502)"));
+        assert!(html.contains("padding:9px"));
+        assert!(html.contains("border-radius:5px"));
+        assert!(html.contains("gap:11px 7px"));
     }
 
     #[tokio::test]

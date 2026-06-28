@@ -221,28 +221,30 @@ impl GuiRenderer {
                 let mut user_events: Vec<a2ui_renderer::UserEvent> = Vec::new();
 
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    let available_width = ui.available_width();
+                    let available_rect = ui.available_rect_before_wrap();
+                    let available_width = available_rect.width();
                     let content_width = (available_width * 0.92)
                         .max(320.0)
                         .min(CONTENT_MAX_WIDTH)
                         .min(available_width);
-                    let left_pad = ((available_width - content_width) / 2.0).max(0.0);
+                    let content_rect = egui::Rect::from_min_size(
+                        egui::pos2(
+                            available_rect.center().x - content_width / 2.0,
+                            available_rect.min.y,
+                        ),
+                        egui::vec2(content_width, available_rect.height()),
+                    );
 
-                    ui.horizontal(|ui| {
-                        ui.add_space(left_pad);
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(content_width, ui.available_height()),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                mapper.render_gui_widget(
-                                    &root_clone,
-                                    ui,
-                                    &widget_map,
-                                    &mut response_tracker,
-                                    &mut user_events,
-                                    &image_textures,
-                                );
-                            },
+                    ui.allocate_ui_at_rect(content_rect, |ui| {
+                        ui.set_min_size(content_rect.size());
+                        ui.set_width(content_width);
+                        mapper.render_gui_widget(
+                            &root_clone,
+                            ui,
+                            &widget_map,
+                            &mut response_tracker,
+                            &mut user_events,
+                            &image_textures,
                         );
                     });
                 });

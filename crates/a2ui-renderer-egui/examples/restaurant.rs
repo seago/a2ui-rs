@@ -9,7 +9,7 @@ use a2ui_core::ServerEnvelope;
 use a2ui_renderer_egui::{A2uiApp, GuiRenderer};
 use serde_json::json;
 
-const HEADER_HEIGHT: f32 = 112.0;
+const HEADER_HEIGHT: f32 = 124.0;
 
 /// 加载系统中文字体，使 egui 能正确渲染中文
 fn setup_chinese_fonts(cc: &eframe::CreationContext) {
@@ -55,7 +55,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = A2uiApp::new(renderer, msg_rx, action_tx);
 
-    // 餐厅数据
     let restaurants = json!([
         {
             "name": "Xi'an Famous Foods",
@@ -104,31 +103,79 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        let card_name = Component::text(
-            ComponentId::new("card_name").unwrap(),
-            DynamicValue::<String>::path("name"),
-        );
-        let card_rating = Component::text(
-            ComponentId::new("card_rating").unwrap(),
-            DynamicValue::<String>::path("rating"),
-        );
-        let card_detail = Component::text(
-            ComponentId::new("card_detail").unwrap(),
-            DynamicValue::<String>::path("detail"),
-        );
-        let card_address = Component::text(
-            ComponentId::new("card_address").unwrap(),
-            DynamicValue::<String>::path("address"),
-        );
-        let card_link = Component::text(
-            ComponentId::new("card_link").unwrap(),
-            DynamicValue::<String>::path("infoLink"),
-        );
+        let card_name: Component = serde_json::from_value(json!({
+            "component": "Text",
+            "id": "card_name",
+            "text": {"path": "name"},
+            "style": {"fontSize": 22, "strong": true}
+        }))
+        .unwrap();
+        let card_rating: Component = serde_json::from_value(json!({
+            "component": "Text",
+            "id": "card_rating",
+            "text": {"path": "rating"},
+            "style": {"fontSize": 15, "color": "#b8860b"}
+        }))
+        .unwrap();
+        let card_detail: Component = serde_json::from_value(json!({
+            "component": "Text",
+            "id": "card_detail",
+            "text": {"path": "detail"},
+            "style": {"fontSize": 16}
+        }))
+        .unwrap();
+        let card_address_icon: Component = serde_json::from_value(json!({
+            "component": "Icon",
+            "id": "card_address_icon",
+            "name": "📍",
+            "style": {"fontSize": 16, "color": "#828282"}
+        }))
+        .unwrap();
+        let card_address: Component = serde_json::from_value(json!({
+            "component": "Text",
+            "id": "card_address",
+            "text": {"path": "address"},
+            "style": {"fontSize": 14, "color": "#6e6e6e"}
+        }))
+        .unwrap();
+        let card_address_row: Component = serde_json::from_value(json!({
+            "component": "Row",
+            "id": "card_address_row",
+            "children": ["card_address_icon", "card_address"],
+            "style": {"spacing": {"x": 6, "y": 0}}
+        }))
+        .unwrap();
+        let card_link_icon: Component = serde_json::from_value(json!({
+            "component": "Icon",
+            "id": "card_link_icon",
+            "name": "↗",
+            "style": {"fontSize": 16, "color": "#1976d2"}
+        }))
+        .unwrap();
+        let card_link: Component = serde_json::from_value(json!({
+            "component": "Text",
+            "id": "card_link",
+            "text": {"path": "infoLink"},
+            "style": {"fontSize": 14, "color": "#1976d2"}
+        }))
+        .unwrap();
+        let card_link_row: Component = serde_json::from_value(json!({
+            "component": "Row",
+            "id": "card_link_row",
+            "children": ["card_link_icon", "card_link"],
+            "style": {"spacing": {"x": 6, "y": 0}}
+        }))
+        .unwrap();
 
-        let card_image = Component::image(
-            ComponentId::new("card_image").unwrap(),
-            DynamicValue::<String>::path("imageUrl"),
-        );
+        let card_image: Component = serde_json::from_value(json!({
+            "component": "Image",
+            "id": "card_image",
+            "url": {"path": "imageUrl"},
+            "width": "fill",
+            "height": 140,
+            "style": {"radius": 10}
+        }))
+        .unwrap();
 
         let card_body = Component::column(
             ComponentId::new("card_body").unwrap(),
@@ -137,27 +184,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ComponentId::new("card_name").unwrap(),
                 ComponentId::new("card_rating").unwrap(),
                 ComponentId::new("card_detail").unwrap(),
-                ComponentId::new("card_address").unwrap(),
-                ComponentId::new("card_link").unwrap(),
+                ComponentId::new("card_address_row").unwrap(),
+                ComponentId::new("card_link_row").unwrap(),
             ],
         );
 
-        let card_template = Component::card(
-            ComponentId::new("card_template").unwrap(),
-            ComponentId::new("card_body").unwrap(),
-        );
+        let card_template: Component = serde_json::from_value(json!({
+            "component": "Card",
+            "id": "card_template",
+            "child": "card_body",
+            "style": {
+                "fill": "#fafafa",
+                "padding": 12,
+                "spacing": {"x": 0, "y": 10}
+            }
+        }))
+        .unwrap();
 
-        let list = Component::list(
-            ComponentId::new("restaurant_list").unwrap(),
+        let root = Component::list(
+            ComponentId::new("root").unwrap(),
             a2ui_core::component::ChildList::object(
                 ComponentId::new("card_template").unwrap(),
                 "/items",
             ),
-        );
-
-        let root = Component::column(
-            ComponentId::new("root").unwrap(),
-            vec![ComponentId::new("restaurant_list").unwrap()],
         );
 
         // CreateSurface 一步到位：组件 + 数据一起发送
@@ -169,15 +218,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 send_data_model: true,
                 components: Some(vec![
                     root,
-                    list,
                     card_template,
                     card_body,
                     card_image,
                     card_name,
                     card_rating,
                     card_detail,
+                    card_address_icon,
                     card_address,
+                    card_address_row,
+                    card_link_icon,
                     card_link,
+                    card_link_row,
                 ]),
                 data_model: Some(json!({
                     "title": "纽约川菜餐厅列表",
@@ -225,16 +277,16 @@ impl eframe::App for RestaurantApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("restaurant_header")
             .exact_height(HEADER_HEIGHT)
+            .show_separator_line(false)
             .frame(egui::Frame::default().fill(egui::Color32::WHITE))
             .show(ctx, |ui| {
-                ui.add_space(16.0);
+                ui.add_space(18.0);
                 ui.vertical_centered(|ui| {
                     ui.label(egui::RichText::new("纽约川菜餐厅列表").size(28.0).strong());
-                    ui.add_space(6.0);
+                    ui.add_space(8.0);
                     ui.label(egui::RichText::new("按评分、菜品风格和位置快速浏览").size(18.0));
                 });
-                ui.add_space(10.0);
-                ui.separator();
+                ui.add_space(14.0);
             });
 
         self.inner.update(ctx, frame);

@@ -88,10 +88,7 @@ impl CustomComponentRegistry {
     pub fn register(&mut self, def: CustomComponentDef) -> Result<(), String> {
         let name = def.name.clone();
         if self.components.contains_key(&name) {
-            return Err(format!(
-                "custom component already registered: {}",
-                name
-            ));
+            return Err(format!("custom component already registered: {}", name));
         }
         self.components.insert(name, def);
         Ok(())
@@ -149,13 +146,10 @@ mod tests {
     #[test]
     fn test_duplicate_register_fails() {
         let mut reg = CustomComponentRegistry::new();
-        reg.register(CustomComponentDef::new("MyChart"))
-            .unwrap();
+        reg.register(CustomComponentDef::new("MyChart")).unwrap();
         let result = reg.register(CustomComponentDef::new("MyChart"));
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("already registered"));
+        assert!(result.unwrap_err().contains("already registered"));
     }
 
     #[test]

@@ -1,8 +1,11 @@
-use crate::WidgetMapper;
 use a2ui_core::prelude::*;
 use a2ui_renderer::component_forest::ComponentTreeNode;
-use a2ui_renderer::{ComponentForest, CustomComponentRegistry, DataBinding};
+use a2ui_renderer::{
+    resolve_dynamic_string_prop, ComponentForest, ComponentStyle, CustomComponentRegistry,
+    DataBinding,
+};
 use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
 
 /// 渲染目标 widget（类型抹平，用于渲染管线）
 #[derive(Debug, Clone)]
@@ -11,6 +14,7 @@ pub enum RenderableWidget {
         id: ComponentId,
         area: Rect,
         text: String,
+        style: ComponentStyle,
     },
     Block {
         id: ComponentId,
@@ -59,6 +63,7 @@ pub enum RenderableWidget {
         id: ComponentId,
         area: Rect,
         symbol: String,
+        style: ComponentStyle,
     },
     Image {
         id: ComponentId,
@@ -149,7 +154,6 @@ impl RenderableWidget {
 
 /// 将组件森林构建为渲染目标列表
 pub struct WidgetBuilder<'a> {
-    mapper: &'a WidgetMapper,
     binding: &'a DataBinding,
     forest: &'a ComponentForest,
     registry: &'a CustomComponentRegistry,
@@ -157,13 +161,11 @@ pub struct WidgetBuilder<'a> {
 
 impl<'a> WidgetBuilder<'a> {
     pub fn new(
-        mapper: &'a WidgetMapper,
         binding: &'a DataBinding,
         forest: &'a ComponentForest,
         registry: &'a CustomComponentRegistry,
     ) -> Self {
         Self {
-            mapper,
             binding,
             forest,
             registry,
@@ -280,10 +282,7 @@ impl<'a> WidgetBuilder<'a> {
             },
             "Button" => {
                 let props = component.properties();
-                let child_id = props
-                    .get("child")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let child_id = props.get("child").and_then(|v| v.as_str()).unwrap_or("");
                 // 尝试从引用的子 Text 组件获取 label
                 let label = self.resolve_child_text(component, child_id);
                 let variant = props
@@ -308,24 +307,18 @@ impl<'a> WidgetBuilder<'a> {
             },
             "Icon" => {
                 let props = component.properties();
-                let name = props
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
+                let name = resolve_dynamic_string_prop(props, "name", Some(self.binding), "?");
                 let symbol = icon_to_symbol(name);
                 RenderableWidget::Icon {
                     id: component.id().clone(),
                     area,
                     symbol,
+                    style: ComponentStyle::from_component_props(props),
                 }
             }
             "Image" => {
                 let props = component.properties();
-                let url = props
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let url = resolve_dynamic_string_prop(props, "url", Some(self.binding), "");
                 RenderableWidget::Image {
                     id: component.id().clone(),
                     area,
@@ -347,12 +340,20 @@ impl<'a> WidgetBuilder<'a> {
                 let options: Vec<String> = props
                     .get("options")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|o| o.as_str().map(String::from)).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|o| o.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 let selected: Vec<String> = props
                     .get("value")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|s| s.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 RenderableWidget::ChoicePicker {
                     id: component.id().clone(),
@@ -362,37 +363,67 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             "Video" => {
-                let url = component.properties().get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                RenderableWidget::Video { id: component.id().clone(), area, url }
+                let url = resolve_dynamic_string_prop(
+                    component.properties(),
+                    "url",
+                    Some(self.binding),
+                    "",
+                );
+                RenderableWidget::Video {
+                    id: component.id().clone(),
+                    area,
+                    url,
+                }
             }
             "AudioPlayer" => {
                 let props = component.properties();
-                let url = props.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let desc = props.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                RenderableWidget::AudioPlayer { id: component.id().clone(), area, url, description: desc }
+                let url = resolve_dynamic_string_prop(props, "url", Some(self.binding), "");
+                let desc =
+                    resolve_dynamic_string_prop(props, "description", Some(self.binding), "");
+                RenderableWidget::AudioPlayer {
+                    id: component.id().clone(),
+                    area,
+                    url,
+                    description: desc,
+                }
             }
             "Modal" => {
                 let props = component.properties();
-                let trigger = props.get("trigger").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let content = props.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                RenderableWidget::Modal { id: component.id().clone(), area, trigger_id: trigger, content_id: content }
+                let trigger = props
+                    .get("trigger")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let content = props
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                RenderableWidget::Modal {
+                    id: component.id().clone(),
+                    area,
+                    trigger_id: trigger,
+                    content_id: content,
+                }
             }
             "DateTimeInput" => {
-                let label = component.properties().get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                RenderableWidget::DateTimeInput { id: component.id().clone(), area, label }
+                let label = resolve_dynamic_string_prop(
+                    component.properties(),
+                    "label",
+                    Some(self.binding),
+                    "",
+                );
+                RenderableWidget::DateTimeInput {
+                    id: component.id().clone(),
+                    area,
+                    label,
+                }
             }
             "TextField" => {
                 let props = component.properties();
-                let value = props
-                    .get("value")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let placeholder = props
-                    .get("placeholder")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let value = resolve_dynamic_string_prop(props, "value", Some(self.binding), "");
+                let placeholder =
+                    resolve_dynamic_string_prop(props, "placeholder", Some(self.binding), "");
                 RenderableWidget::TextField {
                     id: component.id().clone(),
                     area,
@@ -402,11 +433,7 @@ impl<'a> WidgetBuilder<'a> {
             }
             "CheckBox" => {
                 let props = component.properties();
-                let label = props
-                    .get("label")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let label = resolve_dynamic_string_prop(props, "label", Some(self.binding), "");
                 let checked = props
                     .get("checked")
                     .and_then(|v| v.as_bool())
@@ -441,7 +468,7 @@ impl<'a> WidgetBuilder<'a> {
                     }
                 } else {
                     // 尝试提取文本
-                    let text = self.mapper.extract_text(component);
+                    let text = self.extract_text(component);
                     if text.starts_with('[') && text.ends_with(']') {
                         // 未知组件类型，渲染为占位符
                         RenderableWidget::Placeholder {
@@ -454,6 +481,7 @@ impl<'a> WidgetBuilder<'a> {
                             id: component.id().clone(),
                             area,
                             text,
+                            style: ComponentStyle::from_component_props(component.properties()),
                         }
                     }
                 }
@@ -461,21 +489,29 @@ impl<'a> WidgetBuilder<'a> {
         }
     }
 
+    /// 从组件属性中提取文本，并在可用时解析 DataBinding 路径。
+    fn extract_text(&self, component: &Component) -> String {
+        resolve_dynamic_string_prop(
+            component.properties(),
+            "text",
+            Some(self.binding),
+            &format!("[{}]", component.component_type()),
+        )
+    }
+
     /// 从 Button 引用的子 Text 组件中解析标签文本
     fn resolve_child_text(&self, component: &Component, child_id: &str) -> String {
         if child_id.is_empty() {
-            return self.mapper.extract_text(component);
+            return self.extract_text(component);
         }
-        // 尝试从 forest 中查找子 Text 组件
-        if let Ok(cid) = ComponentId::new(child_id) {
-            // 遍历所有 surface 查找该组件
-            for surface in &["s1"] {
-                // 简化实现：先尝试 extract_text
-                let _ = surface;
+        if let Ok(child_component_id) = ComponentId::new(child_id) {
+            if let Some(surface_id) = self.forest.surface_of(component.id()) {
+                if let Some(child) = self.forest.get(surface_id, &child_component_id) {
+                    return self.extract_text(child);
+                }
             }
-            let _ = cid;
         }
-        self.mapper.extract_text(component)
+        self.extract_text(component)
     }
 
     /// 根据组件类型为子组件分配渲染区域
@@ -528,8 +564,20 @@ impl<'a> WidgetBuilder<'a> {
     }
 }
 
+pub(crate) fn component_style_to_tui(style: &ComponentStyle) -> Style {
+    let mut tui_style = Style::default();
+    if let Some(color) = style.color {
+        tui_style = tui_style.fg(Color::Rgb(color.r, color.g, color.b));
+    }
+    if style.strong {
+        tui_style = tui_style.add_modifier(Modifier::BOLD);
+    }
+    tui_style
+}
+
 /// 图标名 → Unicode 符号映射
-fn icon_to_symbol(name: &str) -> String {
+fn icon_to_symbol(name: impl AsRef<str>) -> String {
+    let name = name.as_ref();
     match name {
         "star" => "★".to_string(),
         "home" => "⌂".to_string(),
@@ -591,13 +639,13 @@ fn parse_tabs(props: &serde_json::Value) -> (Vec<String>, Vec<ComponentId>) {
 mod tests {
     use super::*;
     use a2ui_renderer::CustomComponentRegistry;
+    use ratatui::style::{Color, Modifier};
     use serde_json::json;
 
     #[test]
     fn test_build_widget_tree_from_components() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::new(json!({"title": "Hello"})));
-        let mapper = WidgetMapper;
         let reg = CustomComponentRegistry::new();
 
         // Column 作为根组件（ID 必须为 "root" 才能被 forest 识别）
@@ -615,7 +663,7 @@ mod tests {
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", title).unwrap();
 
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
 
         // 至少有一个 widget（root Column + title Text）
@@ -624,14 +672,163 @@ mod tests {
         assert_eq!(widgets[0].id().as_str(), "root");
         // title 应能找到
         let title_widget = widgets.iter().find(|w| w.id().as_str() == "title");
-        assert!(title_widget.is_some());
+        assert!(matches!(
+            title_widget,
+            Some(RenderableWidget::Paragraph { text, .. }) if text == "Hello"
+        ));
+    }
+
+    #[test]
+    fn test_button_label_resolves_child_text_from_data_binding() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::new(json!({"button": {"label": "Submit"}})));
+        let reg = CustomComponentRegistry::new();
+
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("btn").unwrap()],
+        );
+        let btn = Component::button(
+            ComponentId::new("btn").unwrap(),
+            ComponentId::new("label").unwrap(),
+        );
+        let label = Component::text(
+            ComponentId::new("label").unwrap(),
+            DynamicValue::Path {
+                path: "/button/label".into(),
+            },
+        );
+
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", btn).unwrap();
+        forest.upsert("s1", label).unwrap();
+
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let button_widget = widgets.iter().find(|w| w.id().as_str() == "btn");
+
+        assert!(matches!(
+            button_widget,
+            Some(RenderableWidget::Button { label, .. }) if label == "Submit"
+        ));
+    }
+
+    #[test]
+    fn test_string_props_resolve_from_data_binding() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::new(json!({
+            "icon": "star",
+            "image": "https://example.com/a.png",
+            "video": "https://example.com/a.mp4",
+            "audio": {
+                "url": "https://example.com/a.mp3",
+                "description": "Track"
+            },
+            "form": {
+                "value": "Alice",
+                "placeholder": "Name",
+                "label": "Accept"
+            },
+            "date": "Pick date"
+        })));
+        let reg = CustomComponentRegistry::new();
+
+        let root: Component = serde_json::from_value(json!({
+            "id": "root",
+            "component": "Column",
+            "children": ["icon", "image", "video", "audio", "field", "check", "date"]
+        }))
+        .unwrap();
+        let icon: Component = serde_json::from_value(json!({
+            "id": "icon",
+            "component": "Icon",
+            "name": {"path": "/icon"}
+        }))
+        .unwrap();
+        let image: Component = serde_json::from_value(json!({
+            "id": "image",
+            "component": "Image",
+            "url": {"path": "/image"}
+        }))
+        .unwrap();
+        let video: Component = serde_json::from_value(json!({
+            "id": "video",
+            "component": "Video",
+            "url": {"path": "/video"}
+        }))
+        .unwrap();
+        let audio: Component = serde_json::from_value(json!({
+            "id": "audio",
+            "component": "AudioPlayer",
+            "url": {"path": "/audio/url"},
+            "description": {"path": "/audio/description"}
+        }))
+        .unwrap();
+        let field: Component = serde_json::from_value(json!({
+            "id": "field",
+            "component": "TextField",
+            "value": {"path": "/form/value"},
+            "placeholder": {"path": "/form/placeholder"}
+        }))
+        .unwrap();
+        let check: Component = serde_json::from_value(json!({
+            "id": "check",
+            "component": "CheckBox",
+            "checked": true,
+            "label": {"path": "/form/label"}
+        }))
+        .unwrap();
+        let date: Component = serde_json::from_value(json!({
+            "id": "date",
+            "component": "DateTimeInput",
+            "label": {"path": "/date"}
+        }))
+        .unwrap();
+
+        for component in [root, icon, image, video, audio, field, check, date] {
+            forest.upsert("s1", component).unwrap();
+        }
+
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+
+        assert!(matches!(
+            widgets.iter().find(|w| w.id().as_str() == "icon"),
+            Some(RenderableWidget::Icon { symbol, .. }) if symbol == "★"
+        ));
+        assert!(matches!(
+            widgets.iter().find(|w| w.id().as_str() == "image"),
+            Some(RenderableWidget::Image { url, .. }) if url == "https://example.com/a.png"
+        ));
+        assert!(matches!(
+            widgets.iter().find(|w| w.id().as_str() == "video"),
+            Some(RenderableWidget::Video { url, .. }) if url == "https://example.com/a.mp4"
+        ));
+        assert!(matches!(
+            widgets.iter().find(|w| w.id().as_str() == "audio"),
+            Some(RenderableWidget::AudioPlayer { url, description, .. })
+                if url == "https://example.com/a.mp3" && description == "Track"
+        ));
+        assert!(matches!(
+            widgets.iter().find(|w| w.id().as_str() == "field"),
+            Some(RenderableWidget::TextField { value, placeholder, .. })
+                if value == "Alice" && placeholder == "Name"
+        ));
+        assert!(matches!(
+            widgets.iter().find(|w| w.id().as_str() == "check"),
+            Some(RenderableWidget::CheckBox { label, checked, .. })
+                if label == "Accept" && *checked
+        ));
+        assert!(matches!(
+            widgets.iter().find(|w| w.id().as_str() == "date"),
+            Some(RenderableWidget::DateTimeInput { label, .. }) if label == "Pick date"
+        ));
     }
 
     #[test]
     fn test_missing_component_renders_placeholder() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
 
         let root = Component::column(
             ComponentId::new("root").unwrap(),
@@ -640,7 +837,7 @@ mod tests {
         forest.upsert("s1", root).unwrap();
 
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
 
         // missing 组件应渲染为占位符
@@ -655,7 +852,6 @@ mod tests {
     fn test_widget_area_assignment() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
 
         let root = Component::column(
             ComponentId::new("root").unwrap(),
@@ -664,7 +860,7 @@ mod tests {
         forest.upsert("s1", root).unwrap();
 
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(10, 20, 80, 24));
 
         // root widget 应获得完整区域
@@ -679,7 +875,6 @@ mod tests {
     fn test_textfield_component_maps_to_textfield_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
 
         let root = Component::column(
             ComponentId::new("root").unwrap(),
@@ -692,7 +887,7 @@ mod tests {
         forest.upsert("s1", tf).unwrap();
 
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
 
         let tf_widget = widgets.iter().find(|w| w.id().as_str() == "name_input");
@@ -707,7 +902,6 @@ mod tests {
     fn test_checkbox_component_maps_to_checkbox_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
 
         let root = Component::column(
             ComponentId::new("root").unwrap(),
@@ -721,7 +915,7 @@ mod tests {
         forest.upsert("s1", cb).unwrap();
 
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
 
         let cb_widget = widgets.iter().find(|w| w.id().as_str() == "agree");
@@ -736,7 +930,6 @@ mod tests {
     fn test_slider_component_maps_to_slider_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
 
         let root = Component::column(
             ComponentId::new("root").unwrap(),
@@ -750,7 +943,7 @@ mod tests {
         forest.upsert("s1", sl).unwrap();
 
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
 
         let sl_widget = widgets.iter().find(|w| w.id().as_str() == "volume");
@@ -767,18 +960,18 @@ mod tests {
     fn test_button_maps_to_button_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
         let root = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("btn").unwrap()],
         );
         let btn: Component = serde_json::from_str(
             r#"{"id":"btn","component":"Button","child":"lbl","variant":"primary"}"#,
-        ).unwrap();
+        )
+        .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", btn).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
         let w = widgets.iter().find(|w| w.id().as_str() == "btn");
         assert!(w.is_some(), "Button widget should exist");
@@ -789,7 +982,6 @@ mod tests {
     fn test_divider_maps_to_divider_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
         let root = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("div").unwrap()],
@@ -798,7 +990,7 @@ mod tests {
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", div).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
         let w = widgets.iter().find(|w| w.id().as_str() == "div");
         assert!(w.is_some(), "Divider widget should exist");
@@ -809,16 +1001,16 @@ mod tests {
     fn test_icon_maps_to_icon_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
         let root = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("ic").unwrap()],
         );
-        let icon: Component = serde_json::from_str(r#"{"id":"ic","component":"Icon","name":"star"}"#).unwrap();
+        let icon: Component =
+            serde_json::from_str(r#"{"id":"ic","component":"Icon","name":"star"}"#).unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", icon).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
         let w = widgets.iter().find(|w| w.id().as_str() == "ic");
         assert!(w.is_some(), "Icon widget should exist");
@@ -826,21 +1018,111 @@ mod tests {
     }
 
     #[test]
+    fn test_styled_text_maps_to_paragraph_with_degraded_tui_style() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let root: Component = serde_json::from_value(json!({
+            "id": "root",
+            "component": "Text",
+            "text": "Styled",
+            "style": {
+                "fontSize": 18,
+                "strong": true,
+                "color": "#112233",
+                "fill": "#445566",
+                "padding": 9,
+                "radius": 5
+            }
+        }))
+        .unwrap();
+        forest.upsert("s1", root).unwrap();
+
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let w = widgets.iter().find(|w| w.id().as_str() == "root");
+
+        match w {
+            Some(RenderableWidget::Paragraph { style, .. }) => {
+                assert!(style.strong);
+                assert_eq!(
+                    style.color.map(|c| (c.r, c.g, c.b, c.a)),
+                    Some((17, 34, 51, 255))
+                );
+                assert_eq!(
+                    style.fill.map(|c| (c.r, c.g, c.b, c.a)),
+                    Some((68, 85, 102, 255))
+                );
+                assert_eq!(style.padding, Some(9.0));
+                assert_eq!(style.radius, Some(5.0));
+
+                let tui_style = component_style_to_tui(style);
+                assert_eq!(tui_style.fg, Some(Color::Rgb(17, 34, 51)));
+                assert_eq!(tui_style.bg, None);
+                assert!(tui_style.add_modifier.contains(Modifier::BOLD));
+            }
+            other => panic!("styled Text should map to Paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_styled_icon_maps_to_icon_with_degraded_tui_style() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let root: Component = serde_json::from_value(json!({
+            "id": "root",
+            "component": "Icon",
+            "name": "star",
+            "style": {
+                "fontSize": 18,
+                "strong": true,
+                "color": "#112233",
+                "fill": "#445566",
+                "padding": 9,
+                "radius": 5
+            }
+        }))
+        .unwrap();
+        forest.upsert("s1", root).unwrap();
+
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let w = widgets.iter().find(|w| w.id().as_str() == "root");
+
+        match w {
+            Some(RenderableWidget::Icon { style, .. }) => {
+                assert!(style.strong);
+                assert_eq!(
+                    style.color.map(|c| (c.r, c.g, c.b, c.a)),
+                    Some((17, 34, 51, 255))
+                );
+
+                let tui_style = component_style_to_tui(style);
+                assert_eq!(tui_style.fg, Some(Color::Rgb(17, 34, 51)));
+                assert_eq!(tui_style.bg, None);
+                assert!(tui_style.add_modifier.contains(Modifier::BOLD));
+            }
+            other => panic!("styled Icon should map to Icon, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_image_maps_to_image_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
         let root = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("img").unwrap()],
         );
         let img: Component = serde_json::from_str(
             r#"{"id":"img","component":"Image","url":"https://example.com/pic.png"}"#,
-        ).unwrap();
+        )
+        .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", img).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
         let w = widgets.iter().find(|w| w.id().as_str() == "img");
         assert!(w.is_some(), "Image widget should exist");
@@ -851,18 +1133,16 @@ mod tests {
     fn test_card_maps_to_card_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
         let root = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("card").unwrap()],
         );
-        let card: Component = serde_json::from_str(
-            r#"{"id":"card","component":"Card","child":"inner"}"#,
-        ).unwrap();
+        let card: Component =
+            serde_json::from_str(r#"{"id":"card","component":"Card","child":"inner"}"#).unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", card).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
         let w = widgets.iter().find(|w| w.id().as_str() == "card");
         assert!(w.is_some(), "Card widget should exist");
@@ -873,7 +1153,6 @@ mod tests {
     fn test_tabs_maps_to_tabs_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
         let root = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("tabs").unwrap()],
@@ -884,7 +1163,7 @@ mod tests {
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", tabs).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
         let w = widgets.iter().find(|w| w.id().as_str() == "tabs");
         assert!(w.is_some(), "Tabs widget should exist");
@@ -895,18 +1174,18 @@ mod tests {
     fn test_choice_picker_maps_to_choice_picker_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
         let root = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("cp").unwrap()],
         );
         let cp: Component = serde_json::from_str(
             r#"{"id":"cp","component":"ChoicePicker","options":["A","B","C"],"value":["A"]}"#,
-        ).unwrap();
+        )
+        .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", cp).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
         let w = widgets.iter().find(|w| w.id().as_str() == "cp");
         assert!(w.is_some(), "ChoicePicker widget should exist");
@@ -917,59 +1196,85 @@ mod tests {
     fn test_video_maps_to_video_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
-        let root = Component::column(ComponentId::new("root").unwrap(), vec![ComponentId::new("vid").unwrap()]);
-        let vid: Component = serde_json::from_str(r#"{"id":"vid","component":"Video","url":"http://x.mp4"}"#).unwrap();
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("vid").unwrap()],
+        );
+        let vid: Component =
+            serde_json::from_str(r#"{"id":"vid","component":"Video","url":"http://x.mp4"}"#)
+                .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", vid).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
-        assert!(widgets.iter().any(|w| matches!(w, RenderableWidget::Video { .. })));
+        assert!(widgets
+            .iter()
+            .any(|w| matches!(w, RenderableWidget::Video { .. })));
     }
 
     #[test]
     fn test_audio_player_maps_to_audio_player_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
-        let root = Component::column(ComponentId::new("root").unwrap(), vec![ComponentId::new("aud").unwrap()]);
-        let aud: Component = serde_json::from_str(r#"{"id":"aud","component":"AudioPlayer","url":"http://x.mp3","description":"Song"}"#).unwrap();
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("aud").unwrap()],
+        );
+        let aud: Component = serde_json::from_str(
+            r#"{"id":"aud","component":"AudioPlayer","url":"http://x.mp3","description":"Song"}"#,
+        )
+        .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", aud).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
-        assert!(widgets.iter().any(|w| matches!(w, RenderableWidget::AudioPlayer { .. })));
+        assert!(widgets
+            .iter()
+            .any(|w| matches!(w, RenderableWidget::AudioPlayer { .. })));
     }
 
     #[test]
     fn test_modal_maps_to_modal_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
-        let root = Component::column(ComponentId::new("root").unwrap(), vec![ComponentId::new("modal").unwrap()]);
-        let modal: Component = serde_json::from_str(r#"{"id":"modal","component":"Modal","content":"body","trigger":"btn"}"#).unwrap();
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("modal").unwrap()],
+        );
+        let modal: Component = serde_json::from_str(
+            r#"{"id":"modal","component":"Modal","content":"body","trigger":"btn"}"#,
+        )
+        .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", modal).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
-        assert!(widgets.iter().any(|w| matches!(w, RenderableWidget::Modal { .. })));
+        assert!(widgets
+            .iter()
+            .any(|w| matches!(w, RenderableWidget::Modal { .. })));
     }
 
     #[test]
     fn test_date_time_input_maps_to_date_time_input_widget() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let mapper = WidgetMapper;
-        let root = Component::column(ComponentId::new("root").unwrap(), vec![ComponentId::new("dt").unwrap()]);
-        let dt: Component = serde_json::from_str(r#"{"id":"dt","component":"DateTimeInput","label":"Pick date"}"#).unwrap();
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("dt").unwrap()],
+        );
+        let dt: Component =
+            serde_json::from_str(r#"{"id":"dt","component":"DateTimeInput","label":"Pick date"}"#)
+                .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", dt).unwrap();
         let reg = CustomComponentRegistry::new();
-        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
         let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
-        assert!(widgets.iter().any(|w| matches!(w, RenderableWidget::DateTimeInput { .. })));
+        assert!(widgets
+            .iter()
+            .any(|w| matches!(w, RenderableWidget::DateTimeInput { .. })));
     }
 }

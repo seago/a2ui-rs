@@ -119,7 +119,8 @@ impl Transport for WebSocketTransport {
             if let Some(max_attempts) = self.max_reconnect_attempts {
                 for attempt in 1..=max_attempts {
                     tracing::warn!("WS reconnecting (attempt {}/{})", attempt, max_attempts);
-                    tokio::time::sleep(std::time::Duration::from_millis(self.reconnect_delay_ms)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(self.reconnect_delay_ms))
+                        .await;
                     if self.connect().await.is_ok() {
                         tracing::info!("WS reconnected");
                         break;
@@ -145,32 +146,18 @@ impl Transport for WebSocketTransport {
         // 支持 Text 和 Binary 帧（Binary 帧也尝试按 UTF-8 JSON 解析）
         let text = match msg {
             Message::Text(s) => s,
-            Message::Binary(data) => {
-                String::from_utf8(data).map_err(|e| {
-                    WebSocketError::ReceiveError(format!(
-                        "binary frame contains non-UTF-8 data: {}",
-                        e
-                    ))
-                })?
-            }
+            Message::Binary(data) => String::from_utf8(data).map_err(|e| {
+                WebSocketError::ReceiveError(format!("binary frame contains non-UTF-8 data: {}", e))
+            })?,
             Message::Ping(_) | Message::Pong(_) => {
                 // Ping/Pong 已在 tungestenite 层面自动处理，这里不会出现
-                return Err(WebSocketError::ReceiveError(
-                    "unexpected control frame".into(),
-                )
-                .into());
+                return Err(WebSocketError::ReceiveError("unexpected control frame".into()).into());
             }
             Message::Close(_) => {
-                return Err(WebSocketError::ReceiveError(
-                    "peer closed connection".into(),
-                )
-                .into());
+                return Err(WebSocketError::ReceiveError("peer closed connection".into()).into());
             }
             _ => {
-                return Err(WebSocketError::ReceiveError(
-                    "unexpected frame type".into(),
-                )
-                .into());
+                return Err(WebSocketError::ReceiveError("unexpected frame type".into()).into());
             }
         };
 

@@ -24,7 +24,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     renderer.register_function("numeric", a2ui_renderer::CallableFrom::ClientOnly);
     renderer.register_function("formatString", a2ui_renderer::CallableFrom::ClientOrRemote);
     renderer.register_function("formatNumber", a2ui_renderer::CallableFrom::ClientOrRemote);
-    renderer.register_function("formatCurrency", a2ui_renderer::CallableFrom::ClientOrRemote);
+    renderer.register_function(
+        "formatCurrency",
+        a2ui_renderer::CallableFrom::ClientOrRemote,
+    );
     renderer.register_function("formatDate", a2ui_renderer::CallableFrom::ClientOrRemote);
     renderer.register_function("pluralize", a2ui_renderer::CallableFrom::ClientOrRemote);
     renderer.register_function("openUrl", a2ui_renderer::CallableFrom::ClientOnly);
@@ -197,11 +200,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             components: Some(vec![
                 root,
                 header,
-                divider1, divider2, divider3, divider4,
-                card_text, card1,
-                name_input, email_input, agree_cb, volume_slider, form_row,
-                submit_btn, submit_label, cancel_btn, cancel_label, img_placeholder, actions_row,
-                item1, item2, item3, list_section,
+                divider1,
+                divider2,
+                divider3,
+                divider4,
+                card_text,
+                card1,
+                name_input,
+                email_input,
+                agree_cb,
+                volume_slider,
+                form_row,
+                submit_btn,
+                submit_label,
+                cancel_btn,
+                cancel_label,
+                img_placeholder,
+                actions_row,
+                item1,
+                item2,
+                item3,
+                list_section,
                 footer,
             ]),
             data_model: None,
@@ -215,7 +234,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = "a2ui_demo.html";
     std::fs::write(path, &html)?;
     println!("✅ HTML 页面已生成: {}", path);
-    println!("   在浏览器中打开 file://{}/{}", std::env::current_dir()?.display(), path);
+    println!(
+        "   在浏览器中打开 file://{}/{}",
+        std::env::current_dir()?.display(),
+        path
+    );
 
     // 同时输出到 stdout
     println!("\n--- HTML 预览（前 500 字符）---");

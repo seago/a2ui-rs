@@ -124,7 +124,10 @@ async fn test_web_renderer_full_end_to_end() {
     // Create a surface with a proper component tree
     let root = Component::column(
         ComponentId::new("root").unwrap(),
-        vec![ComponentId::new("greeting").unwrap(), ComponentId::new("btn").unwrap()],
+        vec![
+            ComponentId::new("greeting").unwrap(),
+            ComponentId::new("btn").unwrap(),
+        ],
     );
     let text = Component::text(
         ComponentId::new("greeting").unwrap(),

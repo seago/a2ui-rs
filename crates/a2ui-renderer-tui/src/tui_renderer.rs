@@ -1,5 +1,8 @@
 use crate::focus_manager::FocusManager;
-use crate::{widget_builder::RenderableWidget, WidgetBuilder, WidgetMapper};
+use crate::{
+    widget_builder::{component_style_to_tui, RenderableWidget},
+    WidgetBuilder, WidgetMapper,
+};
 use a2ui_core::message::{
     client_to_server::FunctionResponse,
     server_to_client::{
@@ -172,8 +175,7 @@ impl TuiRenderer {
                 None => continue,
             };
 
-            let builder =
-                WidgetBuilder::new(&mapper, binding, &self.forest, &self.custom_registry);
+            let builder = WidgetBuilder::new(binding, &self.forest, &self.custom_registry);
             let area = Rect::new(0, 0, 80, 24);
             let widgets = builder.build_tree(surface_id, area);
             all_widgets.push((surface_id.clone(), widgets));
@@ -206,12 +208,13 @@ impl TuiRenderer {
             .unwrap_or(false);
 
         match widget {
-            RenderableWidget::Paragraph { area, text, .. } => {
-                let style = if is_focused {
-                    ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED)
-                } else {
-                    ratatui::style::Style::default()
-                };
+            RenderableWidget::Paragraph {
+                area, text, style, ..
+            } => {
+                let mut style = component_style_to_tui(&style);
+                if is_focused {
+                    style = style.add_modifier(ratatui::style::Modifier::REVERSED);
+                }
                 let para = Paragraph::new(text).style(style);
                 frame.render_widget(para, area);
             }
@@ -266,7 +269,10 @@ impl TuiRenderer {
                 frame.render_widget(text, area);
             }
             RenderableWidget::Button {
-                area, label, variant, ..
+                area,
+                label,
+                variant,
+                ..
             } => {
                 let display = if variant == "primary" {
                     format!("[ {} ]", label)
@@ -284,15 +290,21 @@ impl TuiRenderer {
                 let line = "─".repeat(area.width as usize);
                 frame.render_widget(Paragraph::new(line), area);
             }
-            RenderableWidget::Icon { area, symbol, .. } => {
-                frame.render_widget(Paragraph::new(symbol), area);
+            RenderableWidget::Icon {
+                area,
+                symbol,
+                style,
+                ..
+            } => {
+                frame.render_widget(
+                    Paragraph::new(symbol).style(component_style_to_tui(&style)),
+                    area,
+                );
             }
             RenderableWidget::Image { area, url, .. } => {
                 frame.render_widget(Paragraph::new(format!("🖼 {}", url)), area);
             }
-            RenderableWidget::Tabs {
-                area, titles, ..
-            } => {
+            RenderableWidget::Tabs { area, titles, .. } => {
                 let header = titles.join(" │ ");
                 frame.render_widget(Paragraph::new(header), area);
             }
@@ -317,12 +329,32 @@ impl TuiRenderer {
             RenderableWidget::Video { area, url, .. } => {
                 frame.render_widget(Paragraph::new(format!("🎬 {}", url)), area);
             }
-            RenderableWidget::AudioPlayer { area, url, description, .. } => {
-                let text = if description.is_empty() { format!("🔊 {}", url) } else { format!("🔊 {} — {}", url, description) };
+            RenderableWidget::AudioPlayer {
+                area,
+                url,
+                description,
+                ..
+            } => {
+                let text = if description.is_empty() {
+                    format!("🔊 {}", url)
+                } else {
+                    format!("🔊 {} — {}", url, description)
+                };
                 frame.render_widget(Paragraph::new(text), area);
             }
-            RenderableWidget::Modal { area, trigger_id, content_id, .. } => {
-                frame.render_widget(Paragraph::new(format!("[Modal: trigger={} content={}]", trigger_id, content_id)), area);
+            RenderableWidget::Modal {
+                area,
+                trigger_id,
+                content_id,
+                ..
+            } => {
+                frame.render_widget(
+                    Paragraph::new(format!(
+                        "[Modal: trigger={} content={}]",
+                        trigger_id, content_id
+                    )),
+                    area,
+                );
             }
             RenderableWidget::DateTimeInput { area, label, .. } => {
                 frame.render_widget(Paragraph::new(format!("📅 {}", label)), area);
@@ -694,7 +726,10 @@ impl Renderer for TuiRenderer {
 mod tests {
     use super::*;
     use a2ui_core::ComponentId;
-    use ratatui::Terminal;
+    use ratatui::{
+        style::{Color, Modifier},
+        Terminal,
+    };
     use serde_json::json;
 
     #[test]
@@ -871,6 +906,88 @@ mod tests {
         let buf = terminal.backend().buffer();
         assert!(buf.area().width > 0);
         assert!(buf.area().height > 0);
+    }
+
+    #[tokio::test]
+    async fn test_render_frame_applies_styled_text_degraded_tui_style() {
+        use ratatui::backend::TestBackend;
+
+        let mut renderer = TuiRenderer::new();
+        let comp: Component = serde_json::from_value(json!({
+            "id": "root",
+            "component": "Text",
+            "text": "Styled",
+            "style": {
+                "strong": true,
+                "color": "#112233",
+                "fill": "#445566",
+                "padding": 9,
+                "radius": 5
+            }
+        }))
+        .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        renderer.render_frame(&mut terminal).await.unwrap();
+
+        let cell = terminal.backend().buffer().get(0, 0);
+        assert_eq!(cell.symbol(), "S");
+        assert_eq!(cell.fg, Color::Rgb(17, 34, 51));
+        assert_eq!(cell.bg, Color::Reset);
+        assert!(cell.modifier.contains(Modifier::BOLD));
+    }
+
+    #[tokio::test]
+    async fn test_render_frame_applies_styled_icon_degraded_tui_style() {
+        use ratatui::backend::TestBackend;
+
+        let mut renderer = TuiRenderer::new();
+        let comp: Component = serde_json::from_value(json!({
+            "id": "root",
+            "component": "Icon",
+            "name": "star",
+            "style": {
+                "strong": true,
+                "color": "#112233",
+                "fill": "#445566",
+                "padding": 9,
+                "radius": 5
+            }
+        }))
+        .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![comp]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        renderer.render_frame(&mut terminal).await.unwrap();
+
+        let cell = terminal.backend().buffer().get(0, 0);
+        assert_eq!(cell.symbol(), "★");
+        assert_eq!(cell.fg, Color::Rgb(17, 34, 51));
+        assert_eq!(cell.bg, Color::Reset);
+        assert!(cell.modifier.contains(Modifier::BOLD));
     }
 
     // --- P0-3: Surface/component limit tests ---
@@ -1776,19 +1893,26 @@ mod tests {
         let mut renderer = TuiRenderer::new();
         let btn: Component = serde_json::from_str(
             r#"{"id":"btn","component":"Button","child":"lbl","text":"Click"}"#,
-        ).unwrap();
+        )
+        .unwrap();
         let tf: Component = serde_json::from_str(
             r#"{"id":"tf","component":"TextField","value":"","placeholder":"Enter"}"#,
-        ).unwrap();
-        let root: Component = serde_json::from_str(
-            r#"{"id":"root","component":"Column","children":["btn","tf"]}"#,
-        ).unwrap();
-        renderer.create_surface(CreateSurface {
-            surface_id: "s1".into(), catalog_id: "a2ui://catalogs/basic/v1".into(),
-            surface_properties: None, send_data_model: false,
-            components: Some(vec![root, btn, tf]),
-            data_model: None,
-        }).await.unwrap();
+        )
+        .unwrap();
+        let root: Component =
+            serde_json::from_str(r#"{"id":"root","component":"Column","children":["btn","tf"]}"#)
+                .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![root, btn, tf]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
 
         renderer.render().await.unwrap();
         // 焦点管理器应收集了 2 个可聚焦组件（Button + TextField）
@@ -1798,22 +1922,29 @@ mod tests {
     #[tokio::test]
     async fn test_tab_key_navigates_focus() {
         let mut renderer = TuiRenderer::new();
-        let btn: Component = serde_json::from_str(
-            r#"{"id":"btn","component":"Button","child":"lbl","text":"OK"}"#,
-        ).unwrap();
-        let root: Component = serde_json::from_str(
-            r#"{"id":"root","component":"Column","children":["btn"]}"#,
-        ).unwrap();
-        renderer.create_surface(CreateSurface {
-            surface_id: "s1".into(), catalog_id: "a2ui://catalogs/basic/v1".into(),
-            surface_properties: None, send_data_model: false,
-            components: Some(vec![root, btn]),
-            data_model: None,
-        }).await.unwrap();
+        let btn: Component =
+            serde_json::from_str(r#"{"id":"btn","component":"Button","child":"lbl","text":"OK"}"#)
+                .unwrap();
+        let root: Component =
+            serde_json::from_str(r#"{"id":"root","component":"Column","children":["btn"]}"#)
+                .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![root, btn]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
         renderer.render().await.unwrap();
 
         // Tab 键应切换焦点
-        let result = renderer.handle_user_event(UserEvent::KeyPress { key: "Tab".into() }).await;
+        let result = renderer
+            .handle_user_event(UserEvent::KeyPress { key: "Tab".into() })
+            .await;
         assert!(result.is_ok());
     }
 }

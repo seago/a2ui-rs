@@ -8,20 +8,26 @@ pub mod component_forest;
 pub mod custom_component;
 pub mod data_binding;
 pub mod dependency_graph;
+pub mod dynamic_value;
 pub mod error;
 pub mod format_string;
 pub mod function_dispatcher;
 pub mod path_resolver;
 pub mod renderer;
+pub mod style;
 pub mod surface_lru;
 
 pub use catalog_registry::CatalogRegistry;
-pub use custom_component::{CustomComponentDef, CustomComponentRegistry};
 pub use component_forest::ComponentForest;
+pub use custom_component::{CustomComponentDef, CustomComponentRegistry};
 pub use data_binding::DataBinding;
 pub use dependency_graph::DependencyGraph;
+pub use dynamic_value::{
+    resolve_dynamic_string_prop, resolve_dynamic_string_value, value_to_display_string,
+};
 pub use error::{RenderResult, RendererError};
 pub use function_dispatcher::{CallableFrom, FunctionDispatcher};
 pub use path_resolver::PathResolver;
 pub use renderer::{Renderer, SurfaceHandle, UserEvent};
+pub use style::{ComponentStyle, StyleColor, StyleSpacing};
 pub use surface_lru::SurfaceLru;
