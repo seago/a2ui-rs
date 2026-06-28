@@ -467,17 +467,7 @@ impl WidgetMapper {
             }
             RenderableGuiWidget::Column { children_ids, .. } => {
                 let width = ui.available_width();
-                let contains_expanding_child = children_ids.iter().any(|child_id| {
-                    matches!(
-                        widget_map.get(child_id.as_str()),
-                        Some(RenderableGuiWidget::List { .. })
-                    )
-                });
-                let height = if contains_expanding_child {
-                    ui.available_height()
-                } else {
-                    0.0
-                };
+                let height = ui.available_height();
                 ui.allocate_ui_with_layout(
                     egui::vec2(width, height),
                     egui::Layout::top_down_justified(egui::Align::Center),
