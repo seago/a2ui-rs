@@ -15,6 +15,15 @@ impl CatalogRegistry {
         Self::default()
     }
 
+    /// 创建注册表并自动加载 Basic Catalog
+    pub fn with_defaults() -> Self {
+        let mut registry = Self::new();
+        if let Ok(catalog) = a2ui_core::load_basic_catalog() {
+            let _ = registry.register(catalog);
+        }
+        registry
+    }
+
     /// 注册 Catalog
     pub fn register(&mut self, catalog: Catalog) -> RenderResult<()> {
         let id = catalog.catalog_id().to_string();
@@ -88,5 +97,29 @@ mod tests {
         let registry = CatalogRegistry::new();
         assert!(registry.get("any").is_none());
         assert!(registry.registered_ids().is_empty());
+    }
+
+    #[test]
+    fn test_load_basic_catalog_debug() {
+        match a2ui_core::load_basic_catalog() {
+            Ok(c) => {
+                assert_eq!(c.catalog_id(), "basic");
+            }
+            Err(e) => {
+                panic!("load_basic_catalog failed: {:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_with_defaults_loads_basic_catalog() {
+        let registry = CatalogRegistry::with_defaults();
+        assert!(registry.has_catalog("basic"));
+        // Verify it has the 18 standard components
+        let catalog = registry.get("basic").unwrap();
+        assert!(catalog.has_component("Text"));
+        assert!(catalog.has_component("Button"));
+        assert!(catalog.has_component("Image"));
+        assert!(catalog.has_function("formatString"));
     }
 }
