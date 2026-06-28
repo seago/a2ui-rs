@@ -302,6 +302,19 @@ impl TuiRenderer {
                     .collect();
                 frame.render_widget(Paragraph::new(display.join("  ")), area);
             }
+            RenderableWidget::Video { area, url, .. } => {
+                frame.render_widget(Paragraph::new(format!("🎬 {}", url)), area);
+            }
+            RenderableWidget::AudioPlayer { area, url, description, .. } => {
+                let text = if description.is_empty() { format!("🔊 {}", url) } else { format!("🔊 {} — {}", url, description) };
+                frame.render_widget(Paragraph::new(text), area);
+            }
+            RenderableWidget::Modal { area, trigger_id, content_id, .. } => {
+                frame.render_widget(Paragraph::new(format!("[Modal: trigger={} content={}]", trigger_id, content_id)), area);
+            }
+            RenderableWidget::DateTimeInput { area, label, .. } => {
+                frame.render_widget(Paragraph::new(format!("📅 {}", label)), area);
+            }
         }
     }
 

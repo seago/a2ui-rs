@@ -77,6 +77,28 @@ pub enum RenderableWidget {
         options: Vec<String>,
         selected: Vec<String>,
     },
+    Video {
+        id: ComponentId,
+        area: Rect,
+        url: String,
+    },
+    AudioPlayer {
+        id: ComponentId,
+        area: Rect,
+        url: String,
+        description: String,
+    },
+    Modal {
+        id: ComponentId,
+        area: Rect,
+        trigger_id: String,
+        content_id: String,
+    },
+    DateTimeInput {
+        id: ComponentId,
+        area: Rect,
+        label: String,
+    },
 }
 
 impl RenderableWidget {
@@ -94,7 +116,11 @@ impl RenderableWidget {
             | Self::Icon { id, .. }
             | Self::Image { id, .. }
             | Self::Tabs { id, .. }
-            | Self::ChoicePicker { id, .. } => id,
+            | Self::ChoicePicker { id, .. }
+            | Self::Video { id, .. }
+            | Self::AudioPlayer { id, .. }
+            | Self::Modal { id, .. }
+            | Self::DateTimeInput { id, .. } => id,
         }
     }
 
@@ -112,7 +138,11 @@ impl RenderableWidget {
             | Self::Icon { area, .. }
             | Self::Image { area, .. }
             | Self::Tabs { area, .. }
-            | Self::ChoicePicker { area, .. } => *area,
+            | Self::ChoicePicker { area, .. }
+            | Self::Video { area, .. }
+            | Self::AudioPlayer { area, .. }
+            | Self::Modal { area, .. }
+            | Self::DateTimeInput { area, .. } => *area,
         }
     }
 }
@@ -317,6 +347,26 @@ impl<'a> WidgetBuilder<'a> {
                     options,
                     selected,
                 }
+            }
+            "Video" => {
+                let url = component.properties().get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                RenderableWidget::Video { id: component.id().clone(), area, url }
+            }
+            "AudioPlayer" => {
+                let props = component.properties();
+                let url = props.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let desc = props.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                RenderableWidget::AudioPlayer { id: component.id().clone(), area, url, description: desc }
+            }
+            "Modal" => {
+                let props = component.properties();
+                let trigger = props.get("trigger").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let content = props.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                RenderableWidget::Modal { id: component.id().clone(), area, trigger_id: trigger, content_id: content }
+            }
+            "DateTimeInput" => {
+                let label = component.properties().get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                RenderableWidget::DateTimeInput { id: component.id().clone(), area, label }
             }
             "TextField" => {
                 let props = component.properties();
@@ -848,5 +898,65 @@ mod tests {
         let w = widgets.iter().find(|w| w.id().as_str() == "cp");
         assert!(w.is_some(), "ChoicePicker widget should exist");
         assert!(matches!(w.unwrap(), RenderableWidget::ChoicePicker { .. }));
+    }
+
+    #[test]
+    fn test_video_maps_to_video_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(ComponentId::new("root").unwrap(), vec![ComponentId::new("vid").unwrap()]);
+        let vid: Component = serde_json::from_str(r#"{"id":"vid","component":"Video","url":"http://x.mp4"}"#).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", vid).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        assert!(widgets.iter().any(|w| matches!(w, RenderableWidget::Video { .. })));
+    }
+
+    #[test]
+    fn test_audio_player_maps_to_audio_player_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(ComponentId::new("root").unwrap(), vec![ComponentId::new("aud").unwrap()]);
+        let aud: Component = serde_json::from_str(r#"{"id":"aud","component":"AudioPlayer","url":"http://x.mp3","description":"Song"}"#).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", aud).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        assert!(widgets.iter().any(|w| matches!(w, RenderableWidget::AudioPlayer { .. })));
+    }
+
+    #[test]
+    fn test_modal_maps_to_modal_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(ComponentId::new("root").unwrap(), vec![ComponentId::new("modal").unwrap()]);
+        let modal: Component = serde_json::from_str(r#"{"id":"modal","component":"Modal","content":"body","trigger":"btn"}"#).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", modal).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        assert!(widgets.iter().any(|w| matches!(w, RenderableWidget::Modal { .. })));
+    }
+
+    #[test]
+    fn test_date_time_input_maps_to_date_time_input_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(ComponentId::new("root").unwrap(), vec![ComponentId::new("dt").unwrap()]);
+        let dt: Component = serde_json::from_str(r#"{"id":"dt","component":"DateTimeInput","label":"Pick date"}"#).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", dt).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        assert!(widgets.iter().any(|w| matches!(w, RenderableWidget::DateTimeInput { .. })));
     }
 }
