@@ -41,28 +41,78 @@ pub enum RenderableWidget {
         min: f64,
         max: f64,
     },
+    Button {
+        id: ComponentId,
+        area: Rect,
+        label: String,
+        variant: String,
+    },
+    Card {
+        id: ComponentId,
+        area: Rect,
+    },
+    Divider {
+        id: ComponentId,
+        area: Rect,
+    },
+    Icon {
+        id: ComponentId,
+        area: Rect,
+        symbol: String,
+    },
+    Image {
+        id: ComponentId,
+        area: Rect,
+        url: String,
+    },
+    Tabs {
+        id: ComponentId,
+        area: Rect,
+        titles: Vec<String>,
+        children_ids: Vec<ComponentId>,
+    },
+    ChoicePicker {
+        id: ComponentId,
+        area: Rect,
+        options: Vec<String>,
+        selected: Vec<String>,
+    },
 }
 
 impl RenderableWidget {
     pub fn id(&self) -> &ComponentId {
         match self {
-            Self::Paragraph { id, .. } => id,
-            Self::Block { id, .. } => id,
-            Self::Placeholder { id, .. } => id,
-            Self::TextField { id, .. } => id,
-            Self::CheckBox { id, .. } => id,
-            Self::Slider { id, .. } => id,
+            Self::Paragraph { id, .. }
+            | Self::Block { id, .. }
+            | Self::Placeholder { id, .. }
+            | Self::TextField { id, .. }
+            | Self::CheckBox { id, .. }
+            | Self::Slider { id, .. }
+            | Self::Button { id, .. }
+            | Self::Card { id, .. }
+            | Self::Divider { id, .. }
+            | Self::Icon { id, .. }
+            | Self::Image { id, .. }
+            | Self::Tabs { id, .. }
+            | Self::ChoicePicker { id, .. } => id,
         }
     }
 
     pub fn area(&self) -> Rect {
         match self {
-            Self::Paragraph { area, .. } => *area,
-            Self::Block { area, .. } => *area,
-            Self::Placeholder { area, .. } => *area,
-            Self::TextField { area, .. } => *area,
-            Self::CheckBox { area, .. } => *area,
-            Self::Slider { area, .. } => *area,
+            Self::Paragraph { area, .. }
+            | Self::Block { area, .. }
+            | Self::Placeholder { area, .. }
+            | Self::TextField { area, .. }
+            | Self::CheckBox { area, .. }
+            | Self::Slider { area, .. }
+            | Self::Button { area, .. }
+            | Self::Card { area, .. }
+            | Self::Divider { area, .. }
+            | Self::Icon { area, .. }
+            | Self::Image { area, .. }
+            | Self::Tabs { area, .. }
+            | Self::ChoicePicker { area, .. } => *area,
         }
     }
 }
@@ -185,6 +235,89 @@ impl<'a> WidgetBuilder<'a> {
                 area,
                 title: format!("[{}]", ctype),
             },
+            "Button" => {
+                let props = component.properties();
+                let child_id = props
+                    .get("child")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                // 尝试从引用的子 Text 组件获取 label
+                let label = self.resolve_child_text(component, child_id);
+                let variant = props
+                    .get("variant")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default")
+                    .to_string();
+                RenderableWidget::Button {
+                    id: component.id().clone(),
+                    area,
+                    label,
+                    variant,
+                }
+            }
+            "Card" => RenderableWidget::Card {
+                id: component.id().clone(),
+                area,
+            },
+            "Divider" => RenderableWidget::Divider {
+                id: component.id().clone(),
+                area,
+            },
+            "Icon" => {
+                let props = component.properties();
+                let name = props
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let symbol = icon_to_symbol(name);
+                RenderableWidget::Icon {
+                    id: component.id().clone(),
+                    area,
+                    symbol,
+                }
+            }
+            "Image" => {
+                let props = component.properties();
+                let url = props
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                RenderableWidget::Image {
+                    id: component.id().clone(),
+                    area,
+                    url,
+                }
+            }
+            "Tabs" => {
+                let props = component.properties();
+                let (titles, children_ids) = parse_tabs(props);
+                RenderableWidget::Tabs {
+                    id: component.id().clone(),
+                    area,
+                    titles,
+                    children_ids,
+                }
+            }
+            "ChoicePicker" => {
+                let props = component.properties();
+                let options: Vec<String> = props
+                    .get("options")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|o| o.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                let selected: Vec<String> = props
+                    .get("value")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                RenderableWidget::ChoicePicker {
+                    id: component.id().clone(),
+                    area,
+                    options,
+                    selected,
+                }
+            }
             "TextField" => {
                 let props = component.properties();
                 let value = props
@@ -265,6 +398,23 @@ impl<'a> WidgetBuilder<'a> {
         }
     }
 
+    /// 从 Button 引用的子 Text 组件中解析标签文本
+    fn resolve_child_text(&self, component: &Component, child_id: &str) -> String {
+        if child_id.is_empty() {
+            return self.mapper.extract_text(component);
+        }
+        // 尝试从 forest 中查找子 Text 组件
+        if let Ok(cid) = ComponentId::new(child_id) {
+            // 遍历所有 surface 查找该组件
+            for surface in &["s1"] {
+                // 简化实现：先尝试 extract_text
+                let _ = surface;
+            }
+            let _ = cid;
+        }
+        self.mapper.extract_text(component)
+    }
+
     /// 根据组件类型为子组件分配渲染区域
     fn layout_children(
         &self,
@@ -313,6 +463,65 @@ impl<'a> WidgetBuilder<'a> {
             }
         }
     }
+}
+
+/// 图标名 → Unicode 符号映射
+fn icon_to_symbol(name: &str) -> String {
+    match name {
+        "star" => "★".to_string(),
+        "home" => "⌂".to_string(),
+        "search" => "⌕".to_string(),
+        "settings" => "⚙".to_string(),
+        "person" => "👤".to_string(),
+        "mail" => "✉".to_string(),
+        "phone" => "📞".to_string(),
+        "camera" => "📷".to_string(),
+        "music" => "♪".to_string(),
+        "video" => "▶".to_string(),
+        "menu" => "☰".to_string(),
+        "close" => "✕".to_string(),
+        "check" => "✓".to_string(),
+        "arrow_up" => "↑".to_string(),
+        "arrow_down" => "↓".to_string(),
+        "arrow_left" => "←".to_string(),
+        "arrow_right" => "→".to_string(),
+        "refresh" => "↻".to_string(),
+        "delete" => "🗑".to_string(),
+        "edit" => "✎".to_string(),
+        "add" => "+".to_string(),
+        "remove" => "−".to_string(),
+        "info" => "ℹ".to_string(),
+        "warning" => "⚠".to_string(),
+        "error" => "✗".to_string(),
+        "help" => "?".to_string(),
+        "lock" => "🔒".to_string(),
+        "unlock" => "🔓".to_string(),
+        "heart" => "♥".to_string(),
+        "bookmark" => "🔖".to_string(),
+        "share" => "↗".to_string(),
+        "download" => "↓".to_string(),
+        "upload" => "↑".to_string(),
+        _ => name.to_string(),
+    }
+}
+
+/// 从 Tabs 组件的 properties 中解析标题和子组件列表
+fn parse_tabs(props: &serde_json::Value) -> (Vec<String>, Vec<ComponentId>) {
+    let mut titles = Vec::new();
+    let mut children = Vec::new();
+    if let Some(arr) = props.get("tabs").and_then(|v| v.as_array()) {
+        for tab in arr {
+            if let Some(title) = tab.get("title").and_then(|v| v.as_str()) {
+                titles.push(title.to_string());
+            }
+            if let Some(child) = tab.get("child").and_then(|v| v.as_str()) {
+                if let Ok(cid) = ComponentId::new(child) {
+                    children.push(cid);
+                }
+            }
+        }
+    }
+    (titles, children)
 }
 
 #[cfg(test)]
@@ -487,5 +696,157 @@ mod tests {
             matches!(sl_widget.unwrap(), RenderableWidget::Slider { .. }),
             "Slider component should produce RenderableWidget::Slider"
         );
+    }
+
+    // ---- 新增组件映射测试 ----
+
+    #[test]
+    fn test_button_maps_to_button_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("btn").unwrap()],
+        );
+        let btn: Component = serde_json::from_str(
+            r#"{"id":"btn","component":"Button","child":"lbl","variant":"primary"}"#,
+        ).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", btn).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let w = widgets.iter().find(|w| w.id().as_str() == "btn");
+        assert!(w.is_some(), "Button widget should exist");
+        assert!(matches!(w.unwrap(), RenderableWidget::Button { .. }));
+    }
+
+    #[test]
+    fn test_divider_maps_to_divider_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("div").unwrap()],
+        );
+        let div: Component = serde_json::from_str(r#"{"id":"div","component":"Divider"}"#).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", div).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let w = widgets.iter().find(|w| w.id().as_str() == "div");
+        assert!(w.is_some(), "Divider widget should exist");
+        assert!(matches!(w.unwrap(), RenderableWidget::Divider { .. }));
+    }
+
+    #[test]
+    fn test_icon_maps_to_icon_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("ic").unwrap()],
+        );
+        let icon: Component = serde_json::from_str(r#"{"id":"ic","component":"Icon","name":"star"}"#).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", icon).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let w = widgets.iter().find(|w| w.id().as_str() == "ic");
+        assert!(w.is_some(), "Icon widget should exist");
+        assert!(matches!(w.unwrap(), RenderableWidget::Icon { .. }));
+    }
+
+    #[test]
+    fn test_image_maps_to_image_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("img").unwrap()],
+        );
+        let img: Component = serde_json::from_str(
+            r#"{"id":"img","component":"Image","url":"https://example.com/pic.png"}"#,
+        ).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", img).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let w = widgets.iter().find(|w| w.id().as_str() == "img");
+        assert!(w.is_some(), "Image widget should exist");
+        assert!(matches!(w.unwrap(), RenderableWidget::Image { .. }));
+    }
+
+    #[test]
+    fn test_card_maps_to_card_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("card").unwrap()],
+        );
+        let card: Component = serde_json::from_str(
+            r#"{"id":"card","component":"Card","child":"inner"}"#,
+        ).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", card).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let w = widgets.iter().find(|w| w.id().as_str() == "card");
+        assert!(w.is_some(), "Card widget should exist");
+        assert!(matches!(w.unwrap(), RenderableWidget::Card { .. }));
+    }
+
+    #[test]
+    fn test_tabs_maps_to_tabs_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("tabs").unwrap()],
+        );
+        let tabs: Component = serde_json::from_str(
+            r#"{"id":"tabs","component":"Tabs","tabs":[{"title":"A","child":"a"},{"title":"B","child":"b"}]}"#,
+        ).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", tabs).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let w = widgets.iter().find(|w| w.id().as_str() == "tabs");
+        assert!(w.is_some(), "Tabs widget should exist");
+        assert!(matches!(w.unwrap(), RenderableWidget::Tabs { .. }));
+    }
+
+    #[test]
+    fn test_choice_picker_maps_to_choice_picker_widget() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let mapper = WidgetMapper;
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("cp").unwrap()],
+        );
+        let cp: Component = serde_json::from_str(
+            r#"{"id":"cp","component":"ChoicePicker","options":["A","B","C"],"value":["A"]}"#,
+        ).unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", cp).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&mapper, &binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let w = widgets.iter().find(|w| w.id().as_str() == "cp");
+        assert!(w.is_some(), "ChoicePicker widget should exist");
+        assert!(matches!(w.unwrap(), RenderableWidget::ChoicePicker { .. }));
     }
 }

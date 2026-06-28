@@ -253,6 +253,55 @@ impl TuiRenderer {
                 let text = Paragraph::new(bar);
                 frame.render_widget(text, area);
             }
+            RenderableWidget::Button {
+                area, label, variant, ..
+            } => {
+                let display = if variant == "primary" {
+                    format!("[ {} ]", label)
+                } else {
+                    format!("< {} >", label)
+                };
+                let p = Paragraph::new(display);
+                frame.render_widget(p, area);
+            }
+            RenderableWidget::Card { area, .. } => {
+                let block = Block::default().title("┌─┐");
+                frame.render_widget(block, area);
+            }
+            RenderableWidget::Divider { area, .. } => {
+                let line = "─".repeat(area.width as usize);
+                frame.render_widget(Paragraph::new(line), area);
+            }
+            RenderableWidget::Icon { area, symbol, .. } => {
+                frame.render_widget(Paragraph::new(symbol), area);
+            }
+            RenderableWidget::Image { area, url, .. } => {
+                frame.render_widget(Paragraph::new(format!("🖼 {}", url)), area);
+            }
+            RenderableWidget::Tabs {
+                area, titles, ..
+            } => {
+                let header = titles.join(" │ ");
+                frame.render_widget(Paragraph::new(header), area);
+            }
+            RenderableWidget::ChoicePicker {
+                area,
+                options,
+                selected,
+                ..
+            } => {
+                let display: Vec<String> = options
+                    .iter()
+                    .map(|o| {
+                        if selected.contains(o) {
+                            format!("(●) {}", o)
+                        } else {
+                            format!("( ) {}", o)
+                        }
+                    })
+                    .collect();
+                frame.render_widget(Paragraph::new(display.join("  ")), area);
+            }
         }
     }
 
