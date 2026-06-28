@@ -50,7 +50,7 @@ fn main() -> iced::Result {
         let envelope = ServerEnvelope::V1_0(a2ui_core::message::V1_0ServerMessage::CreateSurface(
             CreateSurface {
                 surface_id: "demo".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: Some(json!({"agentDisplayName": "A2UI Iced Demo"})),
                 send_data_model: false,
                 components: Some(vec![root]),

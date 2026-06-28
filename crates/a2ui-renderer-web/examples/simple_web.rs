@@ -191,7 +191,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     renderer
         .create_surface(CreateSurface {
             surface_id: "demo".into(),
-            catalog_id: "basic".into(),
+            catalog_id: "a2ui://catalogs/basic/v1".into(),
             surface_properties: Some(json!({"agentDisplayName": "A2UI Web Demo"})),
             send_data_model: false,
             components: Some(vec![

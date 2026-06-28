@@ -1,3 +1,4 @@
+pub use crate::component::child_list::ChildList;
 pub use crate::component::component::{Component, DynamicValue};
 pub use crate::component::Catalog;
 pub use crate::component::ComponentId;

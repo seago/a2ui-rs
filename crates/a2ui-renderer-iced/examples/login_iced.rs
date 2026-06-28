@@ -148,7 +148,7 @@ fn main() -> iced::Result {
         std::thread::sleep(Duration::from_millis(200));
         let envelope = ServerEnvelope::V1_0(V1_0ServerMessage::CreateSurface(CreateSurface {
             surface_id: "login".into(),
-            catalog_id: "basic".into(),
+            catalog_id: "a2ui://catalogs/basic/v1".into(),
             surface_properties: Some(json!({"agentDisplayName": "A2UI Login"})),
             send_data_model: false,
             components: Some(all_components),

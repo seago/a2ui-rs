@@ -48,15 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut renderer = GuiRenderer::new();
     renderer.register_function("formatString", a2ui_renderer::CallableFrom::ClientOrRemote);
-
-    // 注册 Basic Catalog
-    let catalog: a2ui_core::Catalog = serde_json::from_value(json!({
-        "catalogId": "basic",
-        "instructions": "Basic catalog",
-        "components": {},
-        "functions": {}
-    }))?;
-    renderer.register_catalog(catalog).ok();
+    // Basic Catalog 已由 CatalogRegistry::with_defaults() 自动加载
 
     let (msg_tx, msg_rx) = A2uiApp::create_channel();
     let (action_tx, mut action_rx) = A2uiApp::create_action_channel();
@@ -114,90 +106,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let card_name = Component::text(
             ComponentId::new("card_name").unwrap(),
-            DynamicValue::Path {
-                path: "name".into(),
-            },
+            DynamicValue::<String>::path("name"),
         );
-
         let card_rating = Component::text(
             ComponentId::new("card_rating").unwrap(),
-            DynamicValue::Path {
-                path: "rating".into(),
-            },
+            DynamicValue::<String>::path("rating"),
         );
-
         let card_detail = Component::text(
             ComponentId::new("card_detail").unwrap(),
-            DynamicValue::Path {
-                path: "detail".into(),
-            },
+            DynamicValue::<String>::path("detail"),
         );
-
         let card_address = Component::text(
             ComponentId::new("card_address").unwrap(),
-            DynamicValue::Path {
-                path: "address".into(),
-            },
+            DynamicValue::<String>::path("address"),
         );
         let card_link = Component::text(
             ComponentId::new("card_link").unwrap(),
-            DynamicValue::Path {
-                path: "infoLink".into(),
-            },
+            DynamicValue::<String>::path("infoLink"),
         );
 
-        let card_image: Component = serde_json::from_value(json!({
-            "component": "Image",
-            "id": "card_image",
-            "url": {"path": "imageUrl"},
-            "width": "fill",
-            "height": 140
-        }))
-        .unwrap();
+        let card_image = Component::image(
+            ComponentId::new("card_image").unwrap(),
+            DynamicValue::<String>::path("imageUrl"),
+        );
 
-        let card_body: Component = serde_json::from_value(json!({
-            "component": "Column",
-            "id": "card_body",
-            "children": [
-                "card_image",
-                "card_name",
-                "card_rating",
-                "card_detail",
-                "card_address",
-                "card_link"
-            ]
-        }))
-        .unwrap();
+        let card_body = Component::column(
+            ComponentId::new("card_body").unwrap(),
+            vec![
+                ComponentId::new("card_image").unwrap(),
+                ComponentId::new("card_name").unwrap(),
+                ComponentId::new("card_rating").unwrap(),
+                ComponentId::new("card_detail").unwrap(),
+                ComponentId::new("card_address").unwrap(),
+                ComponentId::new("card_link").unwrap(),
+            ],
+        );
 
-        let card_template: Component = serde_json::from_value(json!({
-            "component": "Card",
-            "id": "card_template",
-            "child": "card_body"
-        }))
-        .unwrap();
+        let card_template = Component::card(
+            ComponentId::new("card_template").unwrap(),
+            ComponentId::new("card_body").unwrap(),
+        );
 
-        let list: Component = serde_json::from_value(json!({
-            "component": "List",
-            "id": "restaurant_list",
-            "children": {
-                "template": "card_template",
-                "path": "/items"
-            }
-        }))
-        .unwrap();
+        let list = Component::list(
+            ComponentId::new("restaurant_list").unwrap(),
+            a2ui_core::component::ChildList::object(
+                ComponentId::new("card_template").unwrap(),
+                "/items",
+            ),
+        );
 
-        let root: Component = serde_json::from_value(json!({
-            "component": "Column",
-            "id": "root",
-            "children": ["restaurant_list"]
-        }))
-        .unwrap();
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("restaurant_list").unwrap()],
+        );
 
         // CreateSurface 一步到位：组件 + 数据一起发送
         let envelope = ServerEnvelope::V1_0(a2ui_core::message::V1_0ServerMessage::CreateSurface(
             CreateSurface {
                 surface_id: "restaurants".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: Some(json!({"agentDisplayName": "Szechuan Restaurant Finder"})),
                 send_data_model: true,
                 components: Some(vec![

@@ -182,7 +182,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let envelope = ServerEnvelope::V1_0(a2ui_core::message::V1_0ServerMessage::CreateSurface(
             CreateSurface {
                 surface_id: "contact-card".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: Some(json!({"agentDisplayName": "Contact Card"})),
                 send_data_model: false,
                 components: Some(all_components),

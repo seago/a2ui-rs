@@ -67,15 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     renderer.register_function("length", a2ui_renderer::CallableFrom::ClientOnly);
     renderer.register_function("openUrl", a2ui_renderer::CallableFrom::ClientOnly);
 
-    // 注册 Basic Catalog
-    let catalog: a2ui_core::Catalog = serde_json::from_value(json!({
-        "catalogId": "basic",
-        "instructions": "Basic catalog",
-        "components": {},
-        "functions": {}
-    }))?;
-    renderer.register_catalog(catalog).ok();
-
+    // Basic Catalog 已由 CatalogRegistry::with_defaults() 自动加载
     // 创建 channel
     let (msg_tx, msg_rx) = A2uiApp::create_channel();
     let (action_tx, mut action_rx) = A2uiApp::create_action_channel();
@@ -217,7 +209,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 1. 发送 createSurface（附带完整组件树）
         let envelope = ServerEnvelope::V1_0(V1_0ServerMessage::CreateSurface(CreateSurface {
             surface_id: "login".into(),
-            catalog_id: "basic".into(),
+            catalog_id: "a2ui://catalogs/basic/v1".into(),
             surface_properties: Some(json!({"agentDisplayName": "A2UI Login Demo"})),
             send_data_model: false,
             components: Some(all_components),
