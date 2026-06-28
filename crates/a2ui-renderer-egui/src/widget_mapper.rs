@@ -587,32 +587,24 @@ impl WidgetMapper {
                     .auto_shrink([false, false])
                     .min_scrolled_height(viewport_height)
                     .show(ui, |ui| {
-                        let list_width = ui.available_width();
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(list_width, 0.0),
-                            egui::Layout::top_down_justified(egui::Align::Center),
-                            |ui| {
-                                ui.set_width(list_width);
-                                for (index, child_id) in children_ids.iter().enumerate() {
-                                    if index > 0 {
-                                        ui.add_space(12.0);
-                                    }
-
-                                    if let Some(child) = widget_map.get(child_id.as_str()) {
-                                        self.render_gui_widget(
-                                            child,
-                                            ui,
-                                            widget_map,
-                                            response_tracker,
-                                            user_events,
-                                            image_textures,
-                                        );
-                                    } else {
-                                        ui.label(format!("[missing: {}]", child_id));
-                                    }
-                                }
-                            },
-                        );
+                        ui.set_width(ui.available_width());
+                        for (index, child_id) in children_ids.iter().enumerate() {
+                            if index > 0 {
+                                ui.add_space(12.0);
+                            }
+                            if let Some(child) = widget_map.get(child_id.as_str()) {
+                                self.render_gui_widget(
+                                    child,
+                                    ui,
+                                    widget_map,
+                                    response_tracker,
+                                    user_events,
+                                    image_textures,
+                                );
+                            } else {
+                                ui.label(format!("[missing: {}]", child_id));
+                            }
+                        }
                     });
             }
             RenderableGuiWidget::Tabs {
