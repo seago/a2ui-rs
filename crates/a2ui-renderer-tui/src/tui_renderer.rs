@@ -306,6 +306,7 @@ impl Default for TuiRenderer {
 #[async_trait::async_trait]
 impl Renderer for TuiRenderer {
     async fn create_surface(&mut self, msg: CreateSurface) -> RenderResult<SurfaceHandle> {
+        tracing::trace!(surface_id = %msg.surface_id, "createSurface");
         // LRU 驱逐：检查是否需要驱逐最久未用的 surface
         if let Some(victim_id) = self.surface_lru.find_victim(self.surfaces.len()) {
             // 驱逐最久未用的 surface
@@ -402,6 +403,7 @@ impl Renderer for TuiRenderer {
     }
 
     async fn update_data_model(&mut self, msg: UpdateDataModel) -> RenderResult<()> {
+        tracing::debug!(surface_id = %msg.surface_id, path = ?msg.path, "updateDataModel");
         let surface_id = msg.surface_id.clone();
         self.surface_lru.touch(&surface_id);
         if let Some(binding) = self.data_bindings.get_mut(&surface_id) {
@@ -419,6 +421,7 @@ impl Renderer for TuiRenderer {
     }
 
     async fn delete_surface(&mut self, msg: DeleteSurface) -> RenderResult<()> {
+        tracing::info!(surface_id = %msg.surface_id, "deleteSurface");
         let surface_id = msg.surface_id.clone();
         self.forest.remove_surface(&surface_id)?;
         self.data_bindings.remove(&surface_id);

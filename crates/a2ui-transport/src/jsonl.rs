@@ -38,6 +38,7 @@ where
     async fn send(&mut self, envelope: ClientEnvelope) -> TransportResult<()> {
         let json = serde_json::to_string(&envelope)
             .map_err(|e| crate::TransportError::SendError(format!("serialization error: {}", e)))?;
+        tracing::trace!("JSONL send: {} bytes", json.len());
         self.writer
             .write_all(json.as_bytes())
             .await
@@ -81,6 +82,7 @@ where
     }
 
     async fn close(&mut self) -> TransportResult<()> {
+        tracing::info!("JSONL transport closing");
         self.writer
             .flush()
             .await
