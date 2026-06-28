@@ -457,6 +457,12 @@ impl WidgetMapper {
                         component_id: id.clone(),
                     });
                 }
+                if response.has_focus() {
+                    ui.painter().rect_stroke(
+                        response.rect.expand(2.0), 2.0,
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(25, 118, 210)),
+                    );
+                }
                 response_tracker.insert(id.as_str().to_string(), response);
             }
             RenderableGuiWidget::Column { children_ids, .. } => {

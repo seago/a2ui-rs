@@ -39,13 +39,35 @@ pub struct WebSocketTransport {
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
     >,
+    /// 自动重连配置（None 表示不自动重连）
+    pub max_reconnect_attempts: Option<usize>,
+    /// 重连间隔（毫秒）
+    pub reconnect_delay_ms: u64,
 }
 
 impl WebSocketTransport {
     pub fn new(url: impl AsRef<str>) -> TransportResult<Self> {
         let url = url::Url::parse(url.as_ref())
             .map_err(|e| crate::TransportError::ConnectionError(format!("invalid URL: {}", e)))?;
-        Ok(Self { url, ws: None })
+        Ok(Self {
+            url,
+            ws: None,
+            max_reconnect_attempts: Some(3),
+            reconnect_delay_ms: 1000,
+        })
+    }
+
+    /// 禁用自动重连
+    pub fn without_reconnect(mut self) -> Self {
+        self.max_reconnect_attempts = None;
+        self
+    }
+
+    /// 设置重连参数
+    pub fn with_reconnect(mut self, max_attempts: usize, delay_ms: u64) -> Self {
+        self.max_reconnect_attempts = Some(max_attempts);
+        self.reconnect_delay_ms = delay_ms;
+        self
     }
 }
 
@@ -92,6 +114,20 @@ impl Transport for WebSocketTransport {
     }
 
     async fn receive(&mut self) -> TransportResult<ServerEnvelope> {
+        // 自动重连：ws 为 None 时尝试重新连接
+        if self.ws.is_none() {
+            if let Some(max_attempts) = self.max_reconnect_attempts {
+                for attempt in 1..=max_attempts {
+                    tracing::warn!("WS reconnecting (attempt {}/{})", attempt, max_attempts);
+                    tokio::time::sleep(std::time::Duration::from_millis(self.reconnect_delay_ms)).await;
+                    if self.connect().await.is_ok() {
+                        tracing::info!("WS reconnected");
+                        break;
+                    }
+                }
+            }
+        }
+
         let ws = self
             .ws
             .as_mut()
@@ -99,7 +135,11 @@ impl Transport for WebSocketTransport {
         let msg = ws
             .next()
             .await
-            .ok_or_else(|| WebSocketError::ReceiveError("connection closed".into()))?
+            .ok_or_else(|| {
+                // 连接关闭时清除 ws，触发下次自动重连
+                self.ws = None;
+                WebSocketError::ReceiveError("connection closed".into())
+            })?
             .map_err(|e| WebSocketError::ReceiveError(format!("{}", e)))?;
 
         // 支持 Text 和 Binary 帧（Binary 帧也尝试按 UTF-8 JSON 解析）
