@@ -619,23 +619,88 @@ impl WidgetMapper {
                         );
                     });
             }
-            RenderableGuiWidget::Tabs { tabs_data, .. } => {
+            RenderableGuiWidget::Tabs {
+                id, tabs_data, ..
+            } => {
+                if tabs_data.is_empty() {
+                    return;
+                }
+                // 用 egui memory 存储活动 tab 索引
+                let state_id = ui.make_persistent_id(format!("tabs_{}", id.as_str()));
+                let mut active = ui
+                    .memory_mut(|mem| *mem.data.get_temp_mut_or::<usize>(state_id, 0));
+                if active >= tabs_data.len() {
+                    active = 0;
+                }
+
                 ui.horizontal(|ui| {
-                    for (title, _child_id) in tabs_data {
-                        ui.label(format!("[{}]", title));
+                    for (i, (title, _)) in tabs_data.iter().enumerate() {
+                        let btn = egui::Button::new(
+                            if i == active {
+                                egui::RichText::new(title.clone()).strong()
+                            } else {
+                                egui::RichText::new(title.clone())
+                            },
+                        );
+                        if ui.add(btn).clicked() {
+                            active = i;
+                            ui.memory_mut(|mem| mem.data.insert_temp::<usize>(state_id, active));
+                        }
                     }
                 });
                 ui.separator();
+
+                // 渲染活动 tab 的子组件
+                if let Some((_, child_id)) = tabs_data.get(active) {
+                    if let Some(child) = widget_map.get(child_id.as_str()) {
+                        self.render_gui_widget(
+                            child, ui, widget_map, response_tracker,
+                            user_events, image_textures,
+                        );
+                    }
+                }
             }
             RenderableGuiWidget::Modal {
+                id,
                 content_id,
                 trigger_id,
                 ..
             } => {
-                ui.label(format!(
-                    "[Modal: content={}, trigger={}]",
-                    content_id, trigger_id
-                ));
+                let modal_id = ui.make_persistent_id(format!("modal_{}", id.as_str()));
+                let mut open = ui
+                    .memory_mut(|mem| *mem.data.get_temp_mut_or::<bool>(modal_id, false));
+
+                // 渲染 trigger
+                if let Some(trigger) = widget_map.get(trigger_id.as_str()) {
+                    self.render_gui_widget(
+                        trigger, ui, widget_map, response_tracker,
+                        user_events, image_textures,
+                    );
+                    // 检查 trigger 是否被点击
+                    if let Some(resp) = response_tracker.get(trigger_id.as_str()) {
+                        if resp.clicked() {
+                            open = !open;
+                            ui.memory_mut(|mem| mem.data.insert_temp::<bool>(modal_id, open));
+                        }
+                    }
+                }
+
+                // 渲染 modal 内容
+                if open {
+                    egui::Window::new(format!("Modal"))
+                        .open(&mut open)
+                        .show(ui.ctx(), |ui| {
+                            if let Some(content) = widget_map.get(content_id.as_str()) {
+                                self.render_gui_widget(
+                                    content, ui, widget_map, response_tracker,
+                                    user_events, image_textures,
+                                );
+                            }
+                        });
+                    if !open {
+                        ui.memory_mut(|mem| mem.data.insert_temp::<bool>(modal_id, false));
+                    }
+                }
             }
             RenderableGuiWidget::Slider {
                 id,

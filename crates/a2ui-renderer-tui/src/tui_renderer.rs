@@ -198,9 +198,21 @@ impl TuiRenderer {
 
     /// 将单个 RenderableWidget 绘制到 Frame
     fn draw_widget(&self, frame: &mut Frame, widget: RenderableWidget) {
+        // 检查此 widget 是否为当前焦点组件
+        let is_focused = self
+            .focus_manager
+            .current()
+            .map(|focused_id| focused_id == widget.id())
+            .unwrap_or(false);
+
         match widget {
             RenderableWidget::Paragraph { area, text, .. } => {
-                let para = Paragraph::new(text);
+                let style = if is_focused {
+                    ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::REVERSED)
+                } else {
+                    ratatui::style::Style::default()
+                };
+                let para = Paragraph::new(text).style(style);
                 frame.render_widget(para, area);
             }
             RenderableWidget::Block { area, title, .. } => {

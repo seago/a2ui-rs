@@ -309,6 +309,22 @@ impl HtmlBuilder {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
     <style>
+        /* A2UI CSS Variables (override to customize theme) */
+        :root {{
+            --a2ui-primary-color: #1976D2;
+            --a2ui-primary-text-color: #FFFFFF;
+            --a2ui-bg-color: #FFFFFF;
+            --a2ui-text-color: #212121;
+            --a2ui-border-color: #CCCCCC;
+            --a2ui-error-color: #FF0000;
+            --a2ui-font-family: system-ui, sans-serif;
+            --a2ui-font-size: 14px;
+            --a2ui-border-radius: 4px;
+            --a2ui-card-border-radius: 8px;
+            --a2ui-item-spacing: 8px;
+            --a2ui-icon-size: 24px;
+            --a2ui-content-max-width: 720px;
+        }}
         /* A2UI Basic Styles */
         .a2ui-body {{ margin: 0; padding: 16px; font-family: system-ui, sans-serif; }}
         .a2ui-column {{ display: flex; flex-direction: column; gap: 8px; }}
