@@ -27,7 +27,7 @@ fn test_iced_create_surface_adds_to_order() {
 
     let msg = CreateSurface {
         surface_id: "s1".into(),
-        catalog_id: "basic".into(),
+        catalog_id: "a2ui://catalogs/basic/v1".into(),
         surface_properties: None,
         send_data_model: false,
         components: Some(vec![comp]),

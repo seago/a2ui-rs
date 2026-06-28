@@ -12,7 +12,7 @@ fn test_tui_full_flow() {
     );
     let msg = CreateSurface {
         surface_id: "s1".to_string(),
-        catalog_id: "basic".to_string(),
+        catalog_id: "a2ui://catalogs/basic/v1".to_string(),
         surface_properties: None,
         send_data_model: false,
         components: Some(vec![comp]),

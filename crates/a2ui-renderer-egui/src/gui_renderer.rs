@@ -77,7 +77,7 @@ impl GuiRenderer {
             data_bindings: HashMap::new(),
             dependency_graph: DependencyGraph::new(),
             dispatcher: FunctionDispatcher::new(),
-            catalog_registry: CatalogRegistry::new(),
+            catalog_registry: CatalogRegistry::with_defaults(),
             focused_component: None,
             pending_responses: HashMap::new(),
             send_data_model: HashMap::new(),
@@ -685,7 +685,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -720,7 +720,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -802,7 +802,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),

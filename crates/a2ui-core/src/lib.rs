@@ -49,7 +49,7 @@ pub mod prelude;
 
 #[cfg(feature = "embed-assets")]
 pub fn load_basic_catalog() -> Result<Catalog> {
-    let json = include_str!("assets/catalogs/basic/catalog.json");
+    let json = include_str!("../assets/catalogs/basic/catalog.json");
     let catalog: Catalog = serde_json::from_str(json)?;
     catalog.validate()?;
     Ok(catalog)

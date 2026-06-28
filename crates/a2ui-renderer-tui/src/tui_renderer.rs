@@ -1710,7 +1710,7 @@ mod tests {
             r#"{"id":"root","component":"Column","children":["btn","tf"]}"#,
         ).unwrap();
         renderer.create_surface(CreateSurface {
-            surface_id: "s1".into(), catalog_id: "basic".into(),
+            surface_id: "s1".into(), catalog_id: "a2ui://catalogs/basic/v1".into(),
             surface_properties: None, send_data_model: false,
             components: Some(vec![root, btn, tf]),
             data_model: None,
@@ -1731,7 +1731,7 @@ mod tests {
             r#"{"id":"root","component":"Column","children":["btn"]}"#,
         ).unwrap();
         renderer.create_surface(CreateSurface {
-            surface_id: "s1".into(), catalog_id: "basic".into(),
+            surface_id: "s1".into(), catalog_id: "a2ui://catalogs/basic/v1".into(),
             surface_properties: None, send_data_model: false,
             components: Some(vec![root, btn]),
             data_model: None,

@@ -63,7 +63,7 @@ async fn test_web_renderer_create_and_render() {
     renderer
         .create_surface(CreateSurface {
             surface_id: "e2e".into(),
-            catalog_id: "basic".into(),
+            catalog_id: "a2ui://catalogs/basic/v1".into(),
             surface_properties: None,
             send_data_model: false,
             components: Some(vec![comp]),
@@ -89,7 +89,7 @@ async fn test_web_renderer_incremental_update() {
     renderer
         .create_surface(CreateSurface {
             surface_id: "incr".into(),
-            catalog_id: "basic".into(),
+            catalog_id: "a2ui://catalogs/basic/v1".into(),
             surface_properties: None,
             send_data_model: false,
             components: Some(vec![comp]),
@@ -142,7 +142,7 @@ async fn test_web_renderer_full_end_to_end() {
     renderer
         .create_surface(CreateSurface {
             surface_id: "app".into(),
-            catalog_id: "basic".into(),
+            catalog_id: "a2ui://catalogs/basic/v1".into(),
             surface_properties: None,
             send_data_model: false,
             components: Some(vec![root, text, button, label]),

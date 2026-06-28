@@ -317,7 +317,7 @@ mod tests {
 
         let envelope = ServerEnvelope::V1_0(V1_0ServerMessage::CreateSurface(CreateSurface {
             surface_id: "test".into(),
-            catalog_id: "basic".into(),
+            catalog_id: "a2ui://catalogs/basic/v1".into(),
             surface_properties: None,
             send_data_model: false,
             components: Some(vec![Component::text(

@@ -100,23 +100,11 @@ mod tests {
     }
 
     #[test]
-    fn test_load_basic_catalog_debug() {
-        match a2ui_core::load_basic_catalog() {
-            Ok(c) => {
-                assert_eq!(c.catalog_id(), "basic");
-            }
-            Err(e) => {
-                panic!("load_basic_catalog failed: {:?}", e);
-            }
-        }
-    }
-
-    #[test]
     fn test_with_defaults_loads_basic_catalog() {
         let registry = CatalogRegistry::with_defaults();
-        assert!(registry.has_catalog("basic"));
+        assert!(registry.has_catalog("a2ui://catalogs/basic/v1"));
         // Verify it has the 18 standard components
-        let catalog = registry.get("basic").unwrap();
+        let catalog = registry.get("a2ui://catalogs/basic/v1").unwrap();
         assert!(catalog.has_component("Text"));
         assert!(catalog.has_component("Button"));
         assert!(catalog.has_component("Image"));

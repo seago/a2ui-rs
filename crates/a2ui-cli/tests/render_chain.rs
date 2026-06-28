@@ -15,7 +15,7 @@ async fn test_process_server_envelope_calls_render_frame() {
 
     let msg = a2ui_core::message::server_to_client::CreateSurface {
         surface_id: "s1".into(),
-        catalog_id: "basic".into(),
+        catalog_id: "a2ui://catalogs/basic/v1".into(),
         surface_properties: None,
         send_data_model: false,
         components: Some(vec![comp]),

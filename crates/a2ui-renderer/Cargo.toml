@@ -9,7 +9,7 @@ description = "A2UI Renderer trait and component tree management"
 repository = "https://github.com/yufeng108/a2ui-rs"
 
 [dependencies]
-a2ui-core = { path = "../a2ui-core" }
+a2ui-core = { path = "../a2ui-core", features = ["embed-assets"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -74,7 +74,7 @@ impl WebRenderer {
             data_bindings: HashMap::new(),
             dependency_graph: DependencyGraph::new(),
             dispatcher: FunctionDispatcher::new(),
-            catalog_registry: CatalogRegistry::new(),
+            catalog_registry: CatalogRegistry::with_defaults(),
             focused_component: None,
             pending_responses: HashMap::new(),
             send_data_model: HashMap::new(),
@@ -868,7 +868,7 @@ mod tests {
         let handle = renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -894,7 +894,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -921,7 +921,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -949,7 +949,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -986,7 +986,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp1]),
@@ -997,7 +997,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s2".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp2]),
@@ -1025,7 +1025,7 @@ mod tests {
             renderer
                 .create_surface(CreateSurface {
                     surface_id: format!("s{}", i),
-                    catalog_id: "basic".into(),
+                    catalog_id: "a2ui://catalogs/basic/v1".into(),
                     surface_properties: None,
                     send_data_model: false,
                     components: Some(vec![comp.clone()]),
@@ -1038,7 +1038,7 @@ mod tests {
         let result = renderer
             .create_surface(CreateSurface {
                 surface_id: "overflow".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
@@ -1063,7 +1063,7 @@ mod tests {
         let result = renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(components),
@@ -1088,7 +1088,7 @@ mod tests {
         let result = renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(components),
@@ -1149,7 +1149,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![root_unknown, unknown_comp]),
@@ -1162,7 +1162,7 @@ mod tests {
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s2".into(),
-                catalog_id: "basic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![root_custom, custom_comp]),

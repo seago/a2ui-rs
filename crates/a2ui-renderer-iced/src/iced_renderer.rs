@@ -63,7 +63,7 @@ impl IcedRenderer {
             data_bindings: HashMap::new(),
             dependency_graph: DependencyGraph::new(),
             dispatcher: FunctionDispatcher::new(),
-            catalog_registry: CatalogRegistry::new(),
+            catalog_registry: CatalogRegistry::with_defaults(),
             pending_responses: HashMap::new(),
             send_data_model: HashMap::new(),
             dirty_surfaces: HashSet::new(),
