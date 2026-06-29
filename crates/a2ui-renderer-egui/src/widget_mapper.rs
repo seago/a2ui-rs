@@ -1,5 +1,8 @@
 use a2ui_core::prelude::*;
-use a2ui_renderer::{ComponentStyle, CustomComponentRegistry, StyleColor, StyleSpacing};
+use a2ui_renderer::{
+    resolve_dynamic_string_prop_with_missing_path, resolve_dynamic_string_value_with_missing_path,
+    ComponentStyle, CustomComponentRegistry, StyleColor, StyleSpacing,
+};
 use std::collections::HashMap;
 
 /// GUI 渲染目标 widget（用于 egui 即时模式渲染）
@@ -118,37 +121,12 @@ impl WidgetMapper {
         component: &Component,
         data_model: Option<&a2ui_renderer::DataBinding>,
     ) -> String {
-        let props = component.properties();
-        if let Some(text_val) = props.get("text") {
-            if let Some(s) = text_val.as_str() {
-                return s.to_string();
-            }
-            if let Some(obj) = text_val.as_object() {
-                // 路径绑定：从 DataModel 中解析实际值
-                if let Some(path_val) = obj.get("path") {
-                    if let Some(p) = path_val.as_str() {
-                        if let Some(binding) = data_model {
-                            if let Some(resolved) = binding.get(p) {
-                                if !resolved.is_null() {
-                                    return match resolved {
-                                        serde_json::Value::String(s) => s.clone(),
-                                        other => other.to_string(),
-                                    };
-                                }
-                            }
-                        }
-                        // 数据模型不可用时回退显示路径
-                        return format!("{{{}…}}", p);
-                    }
-                }
-                if let Some(call_val) = obj.get("call") {
-                    if let Some(c) = call_val.as_str() {
-                        return format!("{{call:{}}}", c);
-                    }
-                }
-            }
-        }
-        format!("[{}]", component.component_type())
+        resolve_dynamic_prop(
+            component.properties(),
+            "text",
+            data_model,
+            &format!("[{}]", component.component_type()),
+        )
     }
 
     /// 判断组件是否可聚焦
@@ -257,11 +235,7 @@ impl WidgetMapper {
                 } else {
                     true
                 };
-                let label = props
-                    .get("label")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let label = resolve_dynamic_prop(props, "label", data_model, "");
                 RenderableGuiWidget::CheckBox {
                     id: component.id().clone(),
                     checked,
@@ -272,11 +246,7 @@ impl WidgetMapper {
                 id: component.id().clone(),
             },
             "Icon" => {
-                let name = props
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("\u{2753}")
-                    .to_string();
+                let name = resolve_dynamic_prop(props, "name", data_model, "\u{2753}");
                 RenderableGuiWidget::Icon {
                     id: component.id().clone(),
                     name,
@@ -339,16 +309,9 @@ impl WidgetMapper {
                 }
             }
             "TextField" => {
-                let value = props
-                    .get("value")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let placeholder = props
-                    .get("placeholder")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Enter text...")
-                    .to_string();
+                let value = resolve_dynamic_prop(props, "value", data_model, "");
+                let placeholder =
+                    resolve_dynamic_prop(props, "placeholder", data_model, "Enter text...");
                 let variant = props
                     .get("variant")
                     .and_then(|v| v.as_str())
@@ -387,33 +350,21 @@ impl WidgetMapper {
                 }
             }
             "DateTimeInput" => {
-                let label = props
-                    .get("label")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Select date/time")
-                    .to_string();
+                let label = resolve_dynamic_prop(props, "label", data_model, "Select date/time");
                 RenderableGuiWidget::DateTimeInput {
                     id: component.id().clone(),
                     label,
                 }
             }
             "Video" => {
-                let url = props
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let url = resolve_dynamic_prop(props, "url", data_model, "");
                 RenderableGuiWidget::Video {
                     id: component.id().clone(),
                     url,
                 }
             }
             "AudioPlayer" => {
-                let url = props
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let url = resolve_dynamic_prop(props, "url", data_model, "");
                 RenderableGuiWidget::AudioPlayer {
                     id: component.id().clone(),
                     url,
@@ -899,30 +850,33 @@ fn extract_children_ids(props: &serde_json::Value) -> Vec<ComponentId> {
         .unwrap_or_default()
 }
 
+fn resolve_dynamic_prop(
+    props: &serde_json::Value,
+    key: &str,
+    data_model: Option<&a2ui_renderer::DataBinding>,
+    fallback: &str,
+) -> String {
+    resolve_dynamic_string_prop_with_missing_path(props, key, data_model, fallback, |path| {
+        format!("{{{}…}}", path)
+    })
+}
+
 /// 解析动态属性值（字面量字符串或 { "path": "..." } 绑定）
 fn resolve_dynamic_attr(
     v: &serde_json::Value,
     data_model: Option<&a2ui_renderer::DataBinding>,
 ) -> Option<String> {
     match v {
-        serde_json::Value::String(s) => Some(s.clone()),
-        serde_json::Value::Object(obj) => {
-            if let Some(p) = obj.get("path").and_then(|v| v.as_str()) {
-                if let Some(binding) = data_model {
-                    if let Some(resolved) = binding.get(p) {
-                        if !resolved.is_null() {
-                            return match resolved {
-                                serde_json::Value::String(s) => Some(s.clone()),
-                                other => Some(other.to_string()),
-                            };
-                        }
-                    }
-                }
-                Some(format!("{{{}…}}", p))
-            } else {
-                None
-            }
-        }
+        serde_json::Value::String(_) => Some(resolve_dynamic_string_value_with_missing_path(
+            v,
+            data_model,
+            |path| format!("{{{}…}}", path),
+        )),
+        serde_json::Value::Object(obj) if obj.contains_key("path") => Some(
+            resolve_dynamic_string_value_with_missing_path(v, data_model, |path| {
+                format!("{{{}…}}", path)
+            }),
+        ),
         _ => None,
     }
 }
@@ -1070,6 +1024,93 @@ mod tests {
             DynamicValue::Literal("Hello".to_string()),
         );
         assert_eq!(mapper.extract_text(&comp, None), "Hello");
+    }
+
+    #[test]
+    fn test_dynamic_string_props_resolve_with_egui_missing_path_format() {
+        let mapper = WidgetMapper;
+        let binding = a2ui_renderer::DataBinding::new(DataModel::new(json!({
+            "title": "Welcome",
+            "remember": "记住密码",
+            "form": {
+                "value": "Alice",
+                "placeholder": "请输入用户名"
+            }
+        })));
+
+        let text: Component = serde_json::from_value(json!({
+            "id": "title",
+            "component": "Text",
+            "text": {"path": "/title"}
+        }))
+        .unwrap();
+        assert_eq!(mapper.extract_text(&text, Some(&binding)), "Welcome");
+
+        let checkbox: Component = serde_json::from_value(json!({
+            "id": "remember",
+            "component": "CheckBox",
+            "label": {"path": "/remember"}
+        }))
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&checkbox, &empty_registry(), Some(&binding));
+        assert!(
+            matches!(widget, RenderableGuiWidget::CheckBox { ref label, .. } if label == "记住密码")
+        );
+
+        let text_field: Component = serde_json::from_value(json!({
+            "id": "username",
+            "component": "TextField",
+            "value": {"path": "/form/value"},
+            "placeholder": {"path": "/form/placeholder"}
+        }))
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&text_field, &empty_registry(), Some(&binding));
+        assert!(matches!(
+            widget,
+            RenderableGuiWidget::TextField {
+                ref value,
+                ref placeholder,
+                ..
+            } if value == "Alice" && placeholder == "请输入用户名"
+        ));
+
+        let missing: Component = serde_json::from_value(json!({
+            "id": "missing",
+            "component": "Text",
+            "text": {"path": "/missing"}
+        }))
+        .unwrap();
+        assert_eq!(mapper.extract_text(&missing, Some(&binding)), "{/missing…}");
+    }
+
+    #[test]
+    fn test_dynamic_image_url_keeps_existing_fallback_behavior() {
+        let mapper = WidgetMapper;
+        let binding = a2ui_renderer::DataBinding::new(DataModel::new(
+            json!({"image": "https://example.com/a.png"}),
+        ));
+
+        let image: Component = serde_json::from_value(json!({
+            "id": "image",
+            "component": "Image",
+            "url": {"path": "/image"}
+        }))
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&image, &empty_registry(), Some(&binding));
+        assert!(
+            matches!(widget, RenderableGuiWidget::Image { ref url, .. } if url == "https://example.com/a.png")
+        );
+
+        let unsupported: Component = serde_json::from_value(json!({
+            "id": "image",
+            "component": "Image",
+            "url": {"call": "imageUrl"}
+        }))
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&unsupported, &empty_registry(), Some(&binding));
+        assert!(
+            matches!(widget, RenderableGuiWidget::Image { ref url, .. } if url == "{path:url}")
+        );
     }
 
     #[test]

@@ -8,9 +8,9 @@ use a2ui_core::message::{
 };
 use a2ui_core::prelude::*;
 use a2ui_renderer::{
-    CatalogRegistry, ComponentForest, ComponentStyle, CustomComponentRegistry, DataBinding,
-    DependencyGraph, FunctionDispatcher, PathResolver, RenderResult, Renderer, SurfaceHandle,
-    SurfaceLru, UserEvent,
+    resolve_dynamic_string_prop, CatalogRegistry, ComponentForest, ComponentStyle,
+    CustomComponentRegistry, DataBinding, DependencyGraph, FunctionDispatcher, PathResolver,
+    RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -733,57 +733,14 @@ impl Renderer for WebRenderer {
 
 /// 从组件 properties 中提取文本内容，支持 DynamicValue::Path 解析
 fn extract_text(props: &Value, binding: &DataBinding) -> String {
-    if let Some(text_val) = props.get("text") {
-        if let Some(s) = text_val.as_str() {
-            return s.to_string();
-        }
-        if let Some(obj) = text_val.as_object() {
-            if let Some(path_val) = obj.get("path") {
-                if let Some(p) = path_val.as_str() {
-                    if let Some(resolved) = binding.get(p) {
-                        if let Some(s) = resolved.as_str() {
-                            return s.to_string();
-                        }
-                        return resolved.to_string();
-                    }
-                    return format!("{{path:{}}}", p);
-                }
-            }
-            if let Some(call_val) = obj.get("call") {
-                if let Some(c) = call_val.as_str() {
-                    return format!("{{call:{}}}", c);
-                }
-            }
-        }
-    }
-    String::new()
+    resolve_dynamic_string_prop(props, "text", Some(binding), "")
 }
 
 /// 从组件 properties 中提取字符串类型的值，支持 DynamicValue::Path 解析
 fn extract_string_value(props: &Value, key: &str, binding: &DataBinding) -> Option<String> {
-    let value = props.get(key)?;
-    if let Some(s) = value.as_str() {
-        return Some(s.to_string());
-    }
-    if let Some(obj) = value.as_object() {
-        if let Some(path_val) = obj.get("path") {
-            if let Some(p) = path_val.as_str() {
-                if let Some(resolved) = binding.get(p) {
-                    if let Some(s) = resolved.as_str() {
-                        return Some(s.to_string());
-                    }
-                    return Some(resolved.to_string());
-                }
-                return Some(format!("{{path:{}}}", p));
-            }
-        }
-        if let Some(call_val) = obj.get("call") {
-            if let Some(c) = call_val.as_str() {
-                return Some(format!("{{call:{}}}", c));
-            }
-        }
-    }
-    None
+    props
+        .get(key)
+        .map(|_| resolve_dynamic_string_prop(props, key, Some(binding), ""))
 }
 
 /// 从 JSON 值中提取静态字符串（非 DynamicValue）
@@ -900,6 +857,58 @@ mod tests {
         let html = renderer.render_surface_html("s1");
         assert!(html.is_some());
         assert!(html.unwrap().contains("Hello World"));
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_string_props_render_from_data_model() {
+        let mut renderer = WebRenderer::new();
+        let components: Vec<Component> = vec![
+            serde_json::from_value(json!({
+                "id": "root",
+                "component": "Column",
+                "children": ["title", "checkbox", "icon"]
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "title",
+                "component": "Text",
+                "text": {"path": "/title"}
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "checkbox",
+                "component": "CheckBox",
+                "label": {"path": "/remember"},
+                "value": true
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "icon",
+                "component": "Icon",
+                "name": {"path": "/missing_icon"}
+            }))
+            .unwrap(),
+        ];
+
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "dynamic".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(components),
+                data_model: Some(json!({
+                    "title": "Welcome",
+                    "remember": "记住密码"
+                })),
+            })
+            .await
+            .unwrap();
+
+        let html = renderer.render_surface_html("dynamic").unwrap();
+        assert!(html.contains("Welcome"));
+        assert!(html.contains("记住密码"));
+        assert!(html.contains("{path:/missing_icon}"));
     }
 
     #[tokio::test]

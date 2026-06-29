@@ -8,10 +8,23 @@ pub fn resolve_dynamic_string_prop(
     binding: Option<&DataBinding>,
     fallback: &str,
 ) -> String {
-    props
-        .get(key)
-        .map(|value| resolve_dynamic_string_value(value, binding))
-        .unwrap_or_else(|| fallback.to_string())
+    resolve_dynamic_string_prop_with_missing_path(props, key, binding, fallback, |path| {
+        format!("{{path:{}}}", path)
+    })
+}
+
+/// Resolve a string-like component property with caller-defined missing-path formatting.
+pub fn resolve_dynamic_string_prop_with_missing_path(
+    props: &Value,
+    key: &str,
+    binding: Option<&DataBinding>,
+    fallback: &str,
+    missing_path: impl Fn(&str) -> String,
+) -> String {
+    match props.get(key) {
+        Some(value) => resolve_dynamic_string_value_with_missing_path(value, binding, missing_path),
+        None => fallback.to_string(),
+    }
 }
 
 /// Resolve a single JSON value as display text.
@@ -20,6 +33,17 @@ pub fn resolve_dynamic_string_prop(
 /// - `{"path": "/..."}` resolves through `DataBinding` when available.
 /// - `{"call": "name"}` is kept as a display placeholder.
 pub fn resolve_dynamic_string_value(value: &Value, binding: Option<&DataBinding>) -> String {
+    resolve_dynamic_string_value_with_missing_path(value, binding, |path| {
+        format!("{{path:{}}}", path)
+    })
+}
+
+/// Resolve a single JSON value as display text with caller-defined missing-path formatting.
+pub fn resolve_dynamic_string_value_with_missing_path(
+    value: &Value,
+    binding: Option<&DataBinding>,
+    missing_path: impl Fn(&str) -> String,
+) -> String {
     if let Some(s) = value.as_str() {
         return s.to_string();
     }
@@ -29,7 +53,7 @@ pub fn resolve_dynamic_string_value(value: &Value, binding: Option<&DataBinding>
             if let Some(resolved) = binding.and_then(|binding| binding.get(path)) {
                 return value_to_display_string(resolved);
             }
-            return format!("{{path:{}}}", path);
+            return missing_path(path);
         }
         if let Some(call) = obj.get("call").and_then(|v| v.as_str()) {
             return format!("{{call:{}}}", call);
@@ -110,6 +134,22 @@ mod tests {
                 "[Text]"
             ),
             "{path:/missing}"
+        );
+    }
+
+    #[test]
+    fn supports_custom_missing_path_placeholders() {
+        let binding = DataBinding::new(DataModel::empty());
+
+        assert_eq!(
+            resolve_dynamic_string_prop_with_missing_path(
+                &json!({"text": {"path": "/missing"}}),
+                "text",
+                Some(&binding),
+                "[Text]",
+                |path| format!("{{{}…}}", path)
+            ),
+            "{/missing…}"
         );
     }
 

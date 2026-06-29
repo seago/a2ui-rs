@@ -23,7 +23,9 @@ pub use custom_component::{CustomComponentDef, CustomComponentRegistry};
 pub use data_binding::DataBinding;
 pub use dependency_graph::DependencyGraph;
 pub use dynamic_value::{
-    resolve_dynamic_string_prop, resolve_dynamic_string_value, value_to_display_string,
+    resolve_dynamic_string_prop, resolve_dynamic_string_prop_with_missing_path,
+    resolve_dynamic_string_value, resolve_dynamic_string_value_with_missing_path,
+    value_to_display_string,
 };
 pub use error::{RenderResult, RendererError};
 pub use function_dispatcher::{CallableFrom, FunctionDispatcher};
