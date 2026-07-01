@@ -1,5 +1,5 @@
 use crate::app::{Message, UserAction};
-use crate::iced_renderer::IcedRenderer;
+use crate::iced_renderer::{DynamicStringCacheKey, IcedRenderer};
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
     resolve_dynamic_string_prop_with_missing_path, ComponentStyle, DataBinding, StyleColor,
@@ -13,28 +13,29 @@ pub fn build_element_tree(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
+    renderer.record_element_build();
+
     let ctype = node.component.component_type();
-    let props = node.component.properties();
 
     match ctype {
         "Text" => build_text(node, renderer, surface_id),
         "Button" => build_button(node, renderer, surface_id),
         "Column" => build_column(node, renderer, surface_id),
         "Row" => build_row(node, renderer, surface_id),
-        "Image" => build_image(props, renderer, surface_id),
+        "Image" => build_image(node, renderer, surface_id),
         "Card" => build_card(node, renderer, surface_id),
         "CheckBox" => build_checkbox(node, renderer, surface_id),
         "Divider" => build_divider(),
-        "Icon" => build_icon(props, renderer, surface_id),
+        "Icon" => build_icon(node, renderer, surface_id),
         "List" => build_list(node, renderer, surface_id),
         "Tabs" => build_tabs(node, renderer, surface_id),
         "Modal" => build_modal(node, renderer, surface_id),
-        "Slider" => build_slider(node, renderer),
+        "Slider" => build_slider(node, renderer, surface_id),
         "TextField" => build_text_field(node, renderer, surface_id),
-        "ChoicePicker" => build_choice_picker(props, renderer, surface_id),
-        "DateTimeInput" => build_datetime_input(props, renderer, surface_id),
-        "Video" => build_placeholder("Video", props, renderer, surface_id),
-        "AudioPlayer" => build_placeholder("AudioPlayer", props, renderer, surface_id),
+        "ChoicePicker" => build_choice_picker(node, renderer, surface_id),
+        "DateTimeInput" => build_datetime_input(node, renderer, surface_id),
+        "Video" => build_placeholder("Video", node, renderer, surface_id),
+        "AudioPlayer" => build_placeholder("AudioPlayer", node, renderer, surface_id),
         _ => {
             if renderer.custom_registry.is_registered(ctype) {
                 text(format!("[custom: {}]", ctype))
@@ -57,7 +58,14 @@ fn build_text(
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
     let props = node.component.properties();
-    let content = resolve_dynamic_string(props, "text", "[Text]", renderer, surface_id);
+    let content = resolve_dynamic_string(
+        props,
+        node.component.id(),
+        "text",
+        "[Text]",
+        renderer,
+        surface_id,
+    );
     apply_text_style(
         text(content).shaping(Shaping::Advanced),
         &ComponentStyle::from_component_props(props),
@@ -70,11 +78,19 @@ fn build_divider() -> iced::Element<'static, Message> {
 }
 
 fn build_icon(
-    props: &serde_json::Value,
+    node: &ComponentTreeNode,
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let name = resolve_dynamic_string(props, "name", "?", renderer, surface_id);
+    let props = node.component.properties();
+    let name = resolve_dynamic_string(
+        props,
+        node.component.id(),
+        "name",
+        "?",
+        renderer,
+        surface_id,
+    );
     let style = ComponentStyle::from_component_props(props);
     let label = text(name)
         .size(style.font_size.unwrap_or(24.0))
@@ -84,11 +100,19 @@ fn build_icon(
 
 fn build_placeholder(
     ctype: &str,
-    props: &serde_json::Value,
+    node: &ComponentTreeNode,
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let label = resolve_dynamic_string(props, "url", ctype, renderer, surface_id);
+    let props = node.component.properties();
+    let label = resolve_dynamic_string(
+        props,
+        node.component.id(),
+        "url",
+        ctype,
+        renderer,
+        surface_id,
+    );
     text(format!("[{}: {}]", ctype, label))
         .shaping(Shaping::Advanced)
         .color(iced::Color::from_rgb(0.6, 0.6, 0.6))
@@ -212,8 +236,22 @@ fn build_text_field(
     let props = node.component.properties();
     let id = node.component.id().clone();
     let id_str = id.as_str().to_string();
-    let placeholder = resolve_dynamic_string(props, "placeholder", "", renderer, surface_id);
-    let initial_value = resolve_dynamic_string(props, "value", "", renderer, surface_id);
+    let placeholder = resolve_dynamic_string(
+        props,
+        node.component.id(),
+        "placeholder",
+        "",
+        renderer,
+        surface_id,
+    );
+    let initial_value = resolve_dynamic_string(
+        props,
+        node.component.id(),
+        "value",
+        "",
+        renderer,
+        surface_id,
+    );
     let is_secure = matches!(
         props.get("variant").and_then(|v| v.as_str()),
         Some("obscured")
@@ -247,18 +285,20 @@ fn build_checkbox(
     let props = node.component.properties();
     let id = node.component.id().clone();
     let id_str = id.as_str().to_string();
-    let label = resolve_dynamic_string(props, "label", "", renderer, surface_id);
+    let label = resolve_dynamic_string(
+        props,
+        node.component.id(),
+        "label",
+        "",
+        renderer,
+        surface_id,
+    );
     let checked = renderer
         .checkbox_values
         .borrow()
         .get(&id_str)
         .copied()
-        .unwrap_or_else(|| {
-            props
-                .get("value")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-        });
+        .unwrap_or_else(|| resolve_dynamic_bool(props, "value", false, renderer, surface_id));
 
     iced::widget::checkbox(label, checked)
         .text_shaping(Shaping::Advanced)
@@ -274,11 +314,12 @@ fn build_checkbox(
 fn build_slider(
     node: &ComponentTreeNode,
     renderer: &IcedRenderer,
+    surface_id: &str,
 ) -> iced::Element<'static, Message> {
     let props = node.component.properties();
     let id = node.component.id().clone();
     let id_str = id.as_str().to_string();
-    let initial_value = props.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let initial_value = resolve_dynamic_number(props, "value", 0.0, renderer, surface_id);
     let value = renderer
         .slider_values
         .borrow()
@@ -300,20 +341,21 @@ fn build_slider(
 // ── 复杂 widget ──
 
 fn build_image(
-    props: &serde_json::Value,
+    node: &ComponentTreeNode,
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let url = resolve_dynamic_string(props, "url", "", renderer, surface_id);
+    let props = node.component.properties();
+    let url = resolve_dynamic_string(props, node.component.id(), "url", "", renderer, surface_id);
     let style = ComponentStyle::from_component_props(props);
     if url.is_empty() {
         return apply_text_style(text("[Image: no URL]").shaping(Shaping::Advanced), &style).into();
     }
 
-    if let Some(bytes) = renderer.load_image_bytes(&url) {
+    if let Some(handle) = renderer.load_image_handle(&url) {
         let width = extract_length_prop(props, "width", iced::Length::Shrink);
         let height = extract_length_prop(props, "height", iced::Length::Shrink);
-        let image = iced::widget::image(iced::widget::image::Handle::from_bytes(bytes))
+        let image = iced::widget::image(handle)
             .width(width)
             .height(height)
             .content_fit(iced::ContentFit::Cover);
@@ -400,10 +442,11 @@ fn build_modal(
 }
 
 fn build_choice_picker(
-    props: &serde_json::Value,
+    node: &ComponentTreeNode,
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
+    let props = node.component.properties();
     let options: Vec<String> = props
         .get("options")
         .and_then(|v| v.as_array())
@@ -414,7 +457,14 @@ fn build_choice_picker(
         })
         .unwrap_or_default();
 
-    let label = resolve_dynamic_string(props, "label", "选择:", renderer, surface_id);
+    let label = resolve_dynamic_string(
+        props,
+        node.component.id(),
+        "label",
+        "选择:",
+        renderer,
+        surface_id,
+    );
     let option_texts: Vec<iced::Element<'static, Message>> = options
         .iter()
         .map(|opt| text(opt.clone()).shaping(Shaping::Advanced).into())
@@ -429,11 +479,19 @@ fn build_choice_picker(
 }
 
 fn build_datetime_input(
-    props: &serde_json::Value,
+    node: &ComponentTreeNode,
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let label = resolve_dynamic_string(props, "label", "[DateTimeInput]", renderer, surface_id);
+    let props = node.component.properties();
+    let label = resolve_dynamic_string(
+        props,
+        node.component.id(),
+        "label",
+        "[DateTimeInput]",
+        renderer,
+        surface_id,
+    );
     iced::widget::button(text(label).shaping(Shaping::Advanced)).into()
 }
 
@@ -445,18 +503,93 @@ fn binding_for<'a>(renderer: &'a IcedRenderer, surface_id: &str) -> Option<&'a D
 
 fn resolve_dynamic_string(
     props: &serde_json::Value,
+    component_id: &a2ui_core::prelude::ComponentId,
     key: &str,
     default: &str,
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> String {
-    resolve_dynamic_string_prop_with_missing_path(
+    let cache_key = DynamicStringCacheKey {
+        surface_id: surface_id.to_string(),
+        component_id: component_id.as_str().to_string(),
+        prop: key.to_string(),
+    };
+
+    if let Some(cached) = renderer
+        .dynamic_string_cache
+        .borrow()
+        .get(&cache_key)
+        .cloned()
+    {
+        renderer.record_dynamic_string_cache_hit();
+        return cached;
+    }
+
+    let resolved = resolve_dynamic_string_prop_with_missing_path(
         props,
         key,
         binding_for(renderer, surface_id),
         default,
         |path| format!("{{{}…}}", path),
-    )
+    );
+    renderer
+        .dynamic_string_cache
+        .borrow_mut()
+        .insert(cache_key, resolved.clone());
+    renderer.record_dynamic_string_cache_miss();
+    resolved
+}
+
+fn resolve_dynamic_bool(
+    props: &serde_json::Value,
+    key: &str,
+    default: bool,
+    renderer: &IcedRenderer,
+    surface_id: &str,
+) -> bool {
+    let Some(value) = props.get(key) else {
+        return default;
+    };
+    if let Some(value) = value.as_bool() {
+        return value;
+    }
+    let Some(path) = value
+        .as_object()
+        .and_then(|obj| obj.get("path"))
+        .and_then(|v| v.as_str())
+    else {
+        return default;
+    };
+    binding_for(renderer, surface_id)
+        .and_then(|binding| binding.get(path))
+        .and_then(|resolved| resolved.as_bool())
+        .unwrap_or(default)
+}
+
+fn resolve_dynamic_number(
+    props: &serde_json::Value,
+    key: &str,
+    default: f64,
+    renderer: &IcedRenderer,
+    surface_id: &str,
+) -> f64 {
+    let Some(value) = props.get(key) else {
+        return default;
+    };
+    if let Some(value) = value.as_f64() {
+        return value;
+    }
+    let Some(path) = value
+        .as_object()
+        .and_then(|obj| obj.get("path"))
+        .and_then(|v| v.as_str())
+    else {
+        return default;
+    };
+    binding_for(renderer, surface_id)
+        .and_then(|binding| binding.get(path))
+        .and_then(|resolved| resolved.as_f64())
+        .unwrap_or(default)
 }
 
 fn extract_length_prop(
@@ -499,7 +632,8 @@ fn resolve_button_label(
 ) -> String {
     let props = node.component.properties();
     if props.get("text").is_some() {
-        let label = resolve_dynamic_string(props, "text", "", renderer, surface_id);
+        let label =
+            resolve_dynamic_string(props, node.component.id(), "text", "", renderer, surface_id);
         if !label.is_empty() {
             return label;
         }
@@ -510,6 +644,7 @@ fn resolve_button_label(
         if child.component.component_type() == "Text" {
             let child_text = resolve_dynamic_string(
                 child.component.properties(),
+                child.component.id(),
                 "text",
                 "",
                 renderer,
@@ -528,6 +663,7 @@ fn resolve_button_label(
 mod tests {
     use super::*;
     use a2ui_core::component::component::Component;
+    use a2ui_core::ComponentId;
     use a2ui_core::DataModel;
     use a2ui_renderer::DataBinding;
     use serde_json::json;
@@ -571,21 +707,27 @@ mod tests {
             }))),
         );
 
+        let text_id = ComponentId::new("title").unwrap();
+        let icon_id = ComponentId::new("icon").unwrap();
+        let checkbox_id = ComponentId::new("remember").unwrap();
+        let field_id = ComponentId::new("field").unwrap();
+        let missing_id = ComponentId::new("missing").unwrap();
+
         let title = json!({"text": {"path": "/title"}});
         assert_eq!(
-            resolve_dynamic_string(&title, "text", "[Text]", &renderer, surface_id),
+            resolve_dynamic_string(&title, &text_id, "text", "[Text]", &renderer, surface_id),
             "Welcome"
         );
 
         let icon = json!({"name": {"path": "/icon"}});
         assert_eq!(
-            resolve_dynamic_string(&icon, "name", "?", &renderer, surface_id),
+            resolve_dynamic_string(&icon, &icon_id, "name", "?", &renderer, surface_id),
             "star"
         );
 
         let checkbox = json!({"label": {"path": "/remember"}});
         assert_eq!(
-            resolve_dynamic_string(&checkbox, "label", "", &renderer, surface_id),
+            resolve_dynamic_string(&checkbox, &checkbox_id, "label", "", &renderer, surface_id),
             "记住密码"
         );
 
@@ -594,18 +736,78 @@ mod tests {
             "placeholder": {"path": "/form/placeholder"}
         });
         assert_eq!(
-            resolve_dynamic_string(&text_field, "value", "", &renderer, surface_id),
+            resolve_dynamic_string(&text_field, &field_id, "value", "", &renderer, surface_id),
             "Alice"
         );
         assert_eq!(
-            resolve_dynamic_string(&text_field, "placeholder", "", &renderer, surface_id),
+            resolve_dynamic_string(
+                &text_field,
+                &field_id,
+                "placeholder",
+                "",
+                &renderer,
+                surface_id
+            ),
             "请输入用户名"
         );
 
         let missing = json!({"text": {"path": "/missing"}});
         assert_eq!(
-            resolve_dynamic_string(&missing, "text", "", &renderer, surface_id),
+            resolve_dynamic_string(&missing, &missing_id, "text", "", &renderer, surface_id),
             "{/missing…}"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_string_cache_profiles_hits_and_misses() {
+        let mut renderer = IcedRenderer::new();
+        let surface_id = "s1";
+        renderer.data_bindings.insert(
+            surface_id.to_string(),
+            DataBinding::new(DataModel::new(json!({"title": "Welcome"}))),
+        );
+        let component_id = ComponentId::new("title").unwrap();
+        let props = json!({"text": {"path": "/title"}});
+
+        assert_eq!(
+            resolve_dynamic_string(&props, &component_id, "text", "", &renderer, surface_id),
+            "Welcome"
+        );
+        assert_eq!(
+            resolve_dynamic_string(&props, &component_id, "text", "", &renderer, surface_id),
+            "Welcome"
+        );
+
+        let profile = renderer.profile_snapshot();
+        assert_eq!(profile.dynamic_string_cache_misses, 1);
+        assert_eq!(profile.dynamic_string_cache_hits, 1);
+    }
+
+    #[test]
+    fn test_dynamic_bool_and_number_resolve_from_surface_binding() {
+        let mut renderer = IcedRenderer::new();
+        let surface_id = "s1";
+        renderer.data_bindings.insert(
+            surface_id.to_string(),
+            DataBinding::new(DataModel::new(json!({
+                "remember": true,
+                "volume": 75.0
+            }))),
+        );
+
+        let checkbox_props = json!({"value": {"path": "/remember"}});
+        assert!(resolve_dynamic_bool(
+            &checkbox_props,
+            "value",
+            false,
+            &renderer,
+            surface_id
+        ));
+
+        let slider_props = json!({"value": {"path": "/volume"}});
+        assert_eq!(
+            resolve_dynamic_number(&slider_props, "value", 0.0, &renderer, surface_id),
+            75.0
         );
     }
 

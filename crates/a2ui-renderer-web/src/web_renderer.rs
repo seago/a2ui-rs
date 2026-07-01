@@ -254,16 +254,9 @@ impl WebRenderer {
                     }
                 }
                 "CheckBox" => {
-                    let checked =
-                        props
-                            .get("value")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or_else(|| {
-                                props
-                                    .get("checked")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false)
-                            });
+                    let checked = resolve_bool_value(props, "value", binding)
+                        .or_else(|| resolve_bool_value(props, "checked", binding))
+                        .unwrap_or(false);
                     let label = extract_string_value(props, "label", binding).unwrap_or_default();
                     RenderableHtmlWidget::CheckBox {
                         id: component.id().clone(),
@@ -333,9 +326,9 @@ impl WebRenderer {
                     }
                 }
                 "Slider" => {
-                    let value = props.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    let min = props.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    let max = props.get("max").and_then(|v| v.as_f64()).unwrap_or(100.0);
+                    let value = resolve_number_value(props, "value", binding).unwrap_or(0.0);
+                    let min = resolve_number_value(props, "min", binding).unwrap_or(0.0);
+                    let max = resolve_number_value(props, "max", binding).unwrap_or(100.0);
                     RenderableHtmlWidget::Slider {
                         id: component.id().clone(),
                         value,
@@ -743,6 +736,30 @@ fn extract_string_value(props: &Value, key: &str, binding: &DataBinding) -> Opti
         .map(|_| resolve_dynamic_string_prop(props, key, Some(binding), ""))
 }
 
+fn resolve_bool_value(props: &Value, key: &str, binding: &DataBinding) -> Option<bool> {
+    let value = props.get(key)?;
+    if let Some(value) = value.as_bool() {
+        return Some(value);
+    }
+    let path = value
+        .as_object()
+        .and_then(|obj| obj.get("path"))
+        .and_then(|v| v.as_str())?;
+    binding.get(path).and_then(|value| value.as_bool())
+}
+
+fn resolve_number_value(props: &Value, key: &str, binding: &DataBinding) -> Option<f64> {
+    let value = props.get(key)?;
+    if let Some(value) = value.as_f64() {
+        return Some(value);
+    }
+    let path = value
+        .as_object()
+        .and_then(|obj| obj.get("path"))
+        .and_then(|v| v.as_str())?;
+    binding.get(path).and_then(|value| value.as_f64())
+}
+
 /// 从 JSON 值中提取静态字符串（非 DynamicValue）
 fn extract_static_string(value: &Value) -> Option<String> {
     match value {
@@ -866,7 +883,7 @@ mod tests {
             serde_json::from_value(json!({
                 "id": "root",
                 "component": "Column",
-                "children": ["title", "checkbox", "icon"]
+                "children": ["title", "text_field", "checkbox", "slider", "icon"]
             }))
             .unwrap(),
             serde_json::from_value(json!({
@@ -876,10 +893,25 @@ mod tests {
             }))
             .unwrap(),
             serde_json::from_value(json!({
+                "id": "text_field",
+                "component": "TextField",
+                "value": {"path": "/form/username"},
+                "placeholder": {"path": "/form/placeholder"}
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
                 "id": "checkbox",
                 "component": "CheckBox",
                 "label": {"path": "/remember"},
-                "value": true
+                "value": {"path": "/rememberChecked"}
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id": "slider",
+                "component": "Slider",
+                "value": {"path": "/volume"},
+                "min": 0,
+                "max": 100
             }))
             .unwrap(),
             serde_json::from_value(json!({
@@ -899,7 +931,13 @@ mod tests {
                 components: Some(components),
                 data_model: Some(json!({
                     "title": "Welcome",
-                    "remember": "记住密码"
+                    "remember": "记住密码",
+                    "rememberChecked": true,
+                    "volume": 42.0,
+                    "form": {
+                        "username": "Alice",
+                        "placeholder": "请输入用户名"
+                    }
                 })),
             })
             .await
@@ -907,7 +945,11 @@ mod tests {
 
         let html = renderer.render_surface_html("dynamic").unwrap();
         assert!(html.contains("Welcome"));
+        assert!(html.contains("Alice"));
+        assert!(html.contains("请输入用户名"));
         assert!(html.contains("记住密码"));
+        assert!(html.contains("checked"));
+        assert!(html.contains("value=\"42\""));
         assert!(html.contains("{path:/missing_icon}"));
     }
 

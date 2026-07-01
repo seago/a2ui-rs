@@ -61,3 +61,61 @@ fn test_iced_widget_mapper_all_types() {
         let _el = widget_mapper::build_element_tree(&node, &renderer, "s1");
     }
 }
+
+#[test]
+fn test_iced_widget_mapper_dynamic_form_controls() {
+    use a2ui_renderer::DataBinding;
+    use a2ui_renderer_iced::widget_mapper;
+
+    let mut renderer = IcedRenderer::new();
+    renderer.data_bindings.insert(
+        "s1".to_string(),
+        DataBinding::new(DataModel::new(json!({
+            "form": {
+                "username": "Alice",
+                "placeholder": "请输入用户名",
+                "remember": true,
+                "volume": 42.0
+            }
+        }))),
+    );
+
+    let root: Component = serde_json::from_value(json!({
+        "component": "Column",
+        "id": "root",
+        "children": ["username", "remember", "volume"]
+    }))
+    .unwrap();
+    let username: Component = serde_json::from_value(json!({
+        "component": "TextField",
+        "id": "username",
+        "value": {"path": "/form/username"},
+        "placeholder": {"path": "/form/placeholder"},
+        "variant": "shortText"
+    }))
+    .unwrap();
+    let remember: Component = serde_json::from_value(json!({
+        "component": "CheckBox",
+        "id": "remember",
+        "value": {"path": "/form/remember"},
+        "label": "记住密码"
+    }))
+    .unwrap();
+    let volume: Component = serde_json::from_value(json!({
+        "component": "Slider",
+        "id": "volume",
+        "value": {"path": "/form/volume"},
+        "min": 0,
+        "max": 100
+    }))
+    .unwrap();
+
+    let node = a2ui_renderer::component_forest::ComponentTreeNode::new(root).with_children(vec![
+        a2ui_renderer::component_forest::ComponentTreeNode::new(username),
+        a2ui_renderer::component_forest::ComponentTreeNode::new(remember),
+        a2ui_renderer::component_forest::ComponentTreeNode::new(volume),
+    ]);
+
+    let _el = widget_mapper::build_element_tree(&node, &renderer, "s1");
+    assert_eq!(renderer.profile_snapshot().element_builds, 4);
+}

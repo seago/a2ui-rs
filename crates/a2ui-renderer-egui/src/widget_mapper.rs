@@ -222,19 +222,9 @@ impl WidgetMapper {
                 }
             }
             "CheckBox" => {
-                let checked = props
-                    .get("value")
-                    .and_then(|v| v.as_bool())
+                let checked = resolve_dynamic_bool(props, "value", data_model)
+                    .or_else(|| resolve_dynamic_bool(props, "checked", data_model))
                     .unwrap_or(false);
-                // Also check "checked" property (TUI uses "checked")
-                let checked = if !checked {
-                    props
-                        .get("checked")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false)
-                } else {
-                    true
-                };
                 let label = resolve_dynamic_prop(props, "label", data_model, "");
                 RenderableGuiWidget::CheckBox {
                     id: component.id().clone(),
@@ -298,9 +288,9 @@ impl WidgetMapper {
                 }
             }
             "Slider" => {
-                let value = props.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let min = props.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let max = props.get("max").and_then(|v| v.as_f64()).unwrap_or(100.0);
+                let value = resolve_dynamic_number(props, "value", data_model).unwrap_or(0.0);
+                let min = resolve_dynamic_number(props, "min", data_model).unwrap_or(0.0);
+                let max = resolve_dynamic_number(props, "max", data_model).unwrap_or(100.0);
                 RenderableGuiWidget::Slider {
                     id: component.id().clone(),
                     value,
@@ -861,6 +851,42 @@ fn resolve_dynamic_prop(
     })
 }
 
+fn resolve_dynamic_bool(
+    props: &serde_json::Value,
+    key: &str,
+    data_model: Option<&a2ui_renderer::DataBinding>,
+) -> Option<bool> {
+    let value = props.get(key)?;
+    if let Some(value) = value.as_bool() {
+        return Some(value);
+    }
+    let path = value
+        .as_object()
+        .and_then(|obj| obj.get("path"))
+        .and_then(|v| v.as_str())?;
+    data_model
+        .and_then(|binding| binding.get(path))
+        .and_then(|value| value.as_bool())
+}
+
+fn resolve_dynamic_number(
+    props: &serde_json::Value,
+    key: &str,
+    data_model: Option<&a2ui_renderer::DataBinding>,
+) -> Option<f64> {
+    let value = props.get(key)?;
+    if let Some(value) = value.as_f64() {
+        return Some(value);
+    }
+    let path = value
+        .as_object()
+        .and_then(|obj| obj.get("path"))
+        .and_then(|v| v.as_str())?;
+    data_model
+        .and_then(|binding| binding.get(path))
+        .and_then(|value| value.as_f64())
+}
+
 /// 解析动态属性值（字面量字符串或 { "path": "..." } 绑定）
 fn resolve_dynamic_attr(
     v: &serde_json::Value,
@@ -1032,9 +1058,11 @@ mod tests {
         let binding = a2ui_renderer::DataBinding::new(DataModel::new(json!({
             "title": "Welcome",
             "remember": "记住密码",
+            "rememberChecked": true,
             "form": {
                 "value": "Alice",
-                "placeholder": "请输入用户名"
+                "placeholder": "请输入用户名",
+                "volume": 42.0
             }
         })));
 
@@ -1049,12 +1077,13 @@ mod tests {
         let checkbox: Component = serde_json::from_value(json!({
             "id": "remember",
             "component": "CheckBox",
-            "label": {"path": "/remember"}
+            "label": {"path": "/remember"},
+            "value": {"path": "/rememberChecked"}
         }))
         .unwrap();
         let widget = mapper.map_to_gui_widget(&checkbox, &empty_registry(), Some(&binding));
         assert!(
-            matches!(widget, RenderableGuiWidget::CheckBox { ref label, .. } if label == "记住密码")
+            matches!(widget, RenderableGuiWidget::CheckBox { checked: true, ref label, .. } if label == "记住密码")
         );
 
         let text_field: Component = serde_json::from_value(json!({
@@ -1072,6 +1101,25 @@ mod tests {
                 ref placeholder,
                 ..
             } if value == "Alice" && placeholder == "请输入用户名"
+        ));
+
+        let slider: Component = serde_json::from_value(json!({
+            "id": "volume",
+            "component": "Slider",
+            "value": {"path": "/form/volume"},
+            "min": 0,
+            "max": 100
+        }))
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&slider, &empty_registry(), Some(&binding));
+        assert!(matches!(
+            widget,
+            RenderableGuiWidget::Slider {
+                value: 42.0,
+                min: 0.0,
+                max: 100.0,
+                ..
+            }
         ));
 
         let missing: Component = serde_json::from_value(json!({

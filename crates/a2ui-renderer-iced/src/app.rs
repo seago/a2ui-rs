@@ -144,6 +144,7 @@ pub fn update(app: &mut IcedApp, message: Message) -> iced::Task<Message> {
                         .text_input_values
                         .borrow_mut()
                         .insert(component_id.as_str().to_string(), value.clone());
+                    invalidate_component_cache_for_user_action(app, &component_id);
                     let mut ctx = HashMap::new();
                     ctx.insert(
                         "value".into(),
@@ -170,6 +171,7 @@ pub fn update(app: &mut IcedApp, message: Message) -> iced::Task<Message> {
                         .checkbox_values
                         .borrow_mut()
                         .insert(component_id.as_str().to_string(), checked);
+                    invalidate_component_cache_for_user_action(app, &component_id);
                     let mut ctx = HashMap::new();
                     ctx.insert(
                         "checked".into(),
@@ -196,6 +198,7 @@ pub fn update(app: &mut IcedApp, message: Message) -> iced::Task<Message> {
                         .slider_values
                         .borrow_mut()
                         .insert(component_id.as_str().to_string(), value);
+                    invalidate_component_cache_for_user_action(app, &component_id);
                     let mut ctx = HashMap::new();
                     ctx.insert(
                         "value".into(),
@@ -236,7 +239,7 @@ pub fn view(app: &IcedApp) -> iced::Element<'_, Message> {
     let surface_id = &app.renderer.surface_order[0];
 
     // 构建组件树（临时变量，但 Element 中所有数据已 clone 为 'static）
-    if let Ok(root) = app.renderer.forest.build_tree(surface_id) {
+    if let Ok(root) = app.renderer.cached_tree(surface_id) {
         padded_surface(crate::widget_mapper::build_element_tree(
             &root,
             &app.renderer,
@@ -249,6 +252,14 @@ pub fn view(app: &IcedApp) -> iced::Element<'_, Message> {
                 .into(),
         )
     }
+}
+
+fn invalidate_component_cache_for_user_action(app: &IcedApp, component_id: &ComponentId) {
+    let Some(surface_id) = app.renderer.forest.surface_of(component_id) else {
+        return;
+    };
+    app.renderer
+        .invalidate_component_dynamic_cache(surface_id, component_id);
 }
 
 fn padded_surface(content: iced::Element<'_, Message>) -> iced::Element<'_, Message> {
@@ -355,5 +366,38 @@ mod tests {
         assert!(result.is_ok());
         let response = action_rx.try_recv();
         assert!(response.is_ok());
+    }
+
+    #[test]
+    fn test_view_reuses_cached_tree_between_calls() {
+        let mut renderer = IcedRenderer::new();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            renderer
+                .create_surface(CreateSurface {
+                    surface_id: "s1".into(),
+                    catalog_id: "a2ui://catalogs/basic/v1".into(),
+                    surface_properties: None,
+                    send_data_model: false,
+                    components: Some(vec![Component::text(
+                        ComponentId::new("root").unwrap(),
+                        DynamicValue::Literal("Hello".to_string()),
+                    )]),
+                    data_model: None,
+                })
+                .await
+                .unwrap();
+        });
+
+        let (_msg_tx, msg_rx) = IcedApp::create_channel();
+        let (action_tx, _action_rx) = IcedApp::create_action_channel();
+        let app = IcedApp::new(renderer, msg_rx, action_tx);
+
+        let _first = view(&app);
+        let _second = view(&app);
+
+        let profile = app.renderer.profile_snapshot();
+        assert_eq!(profile.tree_cache_misses, 1);
+        assert_eq!(profile.tree_cache_hits, 1);
     }
 }
