@@ -1,0 +1,37 @@
+{
+  "name": "渐进式渲染：updateComponents 补齐 + 缺失引用产出占位符",
+  "surfaceId": "s1",
+  "messages": [
+    {
+      "version": "v1.0",
+      "createSurface": {
+        "surfaceId": "s1",
+        "catalogId": "basic",
+        "dataModel": {},
+        "components": [
+          { "id": "root", "component": "Column", "children": ["known", "ghost"] },
+          { "id": "known", "component": "Text", "text": "已到达" }
+        ]
+      }
+    },
+    {
+      "version": "v1.0",
+      "updateComponents": {
+        "surfaceId": "s1",
+        "components": [{ "id": "ghost", "component": "Text", "text": "后补到达" }]
+      }
+    }
+  ],
+  "expect": {
+    "dataModel": {},
+    "tree": {
+      "id": "root",
+      "type": "Column",
+      "props": {},
+      "children": [
+        { "id": "known", "type": "Text", "props": { "text": "已到达" }, "children": [] },
+        { "id": "ghost", "type": "Text", "props": { "text": "后补到达" }, "children": [] }
+      ]
+    }
+  }
+}

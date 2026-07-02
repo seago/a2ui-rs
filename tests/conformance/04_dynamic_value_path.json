@@ -1,0 +1,28 @@
+{
+  "name": "DynamicValue path 解析（嵌套路径 + 缺失路径降级）",
+  "surfaceId": "s1",
+  "messages": [
+    {
+      "version": "v1.0",
+      "createSurface": {
+        "surfaceId": "s1",
+        "catalogId": "basic",
+        "dataModel": { "user": { "name": "Alice", "age": 30 } },
+        "components": [
+          { "id": "root", "component": "Column", "children": ["a", "b", "c"] },
+          { "id": "a", "component": "Text", "text": { "path": "/user/name" } },
+          { "id": "b", "component": "Text", "text": { "path": "/user/age" } },
+          { "id": "c", "component": "Text", "text": { "path": "/user/missing" } }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "dataModel": { "user": { "name": "Alice", "age": 30 } },
+    "resolved": {
+      "a": { "text": "Alice" },
+      "b": { "text": 30 },
+      "c": {}
+    }
+  }
+}

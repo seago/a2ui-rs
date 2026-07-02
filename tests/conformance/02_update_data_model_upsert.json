@@ -1,0 +1,33 @@
+{
+  "name": "updateDataModel upsert 更新绑定值",
+  "surfaceId": "s1",
+  "messages": [
+    {
+      "version": "v1.0",
+      "createSurface": {
+        "surfaceId": "s1",
+        "catalogId": "basic",
+        "dataModel": { "form": { "name": "" } },
+        "components": [
+          { "id": "root", "component": "Column", "children": ["name_field"] },
+          {
+            "id": "name_field",
+            "component": "TextField",
+            "value": { "path": "/form/name" },
+            "label": "姓名"
+          }
+        ]
+      }
+    },
+    {
+      "version": "v1.0",
+      "updateDataModel": { "surfaceId": "s1", "path": "/form/name", "value": "张三" }
+    }
+  ],
+  "expect": {
+    "dataModel": { "form": { "name": "张三" } },
+    "resolved": {
+      "name_field": { "value": "张三", "label": "姓名" }
+    }
+  }
+}

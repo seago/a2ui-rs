@@ -1,0 +1,20 @@
+{
+  "name": "updateDataModel 省略 value 删除路径（区别于置 null）",
+  "surfaceId": "s1",
+  "messages": [
+    {
+      "version": "v1.0",
+      "createSurface": {
+        "surfaceId": "s1",
+        "catalogId": "basic",
+        "dataModel": { "a": 1, "b": 2, "c": 3 },
+        "components": [{ "id": "root", "component": "Text", "text": "x" }]
+      }
+    },
+    { "version": "v1.0", "updateDataModel": { "surfaceId": "s1", "path": "/a" } },
+    { "version": "v1.0", "updateDataModel": { "surfaceId": "s1", "path": "/b", "value": null } }
+  ],
+  "expect": {
+    "dataModel": { "b": null, "c": 3 }
+  }
+}

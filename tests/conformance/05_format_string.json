@@ -1,0 +1,32 @@
+{
+  "name": "formatString 插值（{key} + bindings）",
+  "surfaceId": "s1",
+  "messages": [
+    {
+      "version": "v1.0",
+      "createSurface": {
+        "surfaceId": "s1",
+        "catalogId": "basic",
+        "dataModel": { "user": { "name": "Alice", "count": 3 } },
+        "components": [
+          { "id": "root", "component": "Text", "text": {
+            "call": "formatString",
+            "args": {
+              "template": "你好，{name}！你有 {count} 条消息",
+              "bindings": {
+                "name": { "path": "/user/name" },
+                "count": { "path": "/user/count" }
+              }
+            }
+          } }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "dataModel": { "user": { "name": "Alice", "count": 3 } },
+    "resolved": {
+      "root": { "text": "你好，Alice！你有 3 条消息" }
+    }
+  }
+}

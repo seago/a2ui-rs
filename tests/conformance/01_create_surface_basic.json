@@ -1,0 +1,77 @@
+{
+  "name": "createSurface 建树 + 内嵌 dataModel（basic 表单）",
+  "surfaceId": "s1",
+  "messages": [
+    {
+      "version": "v1.0",
+      "createSurface": {
+        "surfaceId": "s1",
+        "catalogId": "basic",
+        "sendDataModel": true,
+        "dataModel": { "form": { "name": "" } },
+        "components": [
+          { "id": "root_card", "component": "Card", "child": "form_col" },
+          {
+            "id": "form_col",
+            "component": "Column",
+            "children": ["title_text", "name_field", "submit_btn"]
+          },
+          { "id": "title_text", "component": "Text", "text": "请输入你的名字" },
+          {
+            "id": "name_field",
+            "component": "TextField",
+            "value": { "path": "/form/name" },
+            "label": "姓名",
+            "variant": "shortText"
+          },
+          {
+            "id": "submit_btn",
+            "component": "Button",
+            "variant": "primary",
+            "child": "submit_label",
+            "action": { "name": "submit", "wantResponse": true, "actionId": "submit-1" }
+          },
+          { "id": "submit_label", "component": "Text", "text": "提交" }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "dataModel": { "form": { "name": "" } },
+    "resolved": {
+      "title_text": { "text": "请输入你的名字" },
+      "name_field": { "value": "", "label": "姓名", "variant": "shortText" },
+      "submit_btn": { "variant": "primary" },
+      "submit_label": { "text": "提交" }
+    },
+    "tree": {
+      "id": "root_card",
+      "type": "Card",
+      "props": {},
+      "children": [
+        {
+          "id": "form_col",
+          "type": "Column",
+          "props": {},
+          "children": [
+            { "id": "title_text", "type": "Text", "props": { "text": "请输入你的名字" }, "children": [] },
+            {
+              "id": "name_field",
+              "type": "TextField",
+              "props": { "value": "", "label": "姓名", "variant": "shortText" },
+              "children": []
+            },
+            {
+              "id": "submit_btn",
+              "type": "Button",
+              "props": { "variant": "primary" },
+              "children": [
+                { "id": "submit_label", "type": "Text", "props": { "text": "提交" }, "children": [] }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

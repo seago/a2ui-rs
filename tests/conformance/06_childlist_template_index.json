@@ -1,0 +1,48 @@
+{
+  "name": "ChildList template 迭代 + @index + 集合作用域相对路径",
+  "surfaceId": "s1",
+  "messages": [
+    {
+      "version": "v1.0",
+      "createSurface": {
+        "surfaceId": "s1",
+        "catalogId": "basic",
+        "dataModel": { "items": [{ "label": "苹果" }, { "label": "香蕉" }, { "label": "橙子" }] },
+        "components": [
+          {
+            "id": "root",
+            "component": "Column",
+            "children": { "template": "row_tpl", "path": "/items" }
+          },
+          {
+            "id": "row_tpl",
+            "component": "Text",
+            "text": {
+              "call": "formatString",
+              "args": {
+                "template": "{i}. {label}",
+                "bindings": {
+                  "i": { "call": "@index" },
+                  "label": { "path": "label" }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "dataModel": { "items": [{ "label": "苹果" }, { "label": "香蕉" }, { "label": "橙子" }] },
+    "tree": {
+      "id": "root",
+      "type": "Column",
+      "props": {},
+      "children": [
+        { "id": "row_tpl#0", "type": "Text", "props": { "text": "0. 苹果" }, "children": [] },
+        { "id": "row_tpl#1", "type": "Text", "props": { "text": "1. 香蕉" }, "children": [] },
+        { "id": "row_tpl#2", "type": "Text", "props": { "text": "2. 橙子" }, "children": [] }
+      ]
+    }
+  }
+}
