@@ -199,15 +199,17 @@ export class Surface {
   }
 
   /**
-   * 应用一次 updateDataModel（协议消息语义）。
-   * @param hasValue 是否显式带了 value 字段（false = 删除，true = 设置含 null）。
+   * 应用一次 updateDataModel（协议消息语义，A2UI v1.0）。
+   * @param hasValue 是否显式带了 value 字段。省略 value 或显式 `null` 均删除该路径；
+   *   仅非 null 值执行 upsert。
    */
   applyDataModel(path: string | undefined, hasValue: boolean, value?: Json): void {
     if (this.stateValue === "deleted") return;
     const pointer = path ?? "/";
-    const change = hasValue
-      ? this.dataModel.applyPointer(pointer, value)
-      : this.dataModel.deletePointer(pointer);
+    const change =
+      hasValue && value !== null
+        ? this.dataModel.applyPointer(pointer, value)
+        : this.dataModel.deletePointer(pointer);
     this.notifyChange(change.path);
   }
 

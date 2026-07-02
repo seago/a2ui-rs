@@ -282,9 +282,13 @@ class Store implements SurfaceStore {
       const m = envelope.updateDataModel;
       const s = this.surfaces.get(m.surfaceId);
       if (!s || s.lifecycle === "deleted") return;
+      // A2UI v1.0：省略 value 或显式 null 均删除该路径（仅非 null 值 upsert）。
       const hasValue = Object.prototype.hasOwnProperty.call(m, "value");
-      if (hasValue) s.dataModel.applyPointer(m.path ?? "/", m.value as Json);
-      else s.dataModel.deletePointer(m.path ?? "/");
+      if (hasValue && m.value !== null) {
+        s.dataModel.applyPointer(m.path ?? "/", m.value as Json);
+      } else {
+        s.dataModel.deletePointer(m.path ?? "/");
+      }
       this.notify();
       return;
     }

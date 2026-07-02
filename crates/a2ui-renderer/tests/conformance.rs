@@ -89,15 +89,8 @@ impl Engine {
         // 通过 a2ui-core 公开 API 反序列化，验证 envelope 合法。
         let parsed = ServerEnvelope::from_json(&envelope.to_string())?;
 
-        let msg = envelope
-            .as_object()
-            .expect("envelope must be object")
-            .iter()
-            .find(|(k, _)| k.as_str() != "version")
-            .map(|(k, v)| (k.as_str(), v));
-
-        match (parsed, msg) {
-            (ServerEnvelope::V1_0(V1_0ServerMessage::CreateSurface(cs)), _) => {
+        match parsed {
+            ServerEnvelope::V1_0(V1_0ServerMessage::CreateSurface(cs)) => {
                 let sid = cs.surface_id.clone();
                 if let Some(dm) = cs.data_model.clone() {
                     self.data_model = DataModel::new(dm);
@@ -109,27 +102,17 @@ impl Engine {
                 }
                 Ok(())
             }
-            (ServerEnvelope::V1_0(V1_0ServerMessage::UpdateComponents(uc)), _) => {
+            ServerEnvelope::V1_0(V1_0ServerMessage::UpdateComponents(uc)) => {
                 for c in uc.components {
                     self.forest.upsert(&uc.surface_id, c)?;
                 }
                 Ok(())
             }
-            (ServerEnvelope::V1_0(V1_0ServerMessage::UpdateDataModel(udm)), Some((_, raw))) => {
+            ServerEnvelope::V1_0(V1_0ServerMessage::UpdateDataModel(udm)) => {
                 let path = udm.path.clone().unwrap_or_else(|| "/".to_string());
-                // 关键：区分「显式 null（置空）」与「省略 value（删除）」。
-                // a2ui-core 的 UpdateDataModel.value: Option<Value> 会把
-                // JSON null 反序列化成 None，与省略无法区分，故读原始键。
-                let raw_obj = raw.as_object();
-                let has_value_key = raw_obj.map(|o| o.contains_key("value")).unwrap_or(false);
-                if has_value_key {
-                    let v = raw_obj.and_then(|o| o.get("value")).cloned();
-                    self.data_model
-                        .apply_pointer(&path, Some(v.unwrap_or(Value::Null)))?;
-                } else {
-                    // 省略 value → 删除该路径
-                    self.data_model.apply_pointer(&path, None)?;
-                }
+                // A2UI v1.0：省略 value 与显式 null 均为删除。a2ui-core 已把 JSON
+                // null 反序列化为 None，故直接用 udm.value（Some=upsert，None=删除）。
+                self.data_model.apply_pointer(&path, udm.value.clone())?;
                 Ok(())
             }
             _ => Ok(()),

@@ -191,7 +191,7 @@ describe("createSurfaceStore — Data Model & reactivity", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
-  it("updateDataModel omitting value deletes the key (vs null which sets)", () => {
+  it("updateDataModel deletes on omitted value AND on explicit null (A2UI v1.0)", () => {
     const store = createSurfaceStore();
     store.ingest({
       version: "v1.0",
@@ -207,7 +207,7 @@ describe("createSurfaceStore — Data Model & reactivity", () => {
       version: "v1.0",
       updateDataModel: { surfaceId: "s1", path: "/b", value: null },
     });
-    expect(store.getDataValue("s1", "/")).toEqual({ b: null });
+    expect(store.getDataValue("s1", "/")).toEqual({});
   });
 });
 

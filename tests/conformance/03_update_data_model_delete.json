@@ -1,5 +1,5 @@
 {
-  "name": "updateDataModel 省略 value 删除路径（区别于置 null）",
+  "name": "updateDataModel 省略 value 或显式 null 均删除路径（A2UI v1.0）",
   "surfaceId": "s1",
   "messages": [
     {
@@ -15,6 +15,6 @@
     { "version": "v1.0", "updateDataModel": { "surfaceId": "s1", "path": "/b", "value": null } }
   ],
   "expect": {
-    "dataModel": { "b": null, "c": 3 }
+    "dataModel": { "c": 3 }
   }
 }
