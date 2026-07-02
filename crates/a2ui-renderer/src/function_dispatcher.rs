@@ -56,6 +56,21 @@ impl FunctionDispatcher {
     pub fn new() -> Self {
         let mut dispatcher = Self::default();
 
+        // 注册 formatString（A2UI 语义：`{key}` 占位 + `bindings` map）
+        dispatcher.register_with_handler(
+            "formatString",
+            CallableFrom::ClientOrRemote,
+            Arc::new(|args| {
+                let template = args.get("template").and_then(|v| v.as_str()).unwrap_or("");
+                let empty = serde_json::Map::new();
+                let bindings = args
+                    .get("bindings")
+                    .and_then(|v| v.as_object())
+                    .unwrap_or(&empty);
+                Ok(Value::String(format_string_interpolate(template, bindings)))
+            }),
+        );
+
         // 注册 formatNumber
         dispatcher.register_with_handler(
             "formatNumber",
@@ -206,6 +221,58 @@ impl FunctionDispatcher {
 // ============================================================================
 // 格式化辅助函数
 // ============================================================================
+
+/// A2UI `formatString` 插值：`{key}` → `bindings[key]`（类型转换），`{{`/`}}` → 字面
+/// 花括号，未知 key → 空串，未闭合 `{` → 原样保留剩余文本。
+///
+/// 与 TS `clients/web-react/src/core/format-string.ts` 的 `formatString` 语义逐字符对齐，
+/// 由共享一致性向量（`tests/conformance/05`、`06`）作为防漂移闸门。
+fn format_string_interpolate(template: &str, bindings: &serde_json::Map<String, Value>) -> String {
+    let chars: Vec<char> = template.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '{' {
+            if chars.get(i + 1) == Some(&'{') {
+                out.push('{');
+                i += 2;
+                continue;
+            }
+            match chars[i + 1..].iter().position(|&c| c == '}') {
+                Some(end_rel) => {
+                    let end = i + 1 + end_rel;
+                    let key: String = chars[i + 1..end].iter().collect();
+                    out.push_str(&binding_to_string(bindings.get(key.trim())));
+                    i = end + 1;
+                }
+                None => {
+                    // 未闭合，原样保留剩余文本
+                    out.extend(&chars[i..]);
+                    break;
+                }
+            }
+            continue;
+        }
+        if ch == '}' && chars.get(i + 1) == Some(&'}') {
+            out.push('}');
+            i += 2;
+            continue;
+        }
+        out.push(ch);
+        i += 1;
+    }
+    out
+}
+
+/// 将 binding 值转为显示字符串：字符串原样，数字/布尔字面，null/缺失 → 空串，复合 → JSON。
+fn binding_to_string(value: Option<&Value>) -> String {
+    match value {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => other.to_string(),
+    }
+}
 
 /// 为数字字符串的整数部分添加千位分隔符
 fn add_thousands_separator(s: &str) -> String {
@@ -478,8 +545,8 @@ mod tests {
         dispatcher.register("f1", CallableFrom::ClientOnly);
         dispatcher.register("f2", CallableFrom::RemoteOnly);
         let names = dispatcher.registered_names();
-        // new() 预注册 formatNumber/formatCurrency/formatDate/pluralize = 4 个
-        assert_eq!(names.len(), 6);
+        // new() 预注册 formatString/formatNumber/formatCurrency/formatDate/pluralize = 5 个
+        assert_eq!(names.len(), 7);
     }
 
     #[test]
@@ -511,6 +578,63 @@ mod tests {
             .dispatch("noop", json!({}), CallableFrom::ClientOrRemote)
             .unwrap();
         assert_eq!(result, Value::Null);
+    }
+
+    // --- formatString（A2UI 语义：{key} + bindings） ---
+
+    #[test]
+    fn test_format_string_interpolates_bindings() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "formatString",
+                json!({
+                    "template": "你好，{name}！你有 {count} 条消息",
+                    "bindings": { "name": "Alice", "count": 3 }
+                }),
+                CallableFrom::ClientOrRemote,
+            )
+            .unwrap();
+        assert_eq!(result, json!("你好，Alice！你有 3 条消息"));
+    }
+
+    #[test]
+    fn test_format_string_unknown_key_is_empty() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "formatString",
+                json!({ "template": "a{missing}b", "bindings": {} }),
+                CallableFrom::ClientOrRemote,
+            )
+            .unwrap();
+        assert_eq!(result, json!("ab"));
+    }
+
+    #[test]
+    fn test_format_string_escapes_double_braces() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "formatString",
+                json!({ "template": "{{literal}} {x}", "bindings": { "x": 1 } }),
+                CallableFrom::ClientOrRemote,
+            )
+            .unwrap();
+        assert_eq!(result, json!("{literal} 1"));
+    }
+
+    #[test]
+    fn test_format_string_null_binding_is_empty() {
+        let dispatcher = FunctionDispatcher::new();
+        let result = dispatcher
+            .dispatch(
+                "formatString",
+                json!({ "template": "[{v}]", "bindings": { "v": null } }),
+                CallableFrom::ClientOrRemote,
+            )
+            .unwrap();
+        assert_eq!(result, json!("[]"));
     }
 
     // --- Basic Catalog 格式化函数 ---

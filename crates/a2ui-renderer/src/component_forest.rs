@@ -6,6 +6,49 @@ use a2ui_core::prelude::*;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
+/// 收集组件**直接**引用的子组件 id：`children`（数组或 `{template,path}`）、
+/// `child`、`content`、`trigger`、`tabs[].child`。用于根检测的「未被引用」判定。
+fn collect_child_refs(component: &Component, out: &mut HashSet<ComponentId>) {
+    let props = component.properties();
+
+    match props.get("children") {
+        Some(Value::Array(arr)) => {
+            for v in arr {
+                if let Some(s) = v.as_str() {
+                    push_ref(out, s);
+                }
+            }
+        }
+        Some(Value::Object(obj)) => {
+            if let Some(s) = obj.get("template").and_then(|v| v.as_str()) {
+                push_ref(out, s);
+            }
+        }
+        _ => {}
+    }
+
+    for key in ["child", "content", "trigger"] {
+        if let Some(s) = props.get(key).and_then(|v| v.as_str()) {
+            push_ref(out, s);
+        }
+    }
+
+    if let Some(arr) = props.get("tabs").and_then(|v| v.as_array()) {
+        for tab in arr {
+            if let Some(s) = tab.get("child").and_then(|v| v.as_str()) {
+                push_ref(out, s);
+            }
+        }
+    }
+}
+
+/// 把合法的 ComponentId 字符串加入引用集合（非法 id 静默跳过）。
+fn push_ref(out: &mut HashSet<ComponentId>, s: &str) {
+    if let Ok(id) = ComponentId::new(s) {
+        out.insert(id);
+    }
+}
+
 /// 组件树节点
 #[derive(Debug, Clone)]
 pub struct ComponentTreeNode {
@@ -52,7 +95,9 @@ struct ComponentSurface {
     tree: Option<ComponentTreeNode>,
     /// 所有组件的 flat map
     components: HashMap<ComponentId, Component>,
-    /// root 组件 ID
+    /// 组件到达顺序（用于根检测的确定性兜底）
+    order: Vec<ComponentId>,
+    /// root 组件 ID（每次 upsert 后按 detect_root 重算）
     root: ComponentId,
 }
 
@@ -73,22 +118,56 @@ impl ComponentForest {
             .or_insert_with(|| ComponentSurface {
                 tree: None,
                 components: HashMap::new(),
+                order: Vec::new(),
                 root: ComponentId::new("root").expect("'root' is a valid ComponentId"),
             });
 
         let comp_id = component.id().clone();
-        let is_root = comp_id.as_str() == "root";
 
-        if is_root {
-            surface.root = comp_id.clone();
+        if !surface.components.contains_key(&comp_id) {
+            surface.order.push(comp_id.clone());
         }
-
         surface.components.insert(comp_id.clone(), component);
+        // 组件集变化后重算 root（约定名优先，否则未被引用者）
+        surface.root = Self::detect_root(surface);
+
         // 维护反向索引
         self.component_to_surface
             .insert(comp_id, surface_id.to_string());
         surface.tree = None;
         Ok(())
+    }
+
+    /// 检测 Surface 的 root 组件 id。
+    ///
+    /// 优先级（与 TS `store.ts` 的 rootId 逻辑对齐）：
+    /// 1. 约定名 `root`，其次 `root_card`；
+    /// 2. 否则取「未被任何组件作为子节点引用」的组件（按到达顺序取首个）；
+    /// 3. 再兜底到到达顺序首个，最后默认 `root`。
+    fn detect_root(surface: &ComponentSurface) -> ComponentId {
+        for name in ["root", "root_card"] {
+            if let Ok(id) = ComponentId::new(name) {
+                if surface.components.contains_key(&id) {
+                    return id;
+                }
+            }
+        }
+
+        let mut referenced: HashSet<ComponentId> = HashSet::new();
+        for comp in surface.components.values() {
+            collect_child_refs(comp, &mut referenced);
+        }
+        for id in &surface.order {
+            if !referenced.contains(id) {
+                return id.clone();
+            }
+        }
+
+        surface
+            .order
+            .first()
+            .cloned()
+            .unwrap_or_else(|| ComponentId::new("root").expect("'root' is a valid ComponentId"))
     }
 
     /// 通过 component_id 查找所属的 surface_id
@@ -560,6 +639,62 @@ mod tests {
     fn test_component_forest_new() {
         let forest = ComponentForest::new();
         assert!(forest.surfaces.is_empty());
+    }
+
+    #[test]
+    fn build_tree_detects_root_card_without_literal_root() {
+        let mut forest = ComponentForest::new();
+        let card: Component = serde_json::from_value(
+            serde_json::json!({"component":"Card","id":"root_card","child":"form_col"}),
+        )
+        .unwrap();
+        let col: Component = serde_json::from_value(
+            serde_json::json!({"component":"Column","id":"form_col","children":["title"]}),
+        )
+        .unwrap();
+        let title = Component::text(
+            ComponentId::new("title").unwrap(),
+            DynamicValue::Literal("hi".to_string()),
+        );
+        forest.upsert("s1", card).unwrap();
+        forest.upsert("s1", col).unwrap();
+        forest.upsert("s1", title).unwrap();
+
+        let tree = forest.build_tree("s1").unwrap();
+        assert_eq!(tree.component.id().as_str(), "root_card");
+        assert_eq!(forest.get_root("s1").unwrap().id().as_str(), "root_card");
+    }
+
+    #[test]
+    fn detects_unreferenced_root_when_no_conventional_name() {
+        let mut forest = ComponentForest::new();
+        let top: Component = serde_json::from_value(
+            serde_json::json!({"component":"Column","id":"top","children":["leaf"]}),
+        )
+        .unwrap();
+        let leaf = Component::text(
+            ComponentId::new("leaf").unwrap(),
+            DynamicValue::Literal("x".to_string()),
+        );
+        forest.upsert("s1", top).unwrap();
+        forest.upsert("s1", leaf).unwrap();
+        assert_eq!(forest.get_root("s1").unwrap().id().as_str(), "top");
+    }
+
+    #[test]
+    fn literal_root_still_wins_over_other_components() {
+        let mut forest = ComponentForest::new();
+        let root: Component = serde_json::from_value(
+            serde_json::json!({"component":"Column","id":"root","children":["c"]}),
+        )
+        .unwrap();
+        let c = Component::text(
+            ComponentId::new("c").unwrap(),
+            DynamicValue::Literal("c".to_string()),
+        );
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", c).unwrap();
+        assert_eq!(forest.get_root("s1").unwrap().id().as_str(), "root");
     }
 
     #[test]
