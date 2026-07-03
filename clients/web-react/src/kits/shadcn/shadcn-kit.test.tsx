@@ -36,6 +36,13 @@ describe("Text", () => {
       "text-muted-foreground"
     );
   });
+
+  it("body inherits color (no hardcoded text-foreground) so it stays visible as a button label", () => {
+    // 回归守卫：body Text 若硬编码 text-foreground，作为 primary 按钮 label 时
+    // 会用深色字盖掉按钮的白字，导致按钮上文字看不见。
+    render(<Text text="提交" variant="body" />);
+    expect(screen.getByText("提交").className).not.toContain("text-foreground");
+  });
 });
 
 describe("Button", () => {
