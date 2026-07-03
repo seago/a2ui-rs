@@ -75,13 +75,100 @@ function makeMockKit(): ComponentKit {
   const Placeholder: ComponentKit["Placeholder"] = ({ reason }) => (
     <div data-testid="kit-placeholder">{reason}</div>
   );
+  // M2 组件的极简 mock（V 的既有测试不覆盖它们，仅需满足 ComponentKit 契约）。
+  const Image: ComponentKit["Image"] = ({ url }) => (
+    <img data-testid="kit-image" src={url} alt="" />
+  );
+  const Icon: ComponentKit["Icon"] = ({ name }) => (
+    <span data-testid="kit-icon">{name}</span>
+  );
+  const Video: ComponentKit["Video"] = ({ url }) => (
+    <video data-testid="kit-video" src={url} />
+  );
+  const AudioPlayer: ComponentKit["AudioPlayer"] = ({ url }) => (
+    <audio data-testid="kit-audio" src={url} />
+  );
+  const List: ComponentKit["List"] = ({ children }) => (
+    <div data-testid="kit-list">{children}</div>
+  );
+  const Tabs: ComponentKit["Tabs"] = ({ tabs }) => (
+    <div data-testid="kit-tabs">
+      {tabs.map((t, i) => (
+        <div key={i}>
+          {t.title}
+          {t.content}
+        </div>
+      ))}
+    </div>
+  );
+  const Modal: ComponentKit["Modal"] = ({ content, trigger }) => (
+    <div data-testid="kit-modal">
+      {trigger}
+      {content}
+    </div>
+  );
+  const Divider: ComponentKit["Divider"] = () => (
+    <hr data-testid="kit-divider" />
+  );
+  const CheckBox: ComponentKit["CheckBox"] = ({ checked, onChange, label }) => (
+    <label data-testid="kit-checkbox">
+      {label}
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+    </label>
+  );
+  const ChoicePicker: ComponentKit["ChoicePicker"] = ({
+    value,
+    onChange,
+    options,
+  }) => (
+    <div data-testid="kit-choicepicker">
+      {options.map((o) => (
+        <button key={o.value} onClick={() => onChange([...value, o.value])}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+  const Slider: ComponentKit["Slider"] = ({ value, onChange, min, max }) => (
+    <input
+      data-testid="kit-slider"
+      type="range"
+      value={value}
+      min={min}
+      max={max}
+      onChange={(e) => onChange(Number(e.target.value))}
+    />
+  );
+  const DateTimeInput: ComponentKit["DateTimeInput"] = ({ value, onChange }) => (
+    <input
+      data-testid="kit-datetime"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
   return {
     Text: Text as ComponentKit["Text"],
+    Image,
+    Icon,
+    Video,
+    AudioPlayer,
+    Row,
+    Column,
+    List,
+    Card,
+    Tabs,
+    Modal,
+    Divider,
     Button,
     TextField,
-    Card,
-    Column,
-    Row,
+    CheckBox,
+    ChoicePicker,
+    Slider,
+    DateTimeInput,
     Placeholder,
   };
 }
@@ -266,13 +353,20 @@ describe("B2 渲染核心", () => {
   it("未知 component 回退到 Placeholder", () => {
     const store = makeMockStore({
       nodes: {
-        rootX: { id: "rootX", component: "Slider", props: {}, children: [] },
+        rootX: {
+          id: "rootX",
+          component: "NonexistentWidget",
+          props: {},
+          children: [],
+        },
       },
       rootId: "rootX",
     });
     renderSurface(store);
     expect(screen.getByTestId("kit-placeholder")).toBeInTheDocument();
-    expect(screen.getByTestId("kit-placeholder")).toHaveTextContent(/Slider/);
+    expect(screen.getByTestId("kit-placeholder")).toHaveTextContent(
+      /NonexistentWidget/,
+    );
   });
 
   it("resolved.placeholder 非空时渲染 Placeholder（即使 component 已知）", () => {

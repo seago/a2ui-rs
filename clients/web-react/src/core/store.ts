@@ -422,6 +422,15 @@ class Store implements SurfaceStore {
       if (r !== undefined) props[key] = r;
     }
 
+    // Tabs 的标签标题是结构性数据（child 引用由 children 抽取），但渲染层需要标题；
+    // 单独透传，顺序与 children 一致。
+    const rawTabs = (component as Record<string, unknown>).tabs;
+    if (Array.isArray(rawTabs)) {
+      props.tabs = rawTabs.map((t) =>
+        isObject(t) ? { title: t.title } : t,
+      );
+    }
+
     const children = this.childRefs(component, resolver, ctx);
 
     const node: ResolvedNode = {

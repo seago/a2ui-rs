@@ -50,6 +50,109 @@ export interface RowProps {
   children: ReactNode;
 }
 
+// ─── 显示组件 ────────────────────────────────────────────────────────────────
+
+/** Image：图片展示。 */
+export interface ImageProps {
+  url: string;
+  fit?: "contain" | "cover" | "fill";
+  variant?: string;
+}
+
+/** Icon：矢量图标（name 为图标枚举名）。 */
+export interface IconProps {
+  name: string;
+}
+
+/** Video：视频播放器。 */
+export interface VideoProps {
+  url: string;
+  posterUrl?: string;
+}
+
+/** AudioPlayer：音频播放器。 */
+export interface AudioPlayerProps {
+  url: string;
+  description?: string;
+}
+
+/** Divider：分割线（无特有属性）。 */
+export type DividerProps = Record<never, never>;
+
+// ─── 容器组件 ────────────────────────────────────────────────────────────────
+
+/** List：列表容器，可纵向/横向排列子项。 */
+export interface ListProps {
+  children: ReactNode;
+  direction: "vertical" | "horizontal";
+}
+
+/** Tabs 的单个标签页（content 已由渲染核心渲染为 ReactNode）。 */
+export interface TabItem {
+  title: string;
+  content: ReactNode;
+}
+
+/** Tabs：标签页容器。 */
+export interface TabsProps {
+  tabs: TabItem[];
+}
+
+/** Modal：模态框（trigger 触发，content 为内容，均已渲染为 ReactNode）。 */
+export interface ModalProps {
+  content: ReactNode;
+  trigger: ReactNode;
+}
+
+// ─── 输入组件（与 Data Model 双向绑定） ──────────────────────────────────────
+
+/** CheckBox：复选框。 */
+export interface CheckBoxProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label?: string;
+  disabled: boolean;
+}
+
+/** Slider：滑块。 */
+export interface SliderProps {
+  value: number;
+  onChange: (value: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+  label?: string;
+  disabled: boolean;
+}
+
+/** ChoicePicker 的单个选项。 */
+export interface ChoiceOption {
+  value: string;
+  label: string;
+}
+
+/** ChoicePicker：选择器（多选 / 互斥单选）。 */
+export interface ChoicePickerProps {
+  value: string[];
+  onChange: (value: string[]) => void;
+  options: ChoiceOption[];
+  variant: "multipleSelection" | "mutuallyExclusive";
+  displayStyle: "checkbox" | "chips";
+  disabled: boolean;
+}
+
+/** DateTimeInput：日期时间选择器。 */
+export interface DateTimeInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  label?: string;
+  enableDate: boolean;
+  enableTime: boolean;
+  min?: string;
+  max?: string;
+  disabled: boolean;
+}
+
 /** Placeholder：未知类型 / 引用缺失的兜底。 */
 export interface PlaceholderProps {
   reason: string;
@@ -61,11 +164,23 @@ export interface PlaceholderProps {
  */
 export interface ComponentKitProps {
   Text: TextProps;
+  Image: ImageProps;
+  Icon: IconProps;
+  Video: VideoProps;
+  AudioPlayer: AudioPlayerProps;
+  Row: RowProps;
+  Column: ColumnProps;
+  List: ListProps;
+  Card: CardProps;
+  Tabs: TabsProps;
+  Modal: ModalProps;
+  Divider: DividerProps;
   Button: ButtonProps;
   TextField: TextFieldProps;
-  Card: CardProps;
-  Column: ColumnProps;
-  Row: RowProps;
+  CheckBox: CheckBoxProps;
+  ChoicePicker: ChoicePickerProps;
+  Slider: SliderProps;
+  DateTimeInput: DateTimeInputProps;
   Placeholder: PlaceholderProps;
 }
 

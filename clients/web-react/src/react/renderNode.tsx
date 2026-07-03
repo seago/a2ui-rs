@@ -144,6 +144,191 @@ function renderResolved(
       return <Row>{renderChildren(surfaceId, resolved.children)}</Row>;
     }
 
+    case "List": {
+      const List = kit.List;
+      return (
+        <List
+          direction={pick(
+            resolved.props.direction,
+            ["vertical", "horizontal"],
+            "vertical",
+          )}
+        >
+          {renderChildren(surfaceId, resolved.children)}
+        </List>
+      );
+    }
+
+    case "Image": {
+      const Image = kit.Image;
+      return (
+        <Image
+          url={asString(resolved.props.url)}
+          fit={optionalEnum(resolved.props.fit, ["contain", "cover", "fill"])}
+          variant={optionalString(resolved.props.variant)}
+        />
+      );
+    }
+
+    case "Icon": {
+      const Icon = kit.Icon;
+      return <Icon name={asString(resolved.props.name)} />;
+    }
+
+    case "Video": {
+      const Video = kit.Video;
+      return (
+        <Video
+          url={asString(resolved.props.url)}
+          posterUrl={optionalString(resolved.props.posterUrl)}
+        />
+      );
+    }
+
+    case "AudioPlayer": {
+      const AudioPlayer = kit.AudioPlayer;
+      return (
+        <AudioPlayer
+          url={asString(resolved.props.url)}
+          description={optionalString(resolved.props.description)}
+        />
+      );
+    }
+
+    case "Divider": {
+      const Divider = kit.Divider;
+      return <Divider />;
+    }
+
+    case "Tabs": {
+      const Tabs = kit.Tabs;
+      const rawTabs = Array.isArray(resolved.props.tabs)
+        ? resolved.props.tabs
+        : [];
+      const tabs = rawTabs.map((t, i) => {
+        const childRef = resolved.children[i];
+        return {
+          title: asString(isObject(t) ? t.title : undefined),
+          content: childRef ? (
+            <RenderNode
+              key={`${childRef.componentId}:${i}`}
+              surfaceId={surfaceId}
+              nodeRef={childRef}
+            />
+          ) : null,
+        };
+      });
+      return <Tabs tabs={tabs} />;
+    }
+
+    case "Modal": {
+      const Modal = kit.Modal;
+      const [contentRef, triggerRef] = resolved.children;
+      return (
+        <Modal
+          content={
+            contentRef ? (
+              <RenderNode surfaceId={surfaceId} nodeRef={contentRef} />
+            ) : null
+          }
+          trigger={
+            triggerRef ? (
+              <RenderNode surfaceId={surfaceId} nodeRef={triggerRef} />
+            ) : null
+          }
+        />
+      );
+    }
+
+    case "CheckBox": {
+      const CheckBox = kit.CheckBox;
+      const path = resolved.bindingPath;
+      const checked = path
+        ? Boolean(ctx.store.getDataValue(surfaceId, path))
+        : Boolean(resolved.props.checked);
+      return (
+        <CheckBox
+          checked={checked}
+          onChange={(b) => {
+            if (path) ctx.store.setDataValue(surfaceId, path, b);
+          }}
+          label={optionalString(resolved.props.label)}
+          disabled={resolved.disabled ?? false}
+        />
+      );
+    }
+
+    case "Slider": {
+      const Slider = kit.Slider;
+      const path = resolved.bindingPath;
+      const value = path
+        ? asNumber(ctx.store.getDataValue(surfaceId, path), 0)
+        : asNumber(resolved.props.value, 0);
+      return (
+        <Slider
+          value={value}
+          onChange={(n) => {
+            if (path) ctx.store.setDataValue(surfaceId, path, n);
+          }}
+          min={asNumber(resolved.props.min, 0)}
+          max={asNumber(resolved.props.max, 100)}
+          step={optionalNumber(resolved.props.steps ?? resolved.props.step)}
+          label={optionalString(resolved.props.label)}
+          disabled={resolved.disabled ?? false}
+        />
+      );
+    }
+
+    case "ChoicePicker": {
+      const ChoicePicker = kit.ChoicePicker;
+      const path = resolved.bindingPath;
+      const value = path
+        ? asStringList(ctx.store.getDataValue(surfaceId, path))
+        : asStringList(resolved.props.value);
+      return (
+        <ChoicePicker
+          value={value}
+          onChange={(v) => {
+            if (path) ctx.store.setDataValue(surfaceId, path, v);
+          }}
+          options={normalizeOptions(resolved.props.options)}
+          variant={pick(
+            resolved.props.variant,
+            ["multipleSelection", "mutuallyExclusive"],
+            "multipleSelection",
+          )}
+          displayStyle={pick(
+            resolved.props.displayStyle,
+            ["checkbox", "chips"],
+            "checkbox",
+          )}
+          disabled={resolved.disabled ?? false}
+        />
+      );
+    }
+
+    case "DateTimeInput": {
+      const DateTimeInput = kit.DateTimeInput;
+      const path = resolved.bindingPath;
+      const value = path
+        ? asString(ctx.store.getDataValue(surfaceId, path))
+        : asString(resolved.props.value);
+      return (
+        <DateTimeInput
+          value={value}
+          onChange={(s) => {
+            if (path) ctx.store.setDataValue(surfaceId, path, s);
+          }}
+          label={optionalString(resolved.props.label)}
+          enableDate={resolved.props.enableDate !== false}
+          enableTime={Boolean(resolved.props.enableTime)}
+          min={optionalString(resolved.props.min)}
+          max={optionalString(resolved.props.max)}
+          disabled={resolved.disabled ?? false}
+        />
+      );
+    }
+
     default:
       return <kit.Placeholder reason={`未知组件类型: ${resolved.component}`} />;
   }
@@ -187,6 +372,58 @@ function isEventAction(action: Action): action is ActionEvent {
 function asString(value: unknown): string {
   if (value === null || value === undefined) return "";
   return typeof value === "string" ? value : String(value);
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asNumber(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function optionalEnum<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T | undefined {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : undefined;
+}
+
+/** 归一化为字符串数组：数组取字符串项；单个字符串包一层；否则空数组。 */
+function asStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((v): v is string => typeof v === "string");
+  }
+  return typeof value === "string" ? [value] : [];
+}
+
+/** 归一化 ChoicePicker 选项：接受 string[] 或 {value,label}[]，统一为 {value,label}[]。 */
+function normalizeOptions(value: unknown): { value: string; label: string }[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((o) => {
+    if (typeof o === "string") return { value: o, label: o };
+    if (isObject(o)) {
+      const v = asString(o.value);
+      return { value: v, label: o.label !== undefined ? asString(o.label) : v };
+    }
+    return { value: "", label: "" };
+  });
 }
 
 function optionalString(value: unknown): string | undefined {
