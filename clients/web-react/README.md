@@ -20,7 +20,12 @@ WS/SSE ──▶ ① 协议核心(纯 TS)  ──▶ ② 渲染核心(React, 库
 - **`src/kits`** — 可插拔组件库实现：
   - `shadcn/` — 基于 shadcn/ui 的 kit（首选）。
   - `html/` — 纯 HTML kit（证明"换 kit 换库"的第二实现）。
-- **`src/transport`** — 浏览器 WS 客户端。
+- **`src/transport`** — 浏览器传输客户端（可互换）：
+  - `wsClient` — WebSocket（双向，连 `WebSocketServer`）。
+  - `sseClient` — SSE + HTTP：`EventSource` 收 `ServerEnvelope`、`fetch POST` 回传
+    `ClientEnvelope`。对接 SSE 型 Agent Host（如 Salvo）只需提供两个端点：
+    `GET <eventsUrl>`（SSE，每帧一条 ServerEnvelope）+ `POST <actionUrl>`
+    （一条 ClientEnvelope）。协议格式与 WS 完全一致（同一份 `src/contracts`）。
 
 核心原则：**换整个组件库只需给 `<A2UIProvider kit={...}>` 传一个不同的 kit**，
 协议核心与渲染核心零改动，Data Model 状态跨切换保留。
