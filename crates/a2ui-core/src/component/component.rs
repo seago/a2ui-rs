@@ -905,6 +905,31 @@ impl Component {
         self.prop_dynamic(key)
     }
 
+    /// 读取动态 prop 的通用形态（`T = Value`，字面量兜底任意 JSON）。
+    ///
+    /// 与 [`Component::prop_dynamic_str`] 不同，非字符串字面量（数字、
+    /// 布尔等）也会以 `Literal` 给出——渲染层「任意字面量按显示文本渲染」
+    /// 的现状语义依赖此形态。仅键缺失时返回 `None`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::{Component, DynamicValue};
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "Text", "id": "t", "text": 42
+    /// })).unwrap();
+    /// assert_eq!(
+    ///     c.prop_dynamic_value("text"),
+    ///     Some(DynamicValue::Literal(json!(42)))
+    /// );
+    /// ```
+    pub fn prop_dynamic_value(&self, key: &str) -> Option<DynamicValue> {
+        self.prop_dynamic(key)
+    }
+
     /// `prop_dynamic_*` 的共同实现：untagged 顺序（Path → FunctionCall →
     /// Literal）由 [`DynamicValue`] 定义保障；解析失败一律返回 `None`
     /// （与手写 `.as_*()` 分支的宽容语义对齐，不新增报错路径）。
@@ -1954,6 +1979,40 @@ mod prop_accessor_tests {
             })
         );
         assert_eq!(c.prop_dynamic_f64("mismatch"), None);
+    }
+
+    #[test]
+    fn prop_dynamic_value_wraps_any_literal_shape() {
+        // T = Value 的动态访问器：字面量兜底任意 JSON（含非字符串），
+        // 支撑渲染层「数字/布尔字面量按显示文本渲染」的现状语义
+        let c = component(json!({
+            "num": 3,
+            "s": "x",
+            "bound": {"path": "/p"},
+            "called": {"call": "f", "args": []}
+        }));
+        assert_eq!(
+            c.prop_dynamic_value("num"),
+            Some(DynamicValue::Literal(json!(3)))
+        );
+        assert_eq!(
+            c.prop_dynamic_value("s"),
+            Some(DynamicValue::Literal(json!("x")))
+        );
+        assert_eq!(
+            c.prop_dynamic_value("bound"),
+            Some(DynamicValue::Path {
+                path: "/p".to_string()
+            })
+        );
+        assert_eq!(
+            c.prop_dynamic_value("called"),
+            Some(DynamicValue::FunctionCall {
+                call: "f".to_string(),
+                args: json!([])
+            })
+        );
+        assert_eq!(c.prop_dynamic_value("missing"), None);
     }
 
     #[test]

@@ -489,26 +489,29 @@ impl RendererCore {
         };
 
         // 3. 规范：只有声明了 server action（action.event）的组件才发送消息
-        let Some(event_decl) = component
-            .properties()
-            .get("action")
-            .and_then(|a| a.get("event"))
-            .cloned()
-        else {
+        let Some(action) = component.action_decl() else {
+            // 区分「未声明 action」（静默）与「声明了 event 但缺合法 name」
+            // （保留现状 warn + 丢弃）
+            if component
+                .properties()
+                .get("action")
+                .and_then(|a| a.get("event"))
+                .is_some()
+            {
+                tracing::warn!(
+                    "component {} declares action.event without name, dropped",
+                    component_id
+                );
+            }
             return Ok((None, effects));
         };
-        let Some(name) = event_decl.get("name").and_then(|v| v.as_str()) else {
-            tracing::warn!(
-                "component {} declares action.event without name, dropped",
-                component_id
-            );
-            return Ok((None, effects));
-        };
+        let event_decl = action.event;
 
         // 4. 对声明的 context 求值（path 绑定/函数调用 → 具体值）
         let binding = self.data_bindings.get(&surface_id);
-        let mut message = ActionMessage::event(name, surface_id.clone(), component_id.as_str());
-        if let Some(ctx_decl) = event_decl.get("context").and_then(|v| v.as_object()) {
+        let mut message =
+            ActionMessage::event(&event_decl.name, surface_id.clone(), component_id.as_str());
+        if let Some(ctx_decl) = &event_decl.context {
             for (key, raw) in ctx_decl {
                 let resolved = resolve_context_value(raw, binding, &self.dispatcher);
                 message = message.with_context(key, DynamicValue::Literal(resolved));
@@ -517,13 +520,9 @@ impl RendererCore {
 
         // 5. wantResponse / responsePath / actionId（actionId 属实例，
         //    声明未提供时自动生成；responsePath 是本地语义，不上线路）
-        let want_response = event_decl
-            .get("wantResponse")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if want_response {
-            let action_id = match event_decl.get("actionId").and_then(|v| v.as_str()) {
-                Some(id) => id.to_string(),
+        if event_decl.want_response.unwrap_or(false) {
+            let action_id = match event_decl.action_id {
+                Some(id) => id,
                 None => {
                     self.next_action_seq += 1;
                     format!("a-{}", self.next_action_seq)
@@ -531,9 +530,9 @@ impl RendererCore {
             };
             message.want_response = true;
             message.action_id = Some(action_id.clone());
-            if let Some(response_path) = event_decl.get("responsePath").and_then(|v| v.as_str()) {
+            if let Some(response_path) = event_decl.response_path {
                 self.pending_responses
-                    .insert(action_id, (surface_id.clone(), response_path.to_string()));
+                    .insert(action_id, (surface_id.clone(), response_path));
             }
         }
 
