@@ -45,6 +45,11 @@ pub use component::ComponentId;
 pub use datamodel::DataModel;
 pub use message::{ClientEnvelope, ServerEnvelope};
 pub use schema::CatalogValidator;
+/// 任意 JSON 值类型的统一入口（re-export 自 `serde_json`）。
+///
+/// 下游 crate（渲染器、transport、cli）应经此使用 `Value`，
+/// 而不是在自己的 Cargo.toml 中直接依赖 `serde_json`。
+pub use serde_json::Value;
 pub mod prelude;
 
 #[cfg(feature = "embed-assets")]

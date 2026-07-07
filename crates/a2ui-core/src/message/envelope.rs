@@ -15,6 +15,24 @@ impl ServerEnvelope {
         Ok(serde_json::from_str(json)?)
     }
 
+    /// 将信封序列化为 JSON 字符串（与 [`ServerEnvelope::from_json`] 对称）。
+    ///
+    /// transport 层发送信封时应使用本方法，而非手写 `serde_json::to_string`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::ServerEnvelope;
+    ///
+    /// let json = r#"{"version":"v1.0","createSurface":{"surfaceId":"s1","catalogId":"basic"}}"#;
+    /// let envelope = ServerEnvelope::from_json(json).unwrap();
+    /// let encoded = envelope.to_json().unwrap();
+    /// assert!(encoded.contains("\"version\":\"v1.0\""));
+    /// ```
+    pub fn to_json(&self) -> Result<String> {
+        Ok(serde_json::to_string(self)?)
+    }
+
     pub fn to_value(&self) -> Result<Value> {
         Ok(serde_json::to_value(self)?)
     }
@@ -102,6 +120,24 @@ impl ClientEnvelope {
         Ok(serde_json::from_str(json)?)
     }
 
+    /// 将信封序列化为 JSON 字符串（与 [`ClientEnvelope::from_json`] 对称）。
+    ///
+    /// transport 层发送信封时应使用本方法，而非手写 `serde_json::to_string`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::ClientEnvelope;
+    ///
+    /// let json = r#"{"version":"v1.0","capabilities":{"version":"1.0","features":["tui"]}}"#;
+    /// let envelope = ClientEnvelope::from_json(json).unwrap();
+    /// let encoded = envelope.to_json().unwrap();
+    /// assert!(encoded.contains("\"capabilities\""));
+    /// ```
+    pub fn to_json(&self) -> Result<String> {
+        Ok(serde_json::to_string(self)?)
+    }
+
     pub fn to_value(&self) -> Result<Value> {
         Ok(serde_json::to_value(self)?)
     }
@@ -167,5 +203,46 @@ mod tests {
     fn client_envelope_unknown_message_key_fails() {
         let json = r#"{"version":"v1.0","unknownMessage":{}}"#;
         assert!(ClientEnvelope::from_json(json).is_err());
+    }
+
+    #[test]
+    fn server_envelope_to_json_roundtrips_with_from_json() {
+        let json = r#"{"version":"v1.0","createSurface":{"surfaceId":"s1","catalogId":"basic"}}"#;
+        let envelope = ServerEnvelope::from_json(json).unwrap();
+        let encoded = envelope.to_json().unwrap();
+        let reparsed = ServerEnvelope::from_json(&encoded).unwrap();
+        assert_eq!(
+            envelope.to_value().unwrap(),
+            reparsed.to_value().unwrap(),
+            "from_json(to_json(x)) 应与 x 等价"
+        );
+        assert!(encoded.contains("\"version\":\"v1.0\""));
+    }
+
+    #[test]
+    fn client_envelope_to_json_roundtrips_with_from_json() {
+        let envelope = ClientEnvelope::V1_0 {
+            message: V1_0ClientMessage::Action(
+                crate::message::client_to_server::ActionMessage::event("submit", "s1", "btn"),
+            ),
+            metadata: Some(ClientMetadata {
+                surface_id: "s1".into(),
+                data_model: Some(json!({"x": 1})),
+            }),
+        };
+        let encoded = envelope.to_json().unwrap();
+        let reparsed = ClientEnvelope::from_json(&encoded).unwrap();
+        assert_eq!(
+            envelope.to_value().unwrap(),
+            reparsed.to_value().unwrap(),
+            "from_json(to_json(x)) 应与 x 等价"
+        );
+    }
+
+    #[test]
+    fn core_reexports_value_for_downstream_crates() {
+        // 下游 crate 经 a2ui_core::Value 使用任意 JSON 类型，不直接依赖 serde_json
+        let v: crate::Value = json!({"a": 1});
+        assert_eq!(v["a"], 1);
     }
 }
