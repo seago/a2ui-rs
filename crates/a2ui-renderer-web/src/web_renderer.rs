@@ -45,8 +45,8 @@ pub struct WebRenderer {
     catalog_registry: CatalogRegistry,
     /// 当前聚焦的组件
     focused_component: Option<ComponentId>,
-    /// action_id → response_path 映射（responsePath 写回用）
-    pending_responses: HashMap<String, String>,
+    /// action_id → (surface_id, response_path) 映射（responsePath 写回用）
+    pending_responses: HashMap<String, (String, String)>,
     /// Surface 的 sendDataModel 标记（为 true 时 action 附带完整 data model）
     send_data_model: HashMap<String, bool>,
     /// 需要增量重渲染的 surface 集合
@@ -124,14 +124,16 @@ impl WebRenderer {
         self.custom_registry.register(def)
     }
 
-    /// 注册待响应的 action_id → response_path 映射
+    /// 注册待响应的 action_id → (surface_id, response_path) 映射
+    /// surface_id 用于响应到达时精确定位写回目标（组件 id 只在 surface 内唯一）
     pub fn register_pending_response(
         &mut self,
         action_id: impl Into<String>,
+        surface_id: impl Into<String>,
         response_path: impl Into<String>,
     ) {
         self.pending_responses
-            .insert(action_id.into(), response_path.into());
+            .insert(action_id.into(), (surface_id.into(), response_path.into()));
     }
 
     /// 渲染指定 Surface 为 HTML 字符串
@@ -588,7 +590,7 @@ impl Renderer for WebRenderer {
 
     async fn action_response(&mut self, msg: ActionResponse) -> RenderResult<()> {
         let action_id = msg.action_id.clone();
-        if let Some(response_path) = self.pending_responses.remove(&action_id) {
+        if let Some((surface_id, response_path)) = self.pending_responses.remove(&action_id) {
             let write_value = match &msg.response {
                 a2ui_core::message::server_to_client::ActionResponsePayload::Success(v) => {
                     v.clone()
@@ -598,19 +600,23 @@ impl Renderer for WebRenderer {
                 }
             };
 
-            for (surface_id, binding) in self.data_bindings.iter_mut() {
-                if binding.as_value().pointer(&response_path).is_some() || response_path == "/" {
-                    self.surface_lru.touch(surface_id);
+            match self.data_bindings.get_mut(&surface_id) {
+                Some(binding) => {
+                    self.surface_lru.touch(&surface_id);
                     binding.set(&response_path, write_value)?;
                     let affected = self.dependency_graph.on_data_change(&response_path);
                     if !affected.is_empty() {
-                        self.dirty_surfaces.insert(surface_id.clone());
+                        self.dirty_surfaces.insert(surface_id);
                     }
-                    break;
+                }
+                None => {
+                    tracing::warn!(
+                        "action response {} targets missing surface {}, dropped",
+                        action_id,
+                        surface_id
+                    );
                 }
             }
-
-            self.pending_responses.remove(&action_id);
         }
         Ok(())
     }
