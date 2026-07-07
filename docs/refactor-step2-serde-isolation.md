@@ -1,6 +1,6 @@
 # 架构返工 · 第 2 步：serde_json 隔离与类型化 props 访问器
 
-状态：设计稿（未实施）
+状态：已实施（2026-07-08，迁移计划 C0-C10 全部落地；约束白名单由 scripts/check-serde-isolation.sh 守护）
 日期：2026-07-07
 前置：[第 1 步 · 渲染器公共核心（RendererCore）](refactor-step1-renderer-core.md)（已实施，本设计以其收敛后的接触面为起点）
 关联：ARCHITECTURE.md / CLAUDE.md 约束「`a2ui-core` 是唯一依赖 `serde_json` 的 crate，下游只依赖 `a2ui-core` 的 Rust 类型，不直接处理 JSON」（当前全面失守，本设计使其以修订后的形式可执行、可维护）

@@ -68,14 +68,14 @@ cargo run --example <name>
 
 - `a2ui-transport` 只负责消息收发和会话管理，不包含任何渲染逻辑。
 - `a2ui-renderer` 定义 `Renderer` trait，具体渲染 API 由各平台 crate 实现，不向上暴露。
-- `a2ui-core` 是唯一依赖 `serde_json` 的 crate，下游只依赖 `a2ui-core` 的 Rust 类型，不直接处理 JSON。
+- `a2ui-core` 与 `a2ui-renderer` 是**仅有的两个**允许直接依赖 `serde_json` 的 crate（白名单，CI 以 `scripts/check-serde-isolation.sh` 检查）：core 是协议里任意 JSON 字段（DataModel/Catalog schema/信封 metadata 等）的法定居所；renderer 是数据绑定引擎，解析绑定路径指向的任意 JSON 是其职责本体。平台渲染器 / transport / cli 一律经 `a2ui-core` 的类型化访问器（`prop_*`、`*_decl` 视图）与 re-export（`Value`、`json!`、`Component::from_value` 等）使用 JSON，Cargo.toml 不得出现 `serde_json`。
 - Surface 生命周期由状态机管理：`createSurface` → 活跃 → `deleteSurface`，状态转换有严格顺序约束。
 
 ## 代码偏好
 
 - 错误处理用 `thiserror` 定义 crate 级错误类型，禁止裸 `panic!` 或 `unwrap()` 在业务逻辑中。
 - 异步接口统一用 `async fn`，即使当前没有 await。
-- 序列化/反序列化统一用 `serde` + `serde_json`。
+- 序列化/反序列化统一用 `serde` + `serde_json`（`serde_json` 直接依赖仅限 core/renderer 白名单，见「架构约束」）。
 - 所有公共 API 必须有文档注释（`///`），且包含至少一个可运行的示例。
 
 ## 禁止事项
