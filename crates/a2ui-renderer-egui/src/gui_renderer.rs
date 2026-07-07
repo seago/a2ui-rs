@@ -351,7 +351,7 @@ impl Renderer for GuiRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use a2ui_core::prelude::json;
 
     #[test]
     fn test_gui_renderer_new() {
@@ -372,13 +372,7 @@ mod tests {
     #[test]
     fn test_register_catalog() {
         let mut renderer = GuiRenderer::new();
-        let catalog: a2ui_core::Catalog = serde_json::from_value(serde_json::json!({
-            "catalogId": "basic",
-            "instructions": "Basic catalog",
-            "components": {},
-            "functions": {}
-        }))
-        .unwrap();
+        let catalog = a2ui_core::Catalog::new("basic").with_instructions("Basic catalog");
         assert!(renderer.register_catalog(catalog).is_ok());
     }
 
@@ -389,7 +383,7 @@ mod tests {
         // 旧断言（合成 input 消息 + context dataModel 快照）→ 新断言：
         // 规范：被动输入变更不触发网络请求，只写回数据模型并标脏
         let mut renderer = GuiRenderer::new();
-        let field: Component = serde_json::from_value(json!({
+        let field: Component = Component::from_value(json!({
             "component":"TextField","id":"root","value":{"path":"/form/username"}
         }))
         .unwrap();
@@ -428,15 +422,15 @@ mod tests {
     async fn test_check_toggle_and_slider_write_back_to_data_model() {
         // 旧断言（合成 toggle/slider_change 消息）→ 新断言：只写回 + 标脏
         let mut renderer = GuiRenderer::new();
-        let checkbox: Component = serde_json::from_value(json!({
+        let checkbox: Component = Component::from_value(json!({
             "component":"CheckBox","id":"cb","checked":{"path":"/agree"}
         }))
         .unwrap();
-        let slider: Component = serde_json::from_value(json!({
+        let slider: Component = Component::from_value(json!({
             "component":"Slider","id":"sl","value":{"path":"/volume"},"min":0,"max":100
         }))
         .unwrap();
-        let root: Component = serde_json::from_value(json!({
+        let root: Component = Component::from_value(json!({
             "component":"Column","id":"root","children":["cb","sl"]
         }))
         .unwrap();
@@ -507,7 +501,7 @@ mod tests {
     #[tokio::test]
     async fn test_click_with_declared_action_emits_spec_envelope() {
         let mut renderer = GuiRenderer::new();
-        let btn: Component = serde_json::from_value(json!({
+        let btn: Component = Component::from_value(json!({
             "id":"btn","component":"Button","child":"lbl",
             "action":{"event":{"name":"submit"}}
         }))
@@ -569,7 +563,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
             })
             .await
             .unwrap();
@@ -606,7 +600,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
             })
             .await
             .unwrap();
@@ -654,7 +648,7 @@ mod tests {
 
         // 未注册的组件类型 → "unknown component type"
         let unknown: Component =
-            serde_json::from_str(r#"{"id":"u1","component":"UnknownType"}"#).unwrap();
+            Component::from_json(r#"{"id":"u1","component":"UnknownType"}"#).unwrap();
         let w = mapper.map_to_gui_widget(&unknown, &empty_reg, None);
         assert!(
             matches!(w, RenderableGuiWidget::Placeholder { ref reason, .. } if reason.contains("unknown"))
@@ -666,7 +660,7 @@ mod tests {
             .register(a2ui_renderer::CustomComponentDef::new("MyChart"))
             .unwrap();
         let custom: Component =
-            serde_json::from_str(r#"{"id":"c1","component":"MyChart"}"#).unwrap();
+            Component::from_json(r#"{"id":"c1","component":"MyChart"}"#).unwrap();
         let w = mapper.map_to_gui_widget(&custom, &custom_reg, None);
         assert!(
             matches!(w, RenderableGuiWidget::Placeholder { ref reason, .. } if reason.contains("custom"))
@@ -689,7 +683,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"result": "pending"})),
+                data_model: Some(json!({"result": "pending"})),
             })
             .await
             .unwrap();
@@ -702,7 +696,7 @@ mod tests {
             .action_response(ActionResponse {
                 action_id: "action-1".into(),
                 response: a2ui_core::message::server_to_client::ActionResponsePayload::Success(
-                    serde_json::json!("done"),
+                    json!("done"),
                 ),
             })
             .await

@@ -4,10 +4,10 @@
 //! 数据在 CreateSurface 时一并发送，模板在 Surface 创建阶段展开。
 
 use a2ui_core::message::server_to_client::CreateSurface;
+use a2ui_core::prelude::json;
 use a2ui_core::prelude::*;
 use a2ui_core::ServerEnvelope;
 use a2ui_renderer_egui::{A2uiApp, GuiRenderer};
-use serde_json::json;
 
 const HEADER_HEIGHT: f32 = 124.0;
 
@@ -103,63 +103,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        let card_name: Component = serde_json::from_value(json!({
+        let card_name: Component = Component::from_value(json!({
             "component": "Text",
             "id": "card_name",
             "text": {"path": "name"},
             "style": {"fontSize": 22, "strong": true}
         }))
         .unwrap();
-        let card_rating: Component = serde_json::from_value(json!({
+        let card_rating: Component = Component::from_value(json!({
             "component": "Text",
             "id": "card_rating",
             "text": {"path": "rating"},
             "style": {"fontSize": 15, "color": "#b8860b"}
         }))
         .unwrap();
-        let card_detail: Component = serde_json::from_value(json!({
+        let card_detail: Component = Component::from_value(json!({
             "component": "Text",
             "id": "card_detail",
             "text": {"path": "detail"},
             "style": {"fontSize": 16}
         }))
         .unwrap();
-        let card_address_icon: Component = serde_json::from_value(json!({
+        let card_address_icon: Component = Component::from_value(json!({
             "component": "Icon",
             "id": "card_address_icon",
             "name": "📍",
             "style": {"fontSize": 16, "color": "#828282"}
         }))
         .unwrap();
-        let card_address: Component = serde_json::from_value(json!({
+        let card_address: Component = Component::from_value(json!({
             "component": "Text",
             "id": "card_address",
             "text": {"path": "address"},
             "style": {"fontSize": 14, "color": "#6e6e6e"}
         }))
         .unwrap();
-        let card_address_row: Component = serde_json::from_value(json!({
+        let card_address_row: Component = Component::from_value(json!({
             "component": "Row",
             "id": "card_address_row",
             "children": ["card_address_icon", "card_address"],
             "style": {"spacing": {"x": 6, "y": 0}}
         }))
         .unwrap();
-        let card_link_icon: Component = serde_json::from_value(json!({
+        let card_link_icon: Component = Component::from_value(json!({
             "component": "Icon",
             "id": "card_link_icon",
             "name": "↗",
             "style": {"fontSize": 16, "color": "#1976d2"}
         }))
         .unwrap();
-        let card_link: Component = serde_json::from_value(json!({
+        let card_link: Component = Component::from_value(json!({
             "component": "Text",
             "id": "card_link",
             "text": {"path": "infoLink"},
             "style": {"fontSize": 14, "color": "#1976d2"}
         }))
         .unwrap();
-        let card_link_row: Component = serde_json::from_value(json!({
+        let card_link_row: Component = Component::from_value(json!({
             "component": "Row",
             "id": "card_link_row",
             "children": ["card_link_icon", "card_link"],
@@ -167,7 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .unwrap();
 
-        let card_image: Component = serde_json::from_value(json!({
+        let card_image: Component = Component::from_value(json!({
             "component": "Image",
             "id": "card_image",
             "url": {"path": "imageUrl"},
@@ -189,7 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ],
         );
 
-        let card_template: Component = serde_json::from_value(json!({
+        let card_template: Component = Component::from_value(json!({
             "component": "Card",
             "id": "card_template",
             "child": "card_body",

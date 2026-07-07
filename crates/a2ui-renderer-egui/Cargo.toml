@@ -18,7 +18,6 @@ a2ui-renderer = { path = "../a2ui-renderer" }
 egui = "0.27"
 eframe = "0.27"
 async-trait = { workspace = true }
-serde_json = { workspace = true }
 tokio.workspace = true
 pollster = "0.3"
 tracing.workspace = true

@@ -58,7 +58,6 @@ dependencies = [
  "egui",
  "image 0.25.10",
  "pollster",
- "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

@@ -4,10 +4,10 @@
 //! 运行：`cargo run --example contact_card -p a2ui-renderer-egui`
 
 use a2ui_core::message::server_to_client::{CreateSurface, UpdateDataModel};
+use a2ui_core::prelude::json;
 use a2ui_core::prelude::*;
 use a2ui_core::ServerEnvelope;
 use a2ui_renderer_egui::{A2uiApp, GuiRenderer};
-use serde_json::json;
 
 fn setup_chinese_fonts(cc: &eframe::CreationContext) {
     let font_paths = [
@@ -45,12 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut renderer = GuiRenderer::new();
     renderer.register_function("formatString", a2ui_renderer::CallableFrom::ClientOrRemote);
 
-    let catalog: a2ui_core::Catalog = serde_json::from_value(json!({
-        "catalogId": "basic",
-        "instructions": "Basic catalog",
-        "components": {},
-        "functions": {}
-    }))?;
+    let catalog = a2ui_core::Catalog::new("basic").with_instructions("Basic catalog");
     renderer.register_catalog(catalog).ok();
 
     let (msg_tx, msg_rx) = A2uiApp::create_channel();
@@ -60,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── 构建联系人卡片组件 ──
 
     // 头像 Image（先放占位，updateDataModel 时填充真实 URL）
-    let avatar: Component = serde_json::from_value(json!({
+    let avatar: Component = Component::from_value(json!({
         "component": "Image",
         "id": "avatar",
         "url": { "path": "/imageUrl" }
@@ -68,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     // 姓名
-    let name_text: Component = serde_json::from_value(json!({
+    let name_text: Component = Component::from_value(json!({
         "component": "Text",
         "id": "name",
         "text": { "path": "/name" }
@@ -76,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     // 职位
-    let title_text: Component = serde_json::from_value(json!({
+    let title_text: Component = Component::from_value(json!({
         "component": "Text",
         "id": "title",
         "text": { "path": "/title" }
@@ -84,7 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     // 团队
-    let team_text: Component = serde_json::from_value(json!({
+    let team_text: Component = Component::from_value(json!({
         "component": "Text",
         "id": "team",
         "text": { "path": "/team" }
@@ -92,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     // 地点
-    let location_text: Component = serde_json::from_value(json!({
+    let location_text: Component = Component::from_value(json!({
         "component": "Text",
         "id": "location",
         "text": { "path": "/location" }
@@ -101,10 +96,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 分隔线
     let div1: Component =
-        serde_json::from_value(json!({"component": "Divider", "id": "div1"})).unwrap();
+        Component::from_value(json!({"component": "Divider", "id": "div1"})).unwrap();
 
     // 联系方式标签
-    let contact_label: Component = serde_json::from_value(json!({
+    let contact_label: Component = Component::from_value(json!({
         "component": "Text",
         "id": "contact_label",
         "text": "📧 联系方式"
@@ -112,7 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     // 邮箱
-    let email_text: Component = serde_json::from_value(json!({
+    let email_text: Component = Component::from_value(json!({
         "component": "Text",
         "id": "email",
         "text": { "path": "/email" }
@@ -120,7 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     // 手机
-    let mobile_text: Component = serde_json::from_value(json!({
+    let mobile_text: Component = Component::from_value(json!({
         "component": "Text",
         "id": "mobile",
         "text": { "path": "/mobile" }
@@ -128,10 +123,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     let div2: Component =
-        serde_json::from_value(json!({"component": "Divider", "id": "div2"})).unwrap();
+        Component::from_value(json!({"component": "Divider", "id": "div2"})).unwrap();
 
     // 日历状态
-    let calendar_text: Component = serde_json::from_value(json!({
+    let calendar_text: Component = Component::from_value(json!({
         "component": "Text",
         "id": "calendar",
         "text": { "path": "/calendar" }
@@ -139,7 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     // 根容器：Card 包裹的 Column
-    let inner_column: Component = serde_json::from_value(json!({
+    let inner_column: Component = Component::from_value(json!({
         "component": "Column",
         "id": "inner_col",
         "children": [
@@ -150,7 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }))
     .unwrap();
 
-    let root: Component = serde_json::from_value(json!({
+    let root: Component = Component::from_value(json!({
         "component": "Card",
         "id": "root",
         "child": "inner_col"

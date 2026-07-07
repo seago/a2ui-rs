@@ -1,13 +1,13 @@
 use a2ui_core::message::server_to_client::{CreateSurface, DeleteSurface, UpdateComponents};
+use a2ui_core::prelude::json;
 use a2ui_core::prelude::*;
 use a2ui_renderer::{Renderer, UserEvent};
 use a2ui_renderer_egui::GuiRenderer;
-use serde_json::json;
 
 #[tokio::test]
 async fn test_gui_full_flow() {
     let mut renderer = GuiRenderer::new();
-    let comp: Component = serde_json::from_value(json!({
+    let comp: Component = Component::from_value(json!({
         "id": "root",
         "component": "Text",
         "text": {"path": "/greeting"}

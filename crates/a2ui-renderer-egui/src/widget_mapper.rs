@@ -1,6 +1,7 @@
+use a2ui_core::component::{prop_keys, ChildrenDecl};
 use a2ui_core::prelude::*;
 use a2ui_renderer::{
-    resolve_dynamic_string_prop_with_missing_path, resolve_dynamic_string_value_with_missing_path,
+    resolve_bool, resolve_f64, resolve_str_with_missing_path, value_to_display_string,
     ComponentStyle, CustomComponentRegistry, StyleColor, StyleSpacing,
 };
 use std::collections::HashMap;
@@ -122,8 +123,8 @@ impl WidgetMapper {
         data_model: Option<&a2ui_renderer::DataBinding>,
     ) -> String {
         resolve_dynamic_prop(
-            component.properties(),
-            "text",
+            component,
+            prop_keys::TEXT,
             data_model,
             &format!("[{}]", component.component_type()),
         )
@@ -156,19 +157,16 @@ impl WidgetMapper {
                 RenderableGuiWidget::Text {
                     id: component.id().clone(),
                     text,
-                    style: ComponentStyle::from_component_props(props),
+                    style: ComponentStyle::from_component(component),
                 }
             }
             "Button" => {
                 let label = self.extract_text(component, data_model);
-                let child_id = props
-                    .get("child")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| ComponentId::new(s).ok())
+                let child_id = component
+                    .prop_component_id(prop_keys::CHILD)
                     .unwrap_or_else(|| ComponentId::new("__missing__").unwrap());
-                let variant = props
-                    .get("variant")
-                    .and_then(|v| v.as_str())
+                let variant = component
+                    .prop_str(prop_keys::VARIANT)
                     .unwrap_or("default")
                     .to_string();
                 RenderableGuiWidget::Button {
@@ -179,53 +177,51 @@ impl WidgetMapper {
                 }
             }
             "Column" => {
-                let children_ids = extract_children_ids(props);
+                let children_ids = extract_children_ids(component);
                 RenderableGuiWidget::Column {
                     id: component.id().clone(),
                     children_ids,
-                    style: ComponentStyle::from_component_props(props),
+                    style: ComponentStyle::from_component(component),
                 }
             }
             "Row" => {
-                let children_ids = extract_children_ids(props);
+                let children_ids = extract_children_ids(component);
                 RenderableGuiWidget::Row {
                     id: component.id().clone(),
                     children_ids,
-                    style: ComponentStyle::from_component_props(props),
+                    style: ComponentStyle::from_component(component),
                 }
             }
             "Image" => {
                 let url = props
-                    .get("url")
+                    .get(prop_keys::URL)
                     .and_then(|v| resolve_dynamic_attr(v, data_model))
                     .unwrap_or_else(|| "{path:url}".to_string());
-                let width = extract_length_prop(props, "width", WidgetLength::Shrink);
-                let height = extract_length_prop(props, "height", WidgetLength::Shrink);
+                let width = extract_length_prop(props, prop_keys::WIDTH, WidgetLength::Shrink);
+                let height = extract_length_prop(props, prop_keys::HEIGHT, WidgetLength::Shrink);
                 RenderableGuiWidget::Image {
                     id: component.id().clone(),
                     url,
                     width,
                     height,
-                    style: ComponentStyle::from_component_props(props),
+                    style: ComponentStyle::from_component(component),
                 }
             }
             "Card" => {
-                let child_id = props
-                    .get("child")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| ComponentId::new(s).ok())
+                let child_id = component
+                    .prop_component_id(prop_keys::CHILD)
                     .unwrap_or_else(|| ComponentId::new("__missing__").unwrap());
                 RenderableGuiWidget::Card {
                     id: component.id().clone(),
                     child_id,
-                    style: ComponentStyle::from_component_props(props),
+                    style: ComponentStyle::from_component(component),
                 }
             }
             "CheckBox" => {
-                let checked = resolve_dynamic_bool(props, "value", data_model)
-                    .or_else(|| resolve_dynamic_bool(props, "checked", data_model))
+                let checked = resolve_dynamic_bool(component, prop_keys::VALUE, data_model)
+                    .or_else(|| resolve_dynamic_bool(component, prop_keys::CHECKED, data_model))
                     .unwrap_or(false);
-                let label = resolve_dynamic_prop(props, "label", data_model, "");
+                let label = resolve_dynamic_prop(component, prop_keys::LABEL, data_model, "");
                 RenderableGuiWidget::CheckBox {
                     id: component.id().clone(),
                     checked,
@@ -236,32 +232,27 @@ impl WidgetMapper {
                 id: component.id().clone(),
             },
             "Icon" => {
-                let name = resolve_dynamic_prop(props, "name", data_model, "\u{2753}");
+                let name = resolve_dynamic_prop(component, prop_keys::NAME, data_model, "\u{2753}");
                 RenderableGuiWidget::Icon {
                     id: component.id().clone(),
                     name,
-                    style: ComponentStyle::from_component_props(props),
+                    style: ComponentStyle::from_component(component),
                 }
             }
             "List" => {
-                let children_ids = extract_children_ids(props);
+                let children_ids = extract_children_ids(component);
                 RenderableGuiWidget::List {
                     id: component.id().clone(),
                     children_ids,
-                    style: ComponentStyle::from_component_props(props),
+                    style: ComponentStyle::from_component(component),
                 }
             }
             "Tabs" => {
-                let tabs_data = props
-                    .get("tabs")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|tab| {
-                                let title = tab.get("title")?.as_str()?.to_string();
-                                let child = tab.get("child")?.as_str()?.to_string();
-                                Some((title, child))
-                            })
+                let tabs_data = component
+                    .tabs_decl()
+                    .map(|tabs| {
+                        tabs.into_iter()
+                            .map(|tab| (tab.title, tab.child.as_str().to_string()))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -271,15 +262,11 @@ impl WidgetMapper {
                 }
             }
             "Modal" => {
-                let content_id = props
-                    .get("content")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| ComponentId::new(s).ok())
+                let content_id = component
+                    .prop_component_id(prop_keys::CONTENT)
                     .unwrap_or_else(|| ComponentId::new("__missing__").unwrap());
-                let trigger_id = props
-                    .get("trigger")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| ComponentId::new(s).ok())
+                let trigger_id = component
+                    .prop_component_id(prop_keys::TRIGGER)
                     .unwrap_or_else(|| ComponentId::new("__missing__").unwrap());
                 RenderableGuiWidget::Modal {
                     id: component.id().clone(),
@@ -288,9 +275,12 @@ impl WidgetMapper {
                 }
             }
             "Slider" => {
-                let value = resolve_dynamic_number(props, "value", data_model).unwrap_or(0.0);
-                let min = resolve_dynamic_number(props, "min", data_model).unwrap_or(0.0);
-                let max = resolve_dynamic_number(props, "max", data_model).unwrap_or(100.0);
+                let value =
+                    resolve_dynamic_number(component, prop_keys::VALUE, data_model).unwrap_or(0.0);
+                let min =
+                    resolve_dynamic_number(component, prop_keys::MIN, data_model).unwrap_or(0.0);
+                let max =
+                    resolve_dynamic_number(component, prop_keys::MAX, data_model).unwrap_or(100.0);
                 RenderableGuiWidget::Slider {
                     id: component.id().clone(),
                     value,
@@ -299,12 +289,15 @@ impl WidgetMapper {
                 }
             }
             "TextField" => {
-                let value = resolve_dynamic_prop(props, "value", data_model, "");
-                let placeholder =
-                    resolve_dynamic_prop(props, "placeholder", data_model, "Enter text...");
-                let variant = props
-                    .get("variant")
-                    .and_then(|v| v.as_str())
+                let value = resolve_dynamic_prop(component, prop_keys::VALUE, data_model, "");
+                let placeholder = resolve_dynamic_prop(
+                    component,
+                    prop_keys::PLACEHOLDER,
+                    data_model,
+                    "Enter text...",
+                );
+                let variant = component
+                    .prop_str(prop_keys::VARIANT)
                     .unwrap_or("shortText")
                     .to_string();
                 RenderableGuiWidget::TextField {
@@ -315,23 +308,13 @@ impl WidgetMapper {
                 }
             }
             "ChoicePicker" => {
-                let options = props
-                    .get("options")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|o| o.as_str().map(String::from))
-                            .collect()
-                    })
+                let options = component
+                    .prop_str_list(prop_keys::OPTIONS)
+                    .map(|list| list.into_iter().map(String::from).collect())
                     .unwrap_or_default();
-                let selected = props
-                    .get("value")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|s| s.as_str().map(String::from))
-                            .collect()
-                    })
+                let selected = component
+                    .prop_str_list(prop_keys::VALUE)
+                    .map(|list| list.into_iter().map(String::from).collect())
                     .unwrap_or_default();
                 RenderableGuiWidget::ChoicePicker {
                     id: component.id().clone(),
@@ -340,21 +323,26 @@ impl WidgetMapper {
                 }
             }
             "DateTimeInput" => {
-                let label = resolve_dynamic_prop(props, "label", data_model, "Select date/time");
+                let label = resolve_dynamic_prop(
+                    component,
+                    prop_keys::LABEL,
+                    data_model,
+                    "Select date/time",
+                );
                 RenderableGuiWidget::DateTimeInput {
                     id: component.id().clone(),
                     label,
                 }
             }
             "Video" => {
-                let url = resolve_dynamic_prop(props, "url", data_model, "");
+                let url = resolve_dynamic_prop(component, prop_keys::URL, data_model, "");
                 RenderableGuiWidget::Video {
                     id: component.id().clone(),
                     url,
                 }
             }
             "AudioPlayer" => {
-                let url = resolve_dynamic_prop(props, "url", data_model, "");
+                let url = resolve_dynamic_prop(component, prop_keys::URL, data_model, "");
                 RenderableGuiWidget::AudioPlayer {
                     id: component.id().clone(),
                     url,
@@ -845,98 +833,81 @@ impl WidgetMapper {
 }
 
 /// 从组件属性中提取 children 的 ComponentId 列表
-fn extract_children_ids(props: &serde_json::Value) -> Vec<ComponentId> {
-    props
-        .get("children")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|id_val| id_val.as_str())
-                .filter_map(|id_str| ComponentId::new(id_str).ok())
-                .collect()
-        })
-        .unwrap_or_default()
+fn extract_children_ids(component: &Component) -> Vec<ComponentId> {
+    match component.children_decl() {
+        Some(ChildrenDecl::Ids(ids)) => ids,
+        // 模板形态在核心层展开为数组；其余形态无直接子引用（对齐旧行为）
+        _ => Vec::new(),
+    }
 }
 
 fn resolve_dynamic_prop(
-    props: &serde_json::Value,
+    component: &Component,
     key: &str,
     data_model: Option<&a2ui_renderer::DataBinding>,
     fallback: &str,
 ) -> String {
-    resolve_dynamic_string_prop_with_missing_path(props, key, data_model, fallback, |path| {
-        format!("{{{}…}}", path)
-    })
+    match component.prop_dynamic_value(key) {
+        Some(dv) => resolve_str_with_missing_path(&dv, data_model, |path| format!("{{{}…}}", path)),
+        None => fallback.to_string(),
+    }
 }
 
 fn resolve_dynamic_bool(
-    props: &serde_json::Value,
+    component: &Component,
     key: &str,
     data_model: Option<&a2ui_renderer::DataBinding>,
 ) -> Option<bool> {
-    let value = props.get(key)?;
-    if let Some(value) = value.as_bool() {
-        return Some(value);
-    }
-    let path = value
-        .as_object()
-        .and_then(|obj| obj.get("path"))
-        .and_then(|v| v.as_str())?;
-    data_model
-        .and_then(|binding| binding.get(path))
-        .and_then(|value| value.as_bool())
+    component
+        .prop_dynamic_bool(key)
+        .and_then(|dv| resolve_bool(&dv, data_model))
 }
 
 fn resolve_dynamic_number(
-    props: &serde_json::Value,
+    component: &Component,
     key: &str,
     data_model: Option<&a2ui_renderer::DataBinding>,
 ) -> Option<f64> {
-    let value = props.get(key)?;
-    if let Some(value) = value.as_f64() {
-        return Some(value);
-    }
-    let path = value
-        .as_object()
-        .and_then(|obj| obj.get("path"))
-        .and_then(|v| v.as_str())?;
-    data_model
-        .and_then(|binding| binding.get(path))
-        .and_then(|value| value.as_f64())
+    component
+        .prop_dynamic_f64(key)
+        .and_then(|dv| resolve_f64(&dv, data_model))
 }
 
 /// 解析动态属性值（字面量字符串或 { "path": "..." } 绑定）
+///
+/// 与通用字符串解析不同：非字符串字面量与 `{"call":...}` 包装返回
+/// `None`（调用方自备默认值），此语义仅 Image url 使用，原样保留。
 fn resolve_dynamic_attr(
-    v: &serde_json::Value,
+    v: &a2ui_core::Value,
     data_model: Option<&a2ui_renderer::DataBinding>,
 ) -> Option<String> {
     match v {
-        serde_json::Value::String(_) => Some(resolve_dynamic_string_value_with_missing_path(
-            v,
-            data_model,
-            |path| format!("{{{}…}}", path),
-        )),
-        serde_json::Value::Object(obj) if obj.contains_key("path") => Some(
-            resolve_dynamic_string_value_with_missing_path(v, data_model, |path| {
-                format!("{{{}…}}", path)
-            }),
-        ),
+        a2ui_core::Value::String(s) => Some(s.clone()),
+        a2ui_core::Value::Object(obj) if obj.contains_key("path") => {
+            match obj.get("path").and_then(|p| p.as_str()) {
+                Some(path) => match data_model.and_then(|binding| binding.get(path)) {
+                    Some(resolved) => Some(value_to_display_string(resolved)),
+                    None => Some(format!("{{{}…}}", path)),
+                },
+                // path 非字符串：对齐旧实现兜底为整个对象的显示文本
+                None => match obj.get("call").and_then(|c| c.as_str()) {
+                    Some(call) => Some(format!("{{call:{}}}", call)),
+                    None => Some(value_to_display_string(v)),
+                },
+            }
+        }
         _ => None,
     }
 }
 
-fn extract_length_prop(
-    props: &serde_json::Value,
-    key: &str,
-    default: WidgetLength,
-) -> WidgetLength {
+fn extract_length_prop(props: &a2ui_core::Value, key: &str, default: WidgetLength) -> WidgetLength {
     match props.get(key) {
-        Some(serde_json::Value::Number(n)) => n
+        Some(a2ui_core::Value::Number(n)) => n
             .as_f64()
             .map(|value| WidgetLength::Fixed(value as f32))
             .unwrap_or(default),
-        Some(serde_json::Value::String(s)) if s == "fill" => WidgetLength::Fill,
-        Some(serde_json::Value::String(s)) if s == "shrink" => WidgetLength::Shrink,
+        Some(a2ui_core::Value::String(s)) if s == "fill" => WidgetLength::Fill,
+        Some(a2ui_core::Value::String(s)) if s == "shrink" => WidgetLength::Shrink,
         _ => default,
     }
 }
@@ -984,7 +955,7 @@ fn cover_uv(image_size: egui::Vec2, target_size: egui::Vec2) -> egui::Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use a2ui_core::prelude::json;
 
     /// 构造 chain 层 Card 链（card0 → card1 → ... → leaf），渲染后返回
     /// response_tracker 是否含链尾叶子 "leaf"（Card 不进 tracker，Text 叶子会）
@@ -1091,7 +1062,7 @@ mod tests {
         CustomComponentRegistry::new()
     }
 
-    fn style_contract_props(component: &str) -> serde_json::Value {
+    fn style_contract_props(component: &str) -> a2ui_core::Value {
         json!({
             "id": "styled",
             "component": component,
@@ -1141,7 +1112,7 @@ mod tests {
 
         for component_type in ["Text", "Icon", "Row", "Column", "List", "Card", "Image"] {
             let comp: Component =
-                serde_json::from_value(style_contract_props(component_type)).unwrap();
+                Component::from_value(style_contract_props(component_type)).unwrap();
             let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
             let actual = match widget {
                 RenderableGuiWidget::Text { style, .. }
@@ -1185,7 +1156,7 @@ mod tests {
             }
         })));
 
-        let text: Component = serde_json::from_value(json!({
+        let text: Component = Component::from_value(json!({
             "id": "title",
             "component": "Text",
             "text": {"path": "/title"}
@@ -1193,7 +1164,7 @@ mod tests {
         .unwrap();
         assert_eq!(mapper.extract_text(&text, Some(&binding)), "Welcome");
 
-        let checkbox: Component = serde_json::from_value(json!({
+        let checkbox: Component = Component::from_value(json!({
             "id": "remember",
             "component": "CheckBox",
             "label": {"path": "/remember"},
@@ -1205,7 +1176,7 @@ mod tests {
             matches!(widget, RenderableGuiWidget::CheckBox { checked: true, ref label, .. } if label == "记住密码")
         );
 
-        let text_field: Component = serde_json::from_value(json!({
+        let text_field: Component = Component::from_value(json!({
             "id": "username",
             "component": "TextField",
             "value": {"path": "/form/value"},
@@ -1222,7 +1193,7 @@ mod tests {
             } if value == "Alice" && placeholder == "请输入用户名"
         ));
 
-        let slider: Component = serde_json::from_value(json!({
+        let slider: Component = Component::from_value(json!({
             "id": "volume",
             "component": "Slider",
             "value": {"path": "/form/volume"},
@@ -1241,7 +1212,7 @@ mod tests {
             }
         ));
 
-        let missing: Component = serde_json::from_value(json!({
+        let missing: Component = Component::from_value(json!({
             "id": "missing",
             "component": "Text",
             "text": {"path": "/missing"}
@@ -1257,7 +1228,7 @@ mod tests {
             json!({"image": "https://example.com/a.png"}),
         ));
 
-        let image: Component = serde_json::from_value(json!({
+        let image: Component = Component::from_value(json!({
             "id": "image",
             "component": "Image",
             "url": {"path": "/image"}
@@ -1268,7 +1239,7 @@ mod tests {
             matches!(widget, RenderableGuiWidget::Image { ref url, .. } if url == "https://example.com/a.png")
         );
 
-        let unsupported: Component = serde_json::from_value(json!({
+        let unsupported: Component = Component::from_value(json!({
             "id": "image",
             "component": "Image",
             "url": {"call": "imageUrl"}
@@ -1318,7 +1289,7 @@ mod tests {
     #[test]
     fn test_map_text_style_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_value(json!({
+        let comp: Component = Component::from_value(json!({
             "id": "title",
             "component": "Text",
             "text": "Styled",
@@ -1347,7 +1318,7 @@ mod tests {
     #[test]
     fn test_map_button_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"btn1","component":"Button","child":"label1","text":"Click Me"}"#,
         )
         .unwrap();
@@ -1359,7 +1330,7 @@ mod tests {
     fn test_map_column_to_gui_widget() {
         let mapper = WidgetMapper;
         let comp: Component =
-            serde_json::from_str(r#"{"id":"col1","component":"Column","children":["c1","c2"]}"#)
+            Component::from_json(r#"{"id":"col1","component":"Column","children":["c1","c2"]}"#)
                 .unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
@@ -1371,7 +1342,7 @@ mod tests {
     fn test_map_row_to_gui_widget() {
         let mapper = WidgetMapper;
         let comp: Component =
-            serde_json::from_str(r#"{"id":"row1","component":"Row","children":["c1"]}"#).unwrap();
+            Component::from_json(r#"{"id":"row1","component":"Row","children":["c1"]}"#).unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Row { .. }));
     }
@@ -1379,7 +1350,7 @@ mod tests {
     #[test]
     fn test_map_row_style_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_value(json!({
+        let comp: Component = Component::from_value(json!({
             "id": "row1",
             "component": "Row",
             "children": ["c1"],
@@ -1402,7 +1373,7 @@ mod tests {
     #[test]
     fn test_map_image_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"img1","component":"Image","url":"https://example.com/img.png"}"#,
         )
         .unwrap();
@@ -1415,7 +1386,7 @@ mod tests {
     #[test]
     fn test_map_image_style_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_value(json!({
+        let comp: Component = Component::from_value(json!({
             "id": "img1",
             "component": "Image",
             "url": "https://example.com/img.png",
@@ -1439,7 +1410,7 @@ mod tests {
     fn test_map_card_to_gui_widget() {
         let mapper = WidgetMapper;
         let comp: Component =
-            serde_json::from_str(r#"{"id":"card1","component":"Card","child":"inner1"}"#).unwrap();
+            Component::from_json(r#"{"id":"card1","component":"Card","child":"inner1"}"#).unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Card { .. }));
     }
@@ -1447,7 +1418,7 @@ mod tests {
     #[test]
     fn test_map_card_style_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_value(json!({
+        let comp: Component = Component::from_value(json!({
             "id": "card1",
             "component": "Card",
             "child": "inner1",
@@ -1477,7 +1448,7 @@ mod tests {
     #[test]
     fn test_map_checkbox_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"cb1","component":"CheckBox","checked":true,"label":"Accept"}"#,
         )
         .unwrap();
@@ -1491,7 +1462,7 @@ mod tests {
     fn test_map_divider_to_gui_widget() {
         let mapper = WidgetMapper;
         let comp: Component =
-            serde_json::from_str(r#"{"id":"div1","component":"Divider"}"#).unwrap();
+            Component::from_json(r#"{"id":"div1","component":"Divider"}"#).unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Divider { .. }));
     }
@@ -1500,7 +1471,7 @@ mod tests {
     fn test_map_icon_to_gui_widget() {
         let mapper = WidgetMapper;
         let comp: Component =
-            serde_json::from_str(r#"{"id":"icon1","component":"Icon","name":"star"}"#).unwrap();
+            Component::from_json(r#"{"id":"icon1","component":"Icon","name":"star"}"#).unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(matches!(widget, RenderableGuiWidget::Icon { ref name, .. } if name == "star"));
     }
@@ -1508,7 +1479,7 @@ mod tests {
     #[test]
     fn test_map_list_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"list1","component":"List","children":["item1","item2","item3"]}"#,
         )
         .unwrap();
@@ -1521,7 +1492,7 @@ mod tests {
     #[test]
     fn test_map_tabs_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"tabs1","component":"Tabs","tabs":[{"title":"Tab A","child":"a"},{"title":"Tab B","child":"b"}]}"#
         ).unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
@@ -1533,7 +1504,7 @@ mod tests {
     #[test]
     fn test_map_modal_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"modal1","component":"Modal","content":"content1","trigger":"btn1"}"#,
         )
         .unwrap();
@@ -1544,7 +1515,7 @@ mod tests {
     #[test]
     fn test_map_slider_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"sl1","component":"Slider","value":50,"min":0,"max":100}"#,
         )
         .unwrap();
@@ -1563,7 +1534,7 @@ mod tests {
     #[test]
     fn test_map_textfield_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"tf1","component":"TextField","value":"Hello","placeholder":"Enter text"}"#,
         )
         .unwrap();
@@ -1576,7 +1547,7 @@ mod tests {
     #[test]
     fn test_map_choicepicker_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"cp1","component":"ChoicePicker","options":["A","B","C"],"value":["A"]}"#,
         )
         .unwrap();
@@ -1590,7 +1561,7 @@ mod tests {
     fn test_map_datetimeinput_to_gui_widget() {
         let mapper = WidgetMapper;
         let comp: Component =
-            serde_json::from_str(r#"{"id":"dt1","component":"DateTimeInput","label":"Pick date"}"#)
+            Component::from_json(r#"{"id":"dt1","component":"DateTimeInput","label":"Pick date"}"#)
                 .unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
@@ -1601,7 +1572,7 @@ mod tests {
     #[test]
     fn test_map_video_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"vid1","component":"Video","url":"https://example.com/video.mp4"}"#,
         )
         .unwrap();
@@ -1614,7 +1585,7 @@ mod tests {
     #[test]
     fn test_map_audioplayer_to_gui_widget() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_str(
+        let comp: Component = Component::from_json(
             r#"{"id":"aud1","component":"AudioPlayer","url":"https://example.com/audio.mp3"}"#,
         )
         .unwrap();
@@ -1628,7 +1599,7 @@ mod tests {
     fn test_map_unknown_component_to_placeholder() {
         let mapper = WidgetMapper;
         let comp: Component =
-            serde_json::from_str(r#"{"id":"unk1","component":"UnknownType"}"#).unwrap();
+            Component::from_json(r#"{"id":"unk1","component":"UnknownType"}"#).unwrap();
         let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
         assert!(
             matches!(widget, RenderableGuiWidget::Placeholder { ref reason, .. } if reason.contains("unknown"))
@@ -1638,7 +1609,7 @@ mod tests {
     #[test]
     fn test_all_18_types_map_without_panic() {
         let mapper = WidgetMapper;
-        let test_cases: Vec<(&str, serde_json::Value)> = vec![
+        let test_cases: Vec<(&str, a2ui_core::Value)> = vec![
             ("Text", json!({"id":"t","component":"Text","text":"Hello"})),
             (
                 "Button",
@@ -1702,7 +1673,7 @@ mod tests {
         ];
 
         for (type_name, json_val) in &test_cases {
-            let comp: Component = serde_json::from_value(json_val.clone()).unwrap_or_else(|_| {
+            let comp: Component = Component::from_value(json_val.clone()).unwrap_or_else(|_| {
                 panic!("Failed to deserialize component of type {}", type_name)
             });
             let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);

@@ -7,10 +7,10 @@
 
 use a2ui_core::message::server_to_client::{CreateSurface, UpdateDataModel};
 use a2ui_core::message::{V1_0ClientMessage, V1_0ServerMessage};
+use a2ui_core::prelude::json;
 use a2ui_core::prelude::*;
 use a2ui_core::{ClientEnvelope, ServerEnvelope};
 use a2ui_renderer_egui::{A2uiApp, GuiRenderer};
-use serde_json::json;
 use std::time::Duration;
 
 /// 加载系统中文字体，使 egui 能正确渲染中文
@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ============================================================
 
     // --- 根容器：Column ---
-    let root: Component = serde_json::from_value(json!({
+    let root: Component = Component::from_value(json!({
         "id": "root",
         "component": "Column",
         "children": { "children": [
@@ -100,20 +100,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }))?;
 
     // --- 标题 ---
-    let title: Component = serde_json::from_value(json!({
+    let title: Component = Component::from_value(json!({
         "id": "title",
         "component": "Text",
         "text": "🔐  用户登录"
     }))?;
 
     // --- 用户名行 ---
-    let username_label: Component = serde_json::from_value(json!({
+    let username_label: Component = Component::from_value(json!({
         "id": "username_label",
         "component": "Text",
         "text": "用户名"
     }))?;
 
-    let username_field: Component = serde_json::from_value(json!({
+    let username_field: Component = Component::from_value(json!({
         "id": "username_field",
         "component": "TextField",
         "value": { "path": "/credentials/username" },
@@ -122,13 +122,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }))?;
 
     // --- 密码行 ---
-    let password_label: Component = serde_json::from_value(json!({
+    let password_label: Component = Component::from_value(json!({
         "id": "password_label",
         "component": "Text",
         "text": "密码"
     }))?;
 
-    let password_field: Component = serde_json::from_value(json!({
+    let password_field: Component = Component::from_value(json!({
         "id": "password_field",
         "component": "TextField",
         "value": { "path": "/credentials/password" },
@@ -137,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }))?;
 
     // --- 记住密码 ---
-    let remember_cb: Component = serde_json::from_value(json!({
+    let remember_cb: Component = Component::from_value(json!({
         "id": "remember_cb",
         "component": "CheckBox",
         "checked": false,
@@ -149,7 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ComponentId::new("btn_label").unwrap(),
         DynamicValue::Literal("登  录".to_string()),
     );
-    let login_btn: Component = serde_json::from_value(json!({
+    let login_btn: Component = Component::from_value(json!({
         "id": "login_btn",
         "component": "Button",
         "child": "btn_label",
@@ -158,25 +158,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }))?;
 
     // --- 状态文本（绑定到 /login_status 路径） ---
-    let status_text: Component = serde_json::from_value(json!({
+    let status_text: Component = Component::from_value(json!({
         "id": "status_text",
         "component": "Text",
         "text": { "path": "/login_status" }
     }))?;
 
     // --- 分割线 ---
-    let div1: Component = serde_json::from_value(json!({
+    let div1: Component = Component::from_value(json!({
         "id": "div1", "component": "Divider"
     }))?;
-    let div2: Component = serde_json::from_value(json!({
+    let div2: Component = Component::from_value(json!({
         "id": "div2", "component": "Divider"
     }))?;
-    let div3: Component = serde_json::from_value(json!({
+    let div3: Component = Component::from_value(json!({
         "id": "div3", "component": "Divider"
     }))?;
 
     // --- 页脚 ---
-    let footer: Component = serde_json::from_value(json!({
+    let footer: Component = Component::from_value(json!({
         "id": "footer",
         "component": "Text",
         "text": "A2UI Protocol v1.0 · 演示用途 · 不发送真实数据"

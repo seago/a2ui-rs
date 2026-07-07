@@ -3,10 +3,10 @@
 //! 创建一个带 Text 组件的 Surface 并在桌面窗口中渲染
 
 use a2ui_core::message::server_to_client::CreateSurface;
+use a2ui_core::prelude::json;
 use a2ui_core::prelude::*;
 use a2ui_core::ServerEnvelope;
 use a2ui_renderer_egui::{A2uiApp, GuiRenderer};
-use serde_json::json;
 
 /// 加载系统中文字体，使 egui 能正确渲染中文
 fn setup_chinese_fonts(cc: &eframe::CreationContext) {

@@ -165,8 +165,8 @@ impl eframe::App for A2uiApp {
 mod tests {
     use super::*;
     use a2ui_core::message::server_to_client::CreateSurface;
+    use a2ui_core::prelude::json;
     use a2ui_core::prelude::*;
-    use serde_json::json;
 
     #[test]
     fn test_a2ui_app_new() {
