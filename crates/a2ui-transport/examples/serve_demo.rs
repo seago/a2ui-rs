@@ -8,11 +8,15 @@
 //! 行为：
 //! 1. 在 `127.0.0.1:8765` 监听 WebSocket 连接（log 输出实际地址）。
 //! 2. 每接入一个连接，推送一条内嵌完整组件树 + dataModel 的 `createSurface`
-//!    消息（Basic Catalog，含 Text/TextField/Button/Card 四类组件，构成一个
-//!    简单表单：标题 Text + 绑定 `/form/name` 的 TextField + primary Button
-//!    发送名为 `"submit"` 的 action，外层 Card/Column 布局）。
-//! 3. 循环接收 `ClientEnvelope` 并打印收到的 action（证明回传通路）。
-//! 4. 若收到的 action 带 `wantResponse`，回一个简单的 `actionResponse`。
+//!    消息（Basic Catalog，构成一个简单表单：标题 Text + 绑定 `/form/name`
+//!    的 TextField + primary Button，按钮以规范嵌套形状声明
+//!    `action.event`（name="submit"、wantResponse、responsePath="/result"），
+//!    外层 Card/Column 布局）。
+//! 3. 循环接收 `ClientEnvelope`：只有声明了 server action 的组件交互才会
+//!    产生 action 消息（输入类被动变更不上线路，最新数据随 action 的信封
+//!    metadata 到达）。
+//! 4. 若收到的 action 带 `wantResponse`，回 `actionResponse`；客户端按本地
+//!    登记的 responsePath 把响应值写回 `/result` 并刷新界面。
 
 use a2ui_core::component::component::Component;
 use a2ui_core::component::{ComponentId, DynamicValue};
@@ -67,7 +71,7 @@ async fn handle_connection(
         match envelope {
             ClientEnvelope::V1_0 {
                 message: V1_0ClientMessage::Action(action),
-                ..
+                metadata,
             } => {
                 tracing::info!(
                     "received action name='{}' surface='{}' source={:?} context={:?} wantResponse={}",
@@ -79,15 +83,32 @@ async fn handle_connection(
                 );
                 println!("[action] {} -> {:?}", action.name, action.context);
 
-                // 若客户端期望响应，回一个简单的 actionResponse。
+                // sendDataModel 开启时，最新数据模型经信封级 metadata 到达
+                // （被动输入不单独上线路，随下一次 action 一并携带）。
+                let submitted_name = metadata
+                    .as_ref()
+                    .and_then(|m| m.data_model.as_ref())
+                    .and_then(|dm| dm.pointer("/form/name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if let Some(m) = &metadata {
+                    println!(
+                        "[metadata] surface='{}' name='{}'",
+                        m.surface_id, submitted_name
+                    );
+                }
+
+                // 若客户端期望响应，回 actionResponse；客户端本地按登记的
+                // responsePath（/result）写回展示，服务端无需知晓该路径。
                 if action.want_response {
                     if let Some(action_id) = action.action_id.clone() {
                         let resp = ActionResponse {
                             action_id,
-                            response: ActionResponsePayload::Success(json!({
-                                "ok": true,
-                                "echo": action.name,
-                            })),
+                            response: ActionResponsePayload::Success(json!(format!(
+                                "✅ 服务端已收到提交：{}",
+                                submitted_name
+                            ))),
                         };
                         conn.push(ServerEnvelope::V1_0(V1_0ServerMessage::ActionResponse(
                             resp,
@@ -127,8 +148,9 @@ async fn handle_connection(
 ///   └─ Column(form_col)
 ///        ├─ Text(title_text)         "请输入你的名字"
 ///        ├─ TextField(name_field)    value 绑定 /form/name
-///        └─ Button(submit_btn)       variant=primary, action name="submit"
-///             └─ Text(submit_label)  "提交"
+///        ├─ Button(submit_btn)       variant=primary，声明 action.event
+///        │    └─ Text(submit_label)  "提交"        name="submit" wantResponse
+///        └─ Text(result_text)        text 绑定 /result（actionResponse 本地写回）
 /// ```
 fn build_create_surface() -> Result<CreateSurface, Box<dyn std::error::Error>> {
     let title = Component::text(
@@ -147,17 +169,22 @@ fn build_create_surface() -> Result<CreateSurface, Box<dyn std::error::Error>> {
         DynamicValue::literal("提交"),
     );
 
-    // Button 通过 serde 构造，以便附加 `action` 属性（发送名为 "submit" 的 action）。
-    // Basic Catalog 的 Button 含 child + variant；action 作为交互属性附加。
+    // Button 通过 serde 构造，以便附加声明式 server action（规范嵌套
+    // `action.event.*` 形状）：点击发送名为 "submit" 的 action，
+    // wantResponse 使客户端自动生成 actionId 并登记 pending；
+    // responsePath 是客户端本地语义（不上线路），actionResponse 到达后
+    // 由客户端写回本地数据模型 /result。
     let submit_btn: Component = serde_json::from_value(json!({
         "component": "Button",
         "id": "submit_btn",
         "child": "submit_label",
         "variant": "primary",
         "action": {
-            "name": "submit",
-            "wantResponse": true,
-            "actionId": "submit-1"
+            "event": {
+                "name": "submit",
+                "wantResponse": true,
+                "responsePath": "/result"
+            }
         }
     }))?;
 
@@ -167,7 +194,14 @@ fn build_create_surface() -> Result<CreateSurface, Box<dyn std::error::Error>> {
             ComponentId::new("title_text")?,
             ComponentId::new("name_field")?,
             ComponentId::new("submit_btn")?,
+            ComponentId::new("result_text")?,
         ],
+    );
+
+    // actionResponse 写回 /result 后由此组件展示（客户端本地闭环）
+    let result_text = Component::text(
+        ComponentId::new("result_text")?,
+        DynamicValue::path("/result"),
     );
 
     let root_card = Component::card(
@@ -187,9 +221,11 @@ fn build_create_surface() -> Result<CreateSurface, Box<dyn std::error::Error>> {
             name_field,
             submit_btn,
             submit_label,
+            result_text,
         ]),
         data_model: Some(json!({
-            "form": { "name": "" }
+            "form": { "name": "" },
+            "result": ""
         })),
     })
 }

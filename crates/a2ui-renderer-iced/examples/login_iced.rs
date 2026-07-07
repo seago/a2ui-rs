@@ -100,9 +100,11 @@ fn main() -> iced::Result {
         ComponentId::new("btn_label").unwrap(),
         DynamicValue::Literal("登  录".to_string()),
     );
+    // 声明式 server action：点击发送 "login_submit"
     let login_btn: Component = serde_json::from_value(json!({
         "id": "login_btn", "component": "Button",
-        "child": "btn_label", "variant": "primary"
+        "child": "btn_label", "variant": "primary",
+        "action": { "event": { "name": "login_submit" } }
     }))
     .unwrap();
 
@@ -173,7 +175,7 @@ fn main() -> iced::Result {
             };
             tracing::info!("收到 action: {:?}", action);
 
-            if action.name == "click" {
+            if action.name == "login_submit" {
                 msg_tx_clone2
                     .send(ServerEnvelope::V1_0(V1_0ServerMessage::UpdateDataModel(
                         UpdateDataModel {

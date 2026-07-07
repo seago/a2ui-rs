@@ -127,12 +127,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ]}
     }))?;
 
-    // 操作按钮行
+    // 操作按钮行（声明式 server action：点击才发送对应语义名的 action 消息）
     let submit_btn: Component = serde_json::from_value(json!({
         "id": "submit_btn",
         "component": "Button",
         "child": "submit_label",
-        "variant": "primary"
+        "variant": "primary",
+        "action": { "event": { "name": "form_submit" } }
     }))?;
     let submit_label: Component = Component::text(
         ComponentId::new("submit_label").unwrap(),
@@ -142,7 +143,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "id": "cancel_btn",
         "component": "Button",
         "child": "cancel_label",
-        "variant": "default"
+        "variant": "default",
+        "action": { "event": { "name": "form_cancel" } }
     }))?;
     let cancel_label: Component = Component::text(
         ComponentId::new("cancel_label").unwrap(),

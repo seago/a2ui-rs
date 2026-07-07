@@ -93,11 +93,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ComponentId::new("btn_label").unwrap(),
         DynamicValue::Literal("点击我".to_string()),
     );
+    // 声明式 server action：激活（Enter/空格）时发送 "demo_submit"
     let btn: Component = serde_json::from_value(json!({
         "id": "btn",
         "component": "Button",
         "child": "btn_label",
-        "variant": "primary"
+        "variant": "primary",
+        "action": { "event": { "name": "demo_submit" } }
     }))?;
     let item1: Component = serde_json::from_value(json!({
         "id": "item1",
@@ -107,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let item2: Component = serde_json::from_value(json!({
         "id": "item2",
         "component": "Text",
-        "text": "  ⌨   键盘事件 → action 消息"
+        "text": "  ⌨   声明式 action → action 消息"
     }))?;
     let item3: Component = serde_json::from_value(json!({
         "id": "item3",

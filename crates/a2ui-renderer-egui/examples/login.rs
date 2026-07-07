@@ -144,7 +144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "label": "记住密码"
     }))?;
 
-    // --- 登录按钮 ---
+    // --- 登录按钮（声明式 server action：点击发送 "login_submit"） ---
     let btn_label: Component = Component::text(
         ComponentId::new("btn_label").unwrap(),
         DynamicValue::Literal("登  录".to_string()),
@@ -153,7 +153,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "id": "login_btn",
         "component": "Button",
         "child": "btn_label",
-        "variant": "primary"
+        "variant": "primary",
+        "action": { "event": { "name": "login_submit" } }
     }))?;
 
     // --- 状态文本（绑定到 /login_status 路径） ---
@@ -241,7 +242,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             tracing::info!("收到 action: {:?}", action);
 
-            if action.name == "click" {
+            if action.name == "login_submit" {
                 // 步骤 1：显示"正在登录..."
                 msg_tx_clone2
                     .send(ServerEnvelope::V1_0(V1_0ServerMessage::UpdateDataModel(
