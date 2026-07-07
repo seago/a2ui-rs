@@ -15,9 +15,20 @@ pub struct TabItem {
 /// 组件标识符，遵循 Unicode UAX #31 命名规则
 /// 正则: ^[\p{XID_Start}_][\p{XID_Continue}]*$
 /// @ 命名空间保留给系统
+///
+/// 反序列化经 `try_from = "String"` 走 [`ComponentId::new`] 的完整校验，
+/// 保证协议输入与手动构造两条路径的约束一致（newtype 序列化天然透明）。
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(try_from = "String")]
 pub struct ComponentId(String);
+
+impl TryFrom<String> for ComponentId {
+    type Error = crate::error::A2uiError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::new(s)
+    }
+}
 
 impl ComponentId {
     /// 创建新的 ComponentId，校验命名规则
@@ -759,6 +770,34 @@ mod tests {
     fn test_component_id_display() {
         let id = ComponentId::new("root").unwrap();
         assert_eq!(format!("{}", id), "root");
+    }
+
+    #[test]
+    fn test_component_id_deserialize_valid() {
+        let id: ComponentId = serde_json::from_str(r#""my_button""#).unwrap();
+        assert_eq!(id.as_str(), "my_button");
+    }
+
+    #[test]
+    fn test_component_id_deserialize_rejects_invalid() {
+        // 反序列化必须走与 ComponentId::new 相同的校验，不能被 serde 旁路
+        assert!(serde_json::from_str::<ComponentId>(r#""@system""#).is_err());
+        assert!(serde_json::from_str::<ComponentId>(r#""123 bad id""#).is_err());
+        assert!(serde_json::from_str::<ComponentId>(r#""""#).is_err());
+        assert!(serde_json::from_str::<ComponentId>(r#""has space""#).is_err());
+    }
+
+    #[test]
+    fn test_component_deserialize_rejects_invalid_id() {
+        // 协议消息入口：Component 携带非法 id 时整体反序列化失败
+        let json = r#"{"id":"@system","component":"Text","text":"hi"}"#;
+        assert!(serde_json::from_str::<Component>(json).is_err());
+    }
+
+    #[test]
+    fn test_component_id_serialize_stays_transparent() {
+        let id = ComponentId::new("root").unwrap();
+        assert_eq!(serde_json::to_string(&id).unwrap(), r#""root""#);
     }
 
     #[test]
