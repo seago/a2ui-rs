@@ -86,17 +86,19 @@ fn is_xid_continue(c: char) -> bool {
 // ---- DynamicValue ----
 
 /// 动态值类型：支持字面量、路径绑定、函数调用三种形式
+///
+/// untagged 枚举按声明顺序尝试匹配：结构化的 Path/FunctionCall 必须排在
+/// Literal 之前——当 `T = Value`（默认）时 `Literal(Value)` 能贪婪匹配任意
+/// JSON，若其在前则 `{"path": ...}` / `{"call": ...}` 永远解析不出绑定形式。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum DynamicValue<T = Value> {
-    /// 字面量值
-    Literal(T),
     /// 绑定到 Data Model 的路径
-    #[serde(rename = "path")]
     Path { path: String },
     /// 调用注册函数
-    #[serde(rename = "call")]
     FunctionCall { call: String, args: Value },
+    /// 字面量值
+    Literal(T),
 }
 
 impl DynamicValue<String> {
@@ -792,6 +794,51 @@ mod tests {
             args: json!({"template": "Hello {name}"}),
         };
         assert_eq!(dv.as_function_call(), Some("formatString"));
+    }
+
+    #[test]
+    fn test_dynamic_value_default_deserialize_path() {
+        // T = Value（默认类型参数）时，{"path": ...} 必须解析为 Path 而非 Literal
+        let dv: DynamicValue = serde_json::from_str(r#"{"path":"/user/name"}"#).unwrap();
+        assert_eq!(
+            dv,
+            DynamicValue::Path {
+                path: "/user/name".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_dynamic_value_default_deserialize_function_call() {
+        let dv: DynamicValue =
+            serde_json::from_str(r#"{"call":"formatString","args":{"t":"hi"}}"#).unwrap();
+        assert_eq!(
+            dv,
+            DynamicValue::FunctionCall {
+                call: "formatString".into(),
+                args: json!({"t": "hi"}),
+            }
+        );
+    }
+
+    #[test]
+    fn test_dynamic_value_default_deserialize_literal() {
+        // 普通对象（不含 path/call 结构）仍应解析为 Literal
+        let dv: DynamicValue = serde_json::from_str(r#"{"name":"Alice","age":30}"#).unwrap();
+        assert_eq!(dv, DynamicValue::Literal(json!({"name":"Alice","age":30})));
+        let dv: DynamicValue = serde_json::from_str(r#""plain string""#).unwrap();
+        assert_eq!(dv, DynamicValue::Literal(json!("plain string")));
+        let dv: DynamicValue = serde_json::from_str("42").unwrap();
+        assert_eq!(dv, DynamicValue::Literal(json!(42)));
+    }
+
+    #[test]
+    fn test_dynamic_value_string_deserialize_roundtrip() {
+        // T = String 的既有行为不受变体顺序调整影响
+        let dv: DynamicValue<String> = serde_json::from_str(r#"{"path":"/a"}"#).unwrap();
+        assert_eq!(dv.as_path(), Some("/a"));
+        let dv: DynamicValue<String> = serde_json::from_str(r#""hello""#).unwrap();
+        assert_eq!(dv.as_str(), Some("hello"));
     }
 
     #[test]
