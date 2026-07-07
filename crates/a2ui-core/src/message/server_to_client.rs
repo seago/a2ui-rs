@@ -9,14 +9,17 @@ pub struct ResponseError {
     pub message: String,
 }
 
-/// untagged 枚举按声明顺序尝试匹配：`Error` 必须在前——
-/// `ResponseError` 带 `deny_unknown_fields`，只精确匹配 `{code, message}`；
-/// 若 `Success(Value)` 在前则会贪婪匹配任意 JSON，`Error` 永远不可达。
+/// actionResponse 的 payload：规范要求 `value`（成功）与 `error`（失败）
+/// 恰有其一。外部标签表示法（`{"value": ...}` / `{"error": {...}}`）天然
+/// 满足互斥——多键或未知键的 map 无法匹配任何变体。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
 pub enum ActionResponsePayload {
-    Error(ResponseError),
+    /// 成功：`{"value": <any>}`
+    #[serde(rename = "value")]
     Success(Value),
+    /// 失败：`{"error": {"code": ..., "message": ...}}`
+    #[serde(rename = "error")]
+    Error(ResponseError),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,23 +71,27 @@ pub struct DeleteSurface {
     pub surface_id: String,
 }
 
-/// ActionResponse — 注意：由于使用 `#[serde(flatten)]`，无法使用 `deny_unknown_fields`。
-/// 改为通过 `validate()` 方法手动检查未知字段。
+/// actionResponse 消息。规范 wire 格式（actionId 在信封层、与
+/// actionResponse 键平级）：
+///
+/// ```json
+/// {"version":"v1.0","actionId":"a1","actionResponse":{"value":"done"}}
+/// ```
+///
+/// 本结构直接序列化为这两个平级键，经 `V1_0ServerMessage` 的
+/// untagged 变体并入信封。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionResponse {
     pub action_id: String,
-    #[serde(flatten)]
+    #[serde(rename = "actionResponse")]
     pub response: ActionResponsePayload,
 }
 
 impl ActionResponse {
-    /// 校验 ActionResponse 不包含未知字段
-    /// 由于 serde(flatten) 与 deny_unknown_fields 不兼容，
-    /// 通过此方法在反序列化后手动校验安全性。
+    /// 校验 ActionResponse 的基本结构有效性
     pub fn validate(&self) -> crate::error::Result<()> {
-        // response 通过 untagged enum 限制只能是 Success 或 Error 两种形式
-        // 额外字段在 untagged 模式下会被忽略，此处确认基本结构有效
         if self.action_id.is_empty() {
             return Err(crate::error::A2uiError::ValidationError {
                 message: "actionId must not be empty".to_string(),
@@ -114,9 +121,13 @@ pub enum V1_0ServerMessage {
     UpdateComponents(UpdateComponents),
     UpdateDataModel(UpdateDataModel),
     DeleteSurface(DeleteSurface),
-    ActionResponse(ActionResponse),
     CallFunction(CallFunction),
     Capabilities(crate::message::capabilities::Capabilities),
+    /// untagged（serde 要求置于枚举末尾）：actionResponse 消息在 wire 上
+    /// 是两个平级键（actionId + actionResponse），由 ActionResponse 自身的
+    /// Serialize/Deserialize 承载，不走单键外部标签
+    #[serde(untagged)]
+    ActionResponse(ActionResponse),
 }
 
 #[cfg(test)]
@@ -213,7 +224,7 @@ mod tests {
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["actionId"], "act1");
-        assert_eq!(json["value"], "done");
+        assert_eq!(json["actionResponse"]["value"]["value"], "done");
     }
 
     #[test]
@@ -227,7 +238,7 @@ mod tests {
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["actionId"], "act1");
-        assert_eq!(json["code"], "INVALID_INPUT");
+        assert_eq!(json["actionResponse"]["error"]["code"], "INVALID_INPUT");
     }
 
     #[test]
@@ -274,11 +285,16 @@ mod tests {
 
     #[test]
     fn test_deserialize_action_response() {
-        let json = r#"{"version":"v1.0","actionResponse":{"actionId":"a1","value":"ok"}}"#;
+        // 规范 wire：actionId 在信封层（与 actionResponse 平级），payload 用 value 包装
+        let json = r#"{"version":"v1.0","actionId":"a1","actionResponse":{"value":"ok"}}"#;
         let envelope: ServerEnvelope = serde_json::from_str(json).unwrap();
         match envelope {
             ServerEnvelope::V1_0(V1_0ServerMessage::ActionResponse(msg)) => {
                 assert_eq!(msg.action_id, "a1");
+                match msg.response {
+                    ActionResponsePayload::Success(v) => assert_eq!(v, json!("ok")),
+                    ActionResponsePayload::Error(_) => panic!("expected Success"),
+                }
             }
             _ => panic!("wrong variant"),
         }
@@ -286,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_action_response_error_variant() {
-        let json = r#"{"version":"v1.0","actionResponse":{"actionId":"a1","code":"INVALID_INPUT","message":"bad data"}}"#;
+        let json = r#"{"version":"v1.0","actionId":"a1","actionResponse":{"error":{"code":"INVALID_INPUT","message":"bad data"}}}"#;
         let envelope: ServerEnvelope = serde_json::from_str(json).unwrap();
         match envelope {
             ServerEnvelope::V1_0(V1_0ServerMessage::ActionResponse(msg)) => {
@@ -306,21 +322,42 @@ mod tests {
     }
 
     #[test]
-    fn test_deserialize_action_response_success_variant() {
+    fn test_serialize_action_response_spec_wire() {
+        let envelope = ServerEnvelope::V1_0(V1_0ServerMessage::ActionResponse(ActionResponse {
+            action_id: "a-123".into(),
+            response: ActionResponsePayload::Success(json!({"total": 3})),
+        }));
+        let value = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(value["version"], "v1.0");
+        assert_eq!(value["actionId"], "a-123", "actionId 必须在信封层");
+        assert_eq!(value["actionResponse"]["value"]["total"], 3);
+        // payload 内不得再出现 actionId
+        assert!(value["actionResponse"].get("actionId").is_none());
+    }
+
+    #[test]
+    fn test_action_response_scalar_success_serializes() {
+        // 旧实现 flatten 标量 Value 会在序列化时报错；规范的 value 包装无此限制
+        let envelope = ServerEnvelope::V1_0(V1_0ServerMessage::ActionResponse(ActionResponse {
+            action_id: "a1".into(),
+            response: ActionResponsePayload::Success(json!("done")),
+        }));
+        let value = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(value["actionResponse"]["value"], "done");
+    }
+
+    #[test]
+    fn test_action_response_rejects_old_payload_level_action_id() {
+        // 旧（与规范冲突的）wire 格式必须被拒绝
         let json = r#"{"version":"v1.0","actionResponse":{"actionId":"a1","value":"ok"}}"#;
-        let envelope: ServerEnvelope = serde_json::from_str(json).unwrap();
-        match envelope {
-            ServerEnvelope::V1_0(V1_0ServerMessage::ActionResponse(msg)) => {
-                assert_eq!(msg.action_id, "a1");
-                match msg.response {
-                    ActionResponsePayload::Success(v) => assert_eq!(v["value"], "ok"),
-                    ActionResponsePayload::Error(_) => {
-                        panic!("success response must deserialize to Success variant")
-                    }
-                }
-            }
-            _ => panic!("wrong variant"),
-        }
+        assert!(serde_json::from_str::<ServerEnvelope>(json).is_err());
+    }
+
+    #[test]
+    fn test_action_response_rejects_both_value_and_error() {
+        // 规范：Exactly one of value or error must be present
+        let json = r#"{"version":"v1.0","actionId":"a1","actionResponse":{"value":1,"error":{"code":"E","message":"m"}}}"#;
+        assert!(serde_json::from_str::<ServerEnvelope>(json).is_err());
     }
 
     #[test]
