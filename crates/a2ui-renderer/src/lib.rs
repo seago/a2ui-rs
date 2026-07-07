@@ -15,6 +15,7 @@ pub mod function_dispatcher;
 pub mod input_writeback;
 pub mod path_resolver;
 pub mod renderer;
+pub mod renderer_core;
 pub mod style;
 pub mod surface_lru;
 
@@ -33,5 +34,6 @@ pub use function_dispatcher::{CallableFrom, FunctionDispatcher};
 pub use input_writeback::{write_back_input, write_back_user_event};
 pub use path_resolver::PathResolver;
 pub use renderer::{Renderer, SurfaceHandle, UserEvent};
+pub use renderer_core::{CoreEffects, RendererCore};
 pub use style::{ComponentStyle, StyleColor, StyleSpacing};
 pub use surface_lru::SurfaceLru;
