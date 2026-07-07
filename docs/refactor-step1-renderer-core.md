@@ -1,6 +1,6 @@
 # 架构返工 · 第 1 步：渲染器公共核心（RendererCore）设计
 
-状态：待评审
+状态：已实施（C0-C6 完成）
 日期：2026-07-07
 前置：[第 0 步 · 事件 wire 格式决策](refactor-step0-event-wire-format.md)（本设计的 `handle_user_event` 按其落地）
 关联：ARCHITECTURE.md「Surface 生命周期由状态机管理」约束（本设计使其真正生效）

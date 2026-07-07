@@ -63,7 +63,7 @@
                                                                     浏览器端独立 TS 实现
 ```
 
-- **Rust 系渲染器**（TUI / egui / iced / Web 静态派）共用 `a2ui-renderer` 核心逻辑与 `a2ui-transport` 传输。
+- **Rust 系渲染器**（TUI / egui / iced / Web 静态派）采用「**RendererCore + 平台 widget 映射**」结构：协议状态与消息处理流水线（含 Surface 生命周期状态机）收敛在 `a2ui-renderer` 的 `RendererCore`，各平台渲染器组合核心、只保留平台特有的 widget 映射与渲染缓存，共用 `a2ui-transport` 传输。
 - **Web 交互派（B2）** 是浏览器端独立的 TS/React 实现（`clients/web-react`），靠 `a2ui-core` ↔ 前端 `src/contracts` 的**同一份协议类型** + [一致性向量](#防漂移一致性向量) 与 Rust 侧对齐。
 - **静态派 vs 交互派**：`a2ui-renderer-web`（Rust）输出一次性 HTML 字符串，适合 SSR / 无-JS 场景；B2 支持完整交互、双向绑定与 action 回传。详见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
@@ -72,7 +72,7 @@
 | Crate | 职责 | 关键依赖 |
 |-------|------|----------|
 | [`a2ui-core`](crates/a2ui-core/) | 协议类型定义、消息枚举、JSON Schema 校验、Surface 状态机 | `serde`, `serde_json`, `thiserror` |
-| [`a2ui-renderer`](crates/a2ui-renderer/) | `Renderer` trait、组件森林、数据绑定、路径解析、函数调度、DependencyGraph、SurfaceLru、CustomComponentRegistry | `a2ui-core` |
+| [`a2ui-renderer`](crates/a2ui-renderer/) | `Renderer` trait、`RendererCore`（共享协议状态 + 消息流水线 + 生命周期状态机）、组件森林、数据绑定、路径解析、函数调度、DependencyGraph、SurfaceLru、CustomComponentRegistry | `a2ui-core` |
 | [`a2ui-renderer-tui`](crates/a2ui-renderer-tui/) | 终端渲染器 | `ratatui`, `crossterm`, `a2ui-renderer` |
 | [`a2ui-renderer-egui`](crates/a2ui-renderer-egui/) | 桌面渲染器（egui + eframe 即时模式 GUI） | `egui`, `eframe`, `a2ui-renderer` |
 | [`a2ui-renderer-iced`](crates/a2ui-renderer-iced/) | 桌面渲染器（iced 保留模式 GUI） | `iced`, `a2ui-renderer` |
@@ -196,7 +196,7 @@ npm run dev     # App 连 serve_demo 的 ws://127.0.0.1:8765
 | `deleteSurface` | Server → Client | 销毁 Surface 并清理资源 | ✅ |
 | `actionResponse` | Server → Client | 服务端响应客户端 action | ✅ |
 | `callFunction` | Server → Client | 服务端调用客户端注册函数 | ✅ |
-| `action` | Client → Server | 用户交互事件（可带完整 data model） | ✅ |
+| `action` | Client → Server | 声明式 server action（组件声明 `action.event` 才发送；`sendDataModel` 经信封 metadata 附带数据） | ✅ |
 | `functionResponse` | Client → Server | 客户端函数执行结果 | ✅ |
 | `error` | Client → Server | 客户端错误上报 | ✅ |
 
@@ -280,9 +280,9 @@ npm run dev     # App 连 serve_demo 的 ws://127.0.0.1:8765
 
 | 层 | 测试数 |
 |----|:------:|
-| Rust workspace（单元 + 集成 + E2E + 文档测试） | **570** |
+| Rust workspace（单元 + 集成 + E2E + 文档测试） | **668** |
 | 交互式 Web 渲染器 B2（Vitest / RTL） | **155** |
-| **合计** | **725** |
+| **合计** | **823** |
 
 ```bash
 cargo test --workspace                       # Rust
@@ -298,9 +298,9 @@ a2ui-rs/
 ├── Cargo.toml                      # Workspace 配置
 ├── crates/
 │   ├── a2ui-core/                  # 协议核心：message / component / datamodel / schema / state
-│   ├── a2ui-renderer/              # 渲染核心：renderer.rs / component_forest.rs / data_binding.rs
-│   │                               #   dependency_graph.rs / path_resolver.rs / function_dispatcher.rs
-│   │                               #   format_string.rs / surface_lru.rs / custom_component.rs …
+│   ├── a2ui-renderer/              # 渲染核心：renderer.rs / renderer_core.rs / component_forest.rs
+│   │                               #   data_binding.rs / dependency_graph.rs / path_resolver.rs
+│   │                               #   function_dispatcher.rs / format_string.rs / surface_lru.rs …
 │   ├── a2ui-renderer-tui/          # TUI（ratatui）+ examples/simple_tui.rs
 │   ├── a2ui-renderer-egui/         # egui 桌面 + examples/{simple_gui,login,contact_card,restaurant}.rs
 │   ├── a2ui-renderer-iced/         # iced 桌面 + examples/{simple_iced,login_iced,restaurant_iced}.rs
