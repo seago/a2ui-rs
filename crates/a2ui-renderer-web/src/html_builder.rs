@@ -82,6 +82,9 @@ pub enum RenderableHtmlWidget {
         id: ComponentId,
         options: Vec<ChoiceOption>,
         selected: Vec<String>,
+        /// 规范 variant（multipleSelection / mutuallyExclusive，默认单选），
+        /// 决定渲染为 checkbox 组还是 radio 组
+        variant: Option<String>,
     },
     /// 日期时间输入组件
     DateTimeInput { id: ComponentId, label: String },
@@ -243,28 +246,42 @@ impl HtmlBuilder {
                 )
             }
             RenderableHtmlWidget::ChoicePicker {
-                options, selected, ..
+                id,
+                options,
+                selected,
+                variant,
             } => {
-                let opts: String = options
+                // 规范 variant 映射 input type：多选 checkbox / 单选（默认）
+                // radio；宿主桥接层依据 data-a2ui-component-id 与 input 的
+                // name/value 把 DOM 变更转为 UserEvent::ChoiceSelect
+                let input_type = if variant.as_deref() == Some("multipleSelection") {
+                    "checkbox"
+                } else {
+                    "radio"
+                };
+                let items: String = options
                     .iter()
                     .map(|o| {
                         // 选中匹配按选项稳定值，value 属性用稳定值、文本用 label
-                        let sel = if selected.contains(&o.value) {
-                            " selected"
+                        let checked = if selected.contains(&o.value) {
+                            " checked"
                         } else {
                             ""
                         };
                         format!(
-                            "<option value=\"{}\"{}>{}</option>",
+                            "<label class=\"a2ui-choice\"><input type=\"{}\" name=\"{}\" value=\"{}\"{} /> {}</label>",
+                            input_type,
+                            html_attr(id.as_str()),
                             html_attr(&o.value),
-                            sel,
+                            checked,
                             html_escape(&o.label)
                         )
                     })
                     .collect();
                 format!(
-                    "<select class=\"a2ui-choicepicker\" multiple>{}</select>",
-                    opts
+                    "<fieldset class=\"a2ui-choicepicker\" data-a2ui-component-id=\"{}\">{}</fieldset>",
+                    html_attr(id.as_str()),
+                    items
                 )
             }
             RenderableHtmlWidget::DateTimeInput { label, .. } => {
@@ -942,16 +959,16 @@ mod tests {
             id: ComponentId::new("cp1").unwrap(),
             options: vec![option("A", "A"), option("B", "B"), option("C", "C")],
             selected: vec!["A".to_string()],
+            variant: None,
         });
-        assert!(html.contains("<select"));
-        assert!(html.contains("<option"));
-        assert!(html.contains("selected"));
+        assert!(html.contains("a2ui-choicepicker"));
+        assert!(html.contains("checked"));
     }
 
     #[test]
-    fn test_render_choicepicker_uses_option_value_attr_and_label_text() {
-        // 规范对象形态：value 进 option 的 value 属性、label 是展示文本，
-        // 选中匹配按稳定值
+    fn test_render_choicepicker_single_select_renders_radio_group() {
+        // 规范默认 mutuallyExclusive → radio 组；宿主经 data-a2ui-component-id
+        // 与 input 的 name/value 把 DOM 事件桥接为 ChoiceSelect
         let html = HtmlBuilder.render(&RenderableHtmlWidget::ChoicePicker {
             id: ComponentId::new("cp2").unwrap(),
             options: vec![
@@ -965,9 +982,38 @@ mod tests {
                 },
             ],
             selected: vec!["email".to_string()],
+            variant: None,
         });
-        assert!(html.contains("<option value=\"email\" selected>Email</option>"));
-        assert!(html.contains("<option value=\"sms\">SMS</option>"));
+        assert!(
+            html.contains("data-a2ui-component-id=\"cp2\""),
+            "got: {html}"
+        );
+        assert!(
+            html.contains("<input type=\"radio\" name=\"cp2\" value=\"email\" checked />"),
+            "got: {html}"
+        );
+        assert!(
+            html.contains("<input type=\"radio\" name=\"cp2\" value=\"sms\" />"),
+            "got: {html}"
+        );
+        assert!(html.contains("Email") && html.contains("SMS"));
+    }
+
+    #[test]
+    fn test_render_choicepicker_multiple_selection_renders_checkboxes() {
+        let html = HtmlBuilder.render(&RenderableHtmlWidget::ChoicePicker {
+            id: ComponentId::new("cp3").unwrap(),
+            options: vec![a2ui_renderer::ChoiceOption {
+                label: "Email".to_string(),
+                value: "email".to_string(),
+            }],
+            selected: vec![],
+            variant: Some("multipleSelection".to_string()),
+        });
+        assert!(
+            html.contains("<input type=\"checkbox\" name=\"cp3\" value=\"email\" />"),
+            "got: {html}"
+        );
     }
 
     #[test]

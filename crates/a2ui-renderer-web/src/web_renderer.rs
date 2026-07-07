@@ -343,6 +343,7 @@ impl WebRenderer {
                 id: component.id().clone(),
                 options: choice_options(component, Some(binding)),
                 selected: choice_selected(component, Some(binding)),
+                variant: component.prop_str(prop_keys::VARIANT).map(String::from),
             },
             "DateTimeInput" => {
                 let label = extract_string_value(component, prop_keys::LABEL, binding)
@@ -896,12 +897,49 @@ mod tests {
 
         let html = renderer.render_surface_html("s1").expect("html");
         assert!(
-            html.contains("<option value=\"email\" selected>Email</option>"),
+            html.contains("<input type=\"radio\" name=\"root\" value=\"email\" checked /> Email"),
             "选中项应按 value 匹配并展示 label，got: {html}"
         );
         assert!(
-            html.contains("<option value=\"sms\">SMS</option>"),
+            html.contains("<input type=\"radio\" name=\"root\" value=\"sms\" /> SMS"),
             "未选中项应展示 label，got: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_choice_select_writes_back_to_data_model() {
+        // ChoiceSelect 平台回归锁：无消息 + 写回字符串数组 + 渲染反映新选中
+        let mut renderer = WebRenderer::new();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![Component::from_value(json!({
+                    "id":"root","component":"ChoicePicker","variant":"multipleSelection",
+                    "options":[{"label":"Email","value":"email"},{"label":"SMS","value":"sms"}],
+                    "value":{"path":"/pref"}
+                }))
+                .unwrap()]),
+                data_model: Some(json!({"pref":["email"]})),
+            })
+            .await
+            .unwrap();
+
+        let envelope = renderer
+            .handle_user_event(UserEvent::ChoiceSelect {
+                component_id: ComponentId::new("root").unwrap(),
+                values: vec!["email".to_string(), "sms".to_string()],
+            })
+            .await
+            .unwrap();
+        assert!(envelope.is_none(), "ChoiceSelect 不应产生消息");
+
+        let html = renderer.render_surface_html("s1").expect("html");
+        assert!(
+            html.contains("<input type=\"checkbox\" name=\"root\" value=\"sms\" checked /> SMS"),
+            "写回后渲染应反映新选中集，got: {html}"
         );
     }
 
