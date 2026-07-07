@@ -351,8 +351,8 @@ mod tests {
             let server_handle = tokio::spawn(async move {
                 if let Ok((stream, _)) = listener.accept().await {
                     if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
-                        // 接收客户端发送的 capabilities 消息
-                        while let Some(Ok(msg)) = ws.next().await {
+                        // 接收客户端发送的 capabilities 消息（只需处理第一条）
+                        if let Some(Ok(msg)) = ws.next().await {
                             let _text = msg.into_text().unwrap();
                             // 回复服务端 capabilities
                             let response =
@@ -362,7 +362,6 @@ mod tests {
                                     response.into(),
                                 ))
                                 .await;
-                            break;
                         }
                     }
                 }

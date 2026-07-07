@@ -160,6 +160,7 @@ pub type JsonlTransportWriter<R> = JsonlTransport<R, tokio::io::Stdout>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use a2ui_core::message::client_to_server::ActionMessage;
     use tokio_test::io::Builder;
 
     #[test]
@@ -170,29 +171,52 @@ mod tests {
 
     #[test]
     fn test_jsonl_transport_new() {
-        let input = Builder::new().read(b"").build();
-        let output = Vec::new();
-        let _transport = JsonlTransport::new(input, output);
-        // 结构验证
-        assert!(true);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let input = Builder::new().read(b"").build();
+            let output = Vec::new();
+            let mut transport = JsonlTransport::new(input, output);
+            // 结构可用：空输入上 receive_line 直接返回 EOF（None）
+            assert_eq!(transport.receive_line().await.unwrap(), None);
+        });
     }
 
     #[test]
     fn test_jsonl_transport_send_receive_roundtrip() {
+        // 输入流预置一条服务端 capabilities 信封，验证 send/receive 双向真实工作
         let input =
-            b"{\"version\":\"v1.0\",\"action\":{\"name\":\"click\",\"surfaceId\":\"s1\"}}\n";
+            b"{\"version\":\"v1.0\",\"capabilities\":{\"version\":\"1.0\",\"features\":[\"basic\"]}}\n";
         let mut output = Vec::new();
 
-        let mut transport = JsonlTransport::new(input.as_slice(), &mut output);
-
-        // 创建 task 运行时
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
+            let mut transport = JsonlTransport::new(input.as_slice(), &mut output);
             transport.connect().await.unwrap();
+
+            // send：写出一条 Action 信封
+            let action = ActionMessage::event("click", "s1", "btn");
+            transport
+                .send(ClientEnvelope::v1_0(V1_0ClientMessage::Action(action)))
+                .await
+                .unwrap();
+
+            // receive：读回预置的 capabilities 信封
+            let envelope = transport.receive().await.unwrap();
+            match envelope {
+                ServerEnvelope::V1_0(V1_0ServerMessage::Capabilities(caps)) => {
+                    assert_eq!(caps.features, vec!["basic"]);
+                }
+                other => panic!("expected capabilities envelope, got: {other:?}"),
+            }
         });
 
-        // 验证结构
-        assert!(true);
+        // 断言 send 的序列化产物
+        let written = String::from_utf8(output).unwrap();
+        assert!(written.ends_with('\n'), "JSONL 每条消息以换行结尾");
+        assert!(written.contains("\"action\""));
+        assert!(written.contains("\"name\":\"click\""));
+        assert!(written.contains("\"surfaceId\":\"s1\""));
+        assert!(written.contains("\"sourceComponentId\":\"btn\""));
     }
 
     #[test]
