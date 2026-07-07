@@ -640,7 +640,10 @@ impl Renderer for WebRenderer {
         self.render_to_html()
     }
 
-    async fn handle_user_event(&mut self, event: UserEvent) -> RenderResult<Option<ActionMessage>> {
+    async fn handle_user_event(
+        &mut self,
+        event: UserEvent,
+    ) -> RenderResult<Option<a2ui_core::ClientEnvelope>> {
         // 先把输入值写回组件声明的绑定路径（在读取 dataModel 快照之前），
         // 使快照与后续渲染反映最新输入
         if let Some((surface_id, path)) =
@@ -672,7 +675,7 @@ impl Renderer for WebRenderer {
                         );
                     }
                 }
-                Ok(Some(action))
+                Ok(Some(action_envelope(action)))
             }
             UserEvent::KeyPress { key } => {
                 if key == "Enter" || key == " " {
@@ -690,7 +693,7 @@ impl Renderer for WebRenderer {
                                 );
                             }
                         }
-                        return Ok(Some(action));
+                        return Ok(Some(action_envelope(action)));
                     }
                 }
                 Ok(None)
@@ -713,7 +716,7 @@ impl Renderer for WebRenderer {
                         );
                     }
                 }
-                Ok(Some(action))
+                Ok(Some(action_envelope(action)))
             }
             UserEvent::CheckToggle {
                 component_id,
@@ -736,7 +739,7 @@ impl Renderer for WebRenderer {
                         );
                     }
                 }
-                Ok(Some(action))
+                Ok(Some(action_envelope(action)))
             }
             UserEvent::SliderChange {
                 component_id,
@@ -759,10 +762,18 @@ impl Renderer for WebRenderer {
                         );
                     }
                 }
-                Ok(Some(action))
+                Ok(Some(action_envelope(action)))
             }
         }
     }
+}
+
+/// 把裸 ActionMessage 包装为 v1.0 客户端信封（trait 签名要求完整信封；
+/// web 尚未迁移 RendererCore，仍发合成事件——C4 迁移）
+fn action_envelope(action: ActionMessage) -> a2ui_core::ClientEnvelope {
+    a2ui_core::ClientEnvelope::v1_0(
+        a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action),
+    )
 }
 
 /// 从组件 properties 中提取文本内容，支持 DynamicValue::Path 解析
@@ -936,7 +947,7 @@ mod tests {
             .await
             .unwrap();
 
-        let action = renderer
+        let envelope = renderer
             .handle_user_event(UserEvent::TextInput {
                 component_id: ComponentId::new("root").unwrap(),
                 value: "alice".into(),
@@ -944,6 +955,12 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        // web 尚未迁移 RendererCore，仍发合成事件（C4 迁移），此处解包信封
+        let a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action) =
+            envelope.message()
+        else {
+            panic!("envelope should carry an action message");
+        };
 
         // 绑定路径已更新
         assert_eq!(

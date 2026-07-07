@@ -4,6 +4,7 @@ use a2ui_core::message::server_to_client::{
     ActionResponse, CallFunction, CreateSurface, DeleteSurface, UpdateComponents, UpdateDataModel,
 };
 use a2ui_core::prelude::*;
+use a2ui_core::ClientEnvelope;
 use uuid::Uuid;
 
 /// Surface 句柄（全局唯一标识符）
@@ -76,8 +77,13 @@ pub trait Renderer: Send {
     /// 渲染当前帧（各平台自行实现）
     async fn render(&mut self) -> RenderResult<()>;
 
-    /// 处理用户交互，生成 action 消息
-    async fn handle_user_event(&mut self, event: UserEvent) -> RenderResult<Option<ActionMessage>>;
+    /// 处理用户交互，生成客户端信封。
+    ///
+    /// 返回完整 [`ClientEnvelope`]（而非裸 ActionMessage）：sendDataModel
+    /// 的数据模型按规范经信封级 metadata 附带，裸消息无法承载。
+    /// 无消息可发（输入类被动变更、无声明 action 的交互）返回 `Ok(None)`。
+    async fn handle_user_event(&mut self, event: UserEvent)
+        -> RenderResult<Option<ClientEnvelope>>;
 }
 
 #[cfg(test)]

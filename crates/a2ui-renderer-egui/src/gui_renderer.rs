@@ -167,14 +167,14 @@ impl GuiRenderer {
         Some((tex_id, size))
     }
 
-    /// 使用 egui 渲染一帧，返回用户交互生成的 action 消息
+    /// 使用 egui 渲染一帧，返回用户交互生成的客户端信封
     /// 支持增量渲染：只重渲染 dirty_surfaces 中的 surface
     pub fn render_frame(
         &mut self,
         ctx: &egui::Context,
-    ) -> RenderResult<Vec<a2ui_core::message::client_to_server::ActionMessage>> {
+    ) -> RenderResult<Vec<a2ui_core::ClientEnvelope>> {
         let mapper = WidgetMapper;
-        let mut all_actions = Vec::new();
+        let mut all_actions: Vec<a2ui_core::ClientEnvelope> = Vec::new();
 
         // 确定要渲染的 surface 列表
         let surfaces_to_render: Vec<_> = if self.dirty_surfaces.is_empty() {
@@ -252,10 +252,10 @@ impl GuiRenderer {
                     });
                 });
 
-                // 处理收集到的用户事件，生成 action 消息
+                // 处理收集到的用户事件，生成客户端信封
                 for event in user_events {
-                    if let Ok(Some(action)) = pollster::block_on(self.handle_user_event(event)) {
-                        all_actions.push(action);
+                    if let Ok(Some(envelope)) = pollster::block_on(self.handle_user_event(event)) {
+                        all_actions.push(envelope);
                     }
                 }
             }
@@ -500,7 +500,10 @@ impl Renderer for GuiRenderer {
         Ok(())
     }
 
-    async fn handle_user_event(&mut self, event: UserEvent) -> RenderResult<Option<ActionMessage>> {
+    async fn handle_user_event(
+        &mut self,
+        event: UserEvent,
+    ) -> RenderResult<Option<a2ui_core::ClientEnvelope>> {
         // 先把输入值写回组件声明的绑定路径（在读取 dataModel 快照之前），
         // 使快照与后续渲染反映最新输入
         if let Some((surface_id, path)) =
@@ -532,7 +535,7 @@ impl Renderer for GuiRenderer {
                         );
                     }
                 }
-                Ok(Some(action))
+                Ok(Some(action_envelope(action)))
             }
             UserEvent::KeyPress { key } => {
                 if key == "Enter" || key == " " {
@@ -550,7 +553,7 @@ impl Renderer for GuiRenderer {
                                 );
                             }
                         }
-                        return Ok(Some(action));
+                        return Ok(Some(action_envelope(action)));
                     }
                 }
                 Ok(None)
@@ -573,7 +576,7 @@ impl Renderer for GuiRenderer {
                         );
                     }
                 }
-                Ok(Some(action))
+                Ok(Some(action_envelope(action)))
             }
             UserEvent::CheckToggle {
                 component_id,
@@ -596,7 +599,7 @@ impl Renderer for GuiRenderer {
                         );
                     }
                 }
-                Ok(Some(action))
+                Ok(Some(action_envelope(action)))
             }
             UserEvent::SliderChange {
                 component_id,
@@ -619,10 +622,18 @@ impl Renderer for GuiRenderer {
                         );
                     }
                 }
-                Ok(Some(action))
+                Ok(Some(action_envelope(action)))
             }
         }
     }
+}
+
+/// 把裸 ActionMessage 包装为 v1.0 客户端信封（trait 签名要求完整信封；
+/// egui 尚未迁移 RendererCore，仍发合成事件——C3 迁移）
+fn action_envelope(action: ActionMessage) -> a2ui_core::ClientEnvelope {
+    a2ui_core::ClientEnvelope::v1_0(
+        a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action),
+    )
 }
 
 /// 从组件的 properties 中递归提取所有 JSON Pointer 路径
@@ -711,7 +722,7 @@ mod tests {
             .await
             .unwrap();
 
-        let action = renderer
+        let envelope = renderer
             .handle_user_event(UserEvent::TextInput {
                 component_id: ComponentId::new("root").unwrap(),
                 value: "alice".into(),
@@ -719,6 +730,12 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        // egui 尚未迁移 RendererCore，仍发合成事件（C3 迁移），此处解包信封
+        let a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action) =
+            envelope.message()
+        else {
+            panic!("envelope should carry an action message");
+        };
 
         assert_eq!(
             renderer

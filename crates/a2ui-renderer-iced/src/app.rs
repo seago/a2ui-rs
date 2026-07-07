@@ -169,9 +169,7 @@ pub fn update(app: &mut IcedApp, message: Message) -> iced::Task<Message> {
             };
 
             match pollster::block_on(app.renderer.handle_user_event(event)) {
-                Ok(Some(msg)) => {
-                    let envelope =
-                        ClientEnvelope::v1_0(a2ui_core::message::V1_0ClientMessage::Action(msg));
+                Ok(Some(envelope)) => {
                     let _ = app.action_tx.send(envelope);
                 }
                 Ok(None) => {}

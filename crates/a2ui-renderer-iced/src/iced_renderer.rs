@@ -424,7 +424,7 @@ impl Renderer for IcedRenderer {
     async fn handle_user_event(
         &mut self,
         event: UserEvent,
-    ) -> RenderResult<Option<a2ui_core::message::client_to_server::ActionMessage>> {
+    ) -> RenderResult<Option<a2ui_core::ClientEnvelope>> {
         // 先把输入值写回组件声明的绑定路径（在读取 data_model 快照之前）。
         // iced 有渲染缓存：写回后必须失效受影响组件，否则 UI 显示旧值
         if let Some((surface_id, path)) =
@@ -500,7 +500,11 @@ impl Renderer for IcedRenderer {
             component_id.as_str(),
         );
         action.context = ctx;
-        Ok(Some(action))
+        // iced 尚未迁移 RendererCore，仍发合成事件（C5 迁移）；
+        // trait 签名要求完整信封，此处包装
+        Ok(Some(a2ui_core::ClientEnvelope::v1_0(
+            a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action),
+        )))
     }
 }
 
@@ -556,7 +560,7 @@ mod tests {
         // 预热动态字符串缓存，验证写回后被正确失效
         let _ = renderer.cached_tree("s1");
 
-        let action = renderer
+        let envelope = renderer
             .handle_user_event(UserEvent::TextInput {
                 component_id: ComponentId::new("root").unwrap(),
                 value: "alice".into(),
@@ -564,6 +568,12 @@ mod tests {
             .await
             .unwrap()
             .expect("TextInput 事件应产生 ActionMessage 而非被丢弃");
+        // iced 尚未迁移 RendererCore，仍发合成事件（C5 迁移），此处解包信封
+        let a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action) =
+            envelope.message()
+        else {
+            panic!("envelope should carry an action message");
+        };
 
         // 事件名沿用 app.rs 现有约定
         assert_eq!(action.name, "text_input");
@@ -613,7 +623,7 @@ mod tests {
             .await
             .unwrap();
 
-        let toggle_action = renderer
+        let toggle_envelope = renderer
             .handle_user_event(UserEvent::CheckToggle {
                 component_id: ComponentId::new("cb").unwrap(),
                 checked: true,
@@ -621,9 +631,14 @@ mod tests {
             .await
             .unwrap()
             .expect("CheckToggle 应产生 ActionMessage");
+        let a2ui_core::message::client_to_server::V1_0ClientMessage::Action(toggle_action) =
+            toggle_envelope.message()
+        else {
+            panic!("envelope should carry an action message");
+        };
         assert_eq!(toggle_action.name, "check_toggle");
 
-        let slider_action = renderer
+        let slider_envelope = renderer
             .handle_user_event(UserEvent::SliderChange {
                 component_id: ComponentId::new("sl").unwrap(),
                 value: 42.5,
@@ -631,6 +646,11 @@ mod tests {
             .await
             .unwrap()
             .expect("SliderChange 应产生 ActionMessage");
+        let a2ui_core::message::client_to_server::V1_0ClientMessage::Action(slider_action) =
+            slider_envelope.message()
+        else {
+            panic!("envelope should carry an action message");
+        };
         assert_eq!(slider_action.name, "slider_change");
 
         let binding = renderer.data_bindings.get("s1").unwrap();

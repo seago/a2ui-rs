@@ -137,15 +137,12 @@ impl eframe::App for A2uiApp {
             }
         }
 
-        // 2. 渲染当前帧，获取用户交互产生的 action
+        // 2. 渲染当前帧，获取用户交互产生的客户端信封
         let mut emitted_actions = 0usize;
         match self.renderer.render_frame(ctx) {
-            Ok(actions) => {
-                emitted_actions = actions.len();
-                for action in actions {
-                    let envelope = a2ui_core::ClientEnvelope::v1_0(
-                        a2ui_core::message::V1_0ClientMessage::Action(action),
-                    );
+            Ok(envelopes) => {
+                emitted_actions = envelopes.len();
+                for envelope in envelopes {
                     let _ = self.action_tx.send(envelope);
                 }
             }
