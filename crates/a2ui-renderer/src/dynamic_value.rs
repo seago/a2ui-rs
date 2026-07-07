@@ -102,6 +102,11 @@ pub fn resolve_f64(dv: &DynamicValue<f64>, binding: Option<&DataBinding>) -> Opt
 }
 
 /// Resolve a string-like component property from literal JSON or A2UI dynamic value objects.
+#[deprecated(
+    since = "0.1.0",
+    note = "改用 `Component::prop_dynamic_value` + `resolve_str`（类型化新 API）"
+)]
+#[allow(deprecated)] // 委托同批 deprecated 的旧实现
 pub fn resolve_dynamic_string_prop(
     props: &Value,
     key: &str,
@@ -114,6 +119,11 @@ pub fn resolve_dynamic_string_prop(
 }
 
 /// Resolve a string-like component property with caller-defined missing-path formatting.
+#[deprecated(
+    since = "0.1.0",
+    note = "改用 `Component::prop_dynamic_value` + `resolve_str_with_missing_path`（类型化新 API）"
+)]
+#[allow(deprecated)] // 委托同批 deprecated 的旧实现
 pub fn resolve_dynamic_string_prop_with_missing_path(
     props: &Value,
     key: &str,
@@ -132,6 +142,8 @@ pub fn resolve_dynamic_string_prop_with_missing_path(
 /// Supported dynamic value shapes:
 /// - `{"path": "/..."}` resolves through `DataBinding` when available.
 /// - `{"call": "name"}` is kept as a display placeholder.
+#[deprecated(since = "0.1.0", note = "改用 `resolve_str`（类型化新 API）")]
+#[allow(deprecated)] // 委托同批 deprecated 的旧实现
 pub fn resolve_dynamic_string_value(value: &Value, binding: Option<&DataBinding>) -> String {
     resolve_dynamic_string_value_with_missing_path(value, binding, |path| {
         format!("{{path:{}}}", path)
@@ -139,6 +151,10 @@ pub fn resolve_dynamic_string_value(value: &Value, binding: Option<&DataBinding>
 }
 
 /// Resolve a single JSON value as display text with caller-defined missing-path formatting.
+#[deprecated(
+    since = "0.1.0",
+    note = "改用 `resolve_str_with_missing_path`（类型化新 API）"
+)]
 pub fn resolve_dynamic_string_value_with_missing_path(
     value: &Value,
     binding: Option<&DataBinding>,
@@ -171,6 +187,7 @@ pub fn value_to_display_string(value: &Value) -> String {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // 旧 &Value 入参 API 的等价性基线测试仍需调用它们
 mod tests {
     use super::*;
     use a2ui_core::prelude::*;

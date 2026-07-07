@@ -28,6 +28,11 @@ pub struct ComponentStyle {
 }
 
 impl ComponentStyle {
+    /// 从组件 props 的 JSON 值解析样式（旧 API）。
+    #[deprecated(
+        since = "0.1.0",
+        note = "改用 `ComponentStyle::from_component` / `from_style_decl`（StyleDecl 视图新 API）"
+    )]
     pub fn from_component_props(props: &Value) -> Self {
         let Some(style) = props.get("style").and_then(|v| v.as_object()) else {
             return Self::default();
@@ -162,6 +167,7 @@ fn parse_color_str(value: &str) -> Option<StyleColor> {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // 新旧路径等价性基线测试仍需调用旧 from_component_props
 mod tests {
     use super::*;
     use serde::Deserialize;

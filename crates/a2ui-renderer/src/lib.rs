@@ -24,6 +24,7 @@ pub use component_forest::ComponentForest;
 pub use custom_component::{CustomComponentDef, CustomComponentRegistry};
 pub use data_binding::DataBinding;
 pub use dependency_graph::DependencyGraph;
+#[allow(deprecated)] // 旧 &Value 入参函数按禁删约定保留并继续 re-export
 pub use dynamic_value::{
     resolve_bool, resolve_dynamic_string_prop, resolve_dynamic_string_prop_with_missing_path,
     resolve_dynamic_string_value, resolve_dynamic_string_value_with_missing_path, resolve_f64,
