@@ -129,41 +129,49 @@ impl Transport for WebSocketTransport {
             }
         }
 
-        let ws = self
-            .ws
-            .as_mut()
-            .ok_or_else(|| WebSocketError::ReceiveError("not connected".into()))?;
-        let msg = ws
-            .next()
-            .await
-            .ok_or_else(|| {
-                // 连接关闭时清除 ws，触发下次自动重连
-                self.ws = None;
-                WebSocketError::ReceiveError("connection closed".into())
-            })?
-            .map_err(|e| WebSocketError::ReceiveError(format!("{}", e)))?;
+        loop {
+            let ws = self
+                .ws
+                .as_mut()
+                .ok_or_else(|| WebSocketError::ReceiveError("not connected".into()))?;
+            let msg = ws
+                .next()
+                .await
+                .ok_or_else(|| {
+                    // 连接关闭时清除 ws，触发下次自动重连
+                    self.ws = None;
+                    WebSocketError::ReceiveError("connection closed".into())
+                })?
+                .map_err(|e| WebSocketError::ReceiveError(format!("{}", e)))?;
 
-        // 支持 Text 和 Binary 帧（Binary 帧也尝试按 UTF-8 JSON 解析）
-        let text = match msg {
-            Message::Text(s) => s,
-            Message::Binary(data) => String::from_utf8(data).map_err(|e| {
-                WebSocketError::ReceiveError(format!("binary frame contains non-UTF-8 data: {}", e))
-            })?,
-            Message::Ping(_) | Message::Pong(_) => {
-                // Ping/Pong 已在 tungestenite 层面自动处理，这里不会出现
-                return Err(WebSocketError::ReceiveError("unexpected control frame".into()).into());
-            }
-            Message::Close(_) => {
-                return Err(WebSocketError::ReceiveError("peer closed connection".into()).into());
-            }
-            _ => {
-                return Err(WebSocketError::ReceiveError("unexpected frame type".into()).into());
-            }
-        };
+            // 支持 Text 和 Binary 帧（Binary 帧也尝试按 UTF-8 JSON 解析）
+            let text = match msg {
+                Message::Text(s) => s,
+                Message::Binary(data) => String::from_utf8(data).map_err(|e| {
+                    WebSocketError::ReceiveError(format!(
+                        "binary frame contains non-UTF-8 data: {}",
+                        e
+                    ))
+                })?,
+                Message::Ping(_) | Message::Pong(_) => {
+                    // tungstenite 会自动回复 Pong，但 Ping/Pong 帧仍会从
+                    // Stream 中产出——跳过继续等待数据帧（服务端心跳很常见）
+                    continue;
+                }
+                Message::Close(_) => {
+                    return Err(
+                        WebSocketError::ReceiveError("peer closed connection".into()).into(),
+                    );
+                }
+                _ => {
+                    return Err(WebSocketError::ReceiveError("unexpected frame type".into()).into());
+                }
+            };
 
-        let envelope: ServerEnvelope = serde_json::from_str(&text)
-            .map_err(|e| WebSocketError::ReceiveError(format!("deserialization: {}", e)))?;
-        Ok(envelope)
+            let envelope: ServerEnvelope = serde_json::from_str(&text)
+                .map_err(|e| WebSocketError::ReceiveError(format!("deserialization: {}", e)))?;
+            return Ok(envelope);
+        }
     }
 
     async fn close(&mut self) -> TransportResult<()> {
@@ -272,6 +280,59 @@ mod tests {
             assert!(transport.is_connected(), "ws should be Some after connect");
 
             // 清理服务器
+            server_handle.abort();
+            let _ = server_handle.await;
+        });
+    }
+
+    #[test]
+    fn test_websocket_receive_skips_ping_frames() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            // 服务端先发 Ping（keepalive 心跳，极为常见），再发正常消息。
+            // receive() 必须跳过 Ping 而不是把它当作致命错误。
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("failed to bind test server");
+            let addr = listener.local_addr().expect("failed to get local addr");
+
+            let server_handle = tokio::spawn(async move {
+                if let Ok((stream, _)) = listener.accept().await {
+                    if let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await {
+                        let _ = ws
+                            .send(tokio_tungstenite::tungstenite::protocol::Message::Ping(
+                                vec![1, 2, 3],
+                            ))
+                            .await;
+                        let response = r#"{"version":"v1.0","capabilities":{"version":"1.0","features":["basic"]}}"#;
+                        let _ = ws
+                            .send(tokio_tungstenite::tungstenite::protocol::Message::Text(
+                                response.into(),
+                            ))
+                            .await;
+                        // 保持连接直到客户端收完
+                        while let Some(Ok(_)) = ws.next().await {}
+                    }
+                }
+            });
+
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+            let url = format!("ws://{}/a2ui", addr);
+            let mut transport = WebSocketTransport::new(&url).expect("failed to create transport");
+            transport.connect().await.unwrap();
+
+            let envelope = transport
+                .receive()
+                .await
+                .expect("Ping frame must be skipped, not treated as a fatal error");
+            match envelope {
+                ServerEnvelope::V1_0(V1_0ServerMessage::Capabilities(c)) => {
+                    assert_eq!(c.features, vec!["basic"]);
+                }
+                _ => panic!("expected capabilities message after skipping ping"),
+            }
+
             server_handle.abort();
             let _ = server_handle.await;
         });
