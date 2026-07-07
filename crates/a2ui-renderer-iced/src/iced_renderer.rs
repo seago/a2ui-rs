@@ -420,39 +420,84 @@ impl Renderer for IcedRenderer {
         &mut self,
         event: UserEvent,
     ) -> RenderResult<Option<a2ui_core::message::client_to_server::ActionMessage>> {
-        match event {
-            UserEvent::Click { component_id } => {
-                for (surface_id, binding) in &self.send_data_model {
-                    if *binding {
-                        if let Some(data_binding) = self.data_bindings.get(surface_id) {
-                            let data = data_binding.as_value().clone();
-                            let mut ctx =
-                                a2ui_core::message::client_to_server::ActionContext::new();
-                            ctx.insert("data_model".into(), DynamicValue::Literal(data));
-                            return Ok(Some(a2ui_core::message::client_to_server::ActionMessage {
-                                name: "click".into(),
-                                surface_id: surface_id.clone(),
-                                source_component_id: Some(component_id.as_str().to_string()),
-                                context: ctx,
-                                want_response: false,
-                                response_path: None,
-                                action_id: None,
-                            }));
-                        }
-                    }
-                }
-                Ok(Some(a2ui_core::message::client_to_server::ActionMessage {
-                    name: "click".into(),
-                    surface_id: String::new(),
-                    source_component_id: Some(component_id.as_str().to_string()),
-                    context: std::collections::HashMap::new(),
-                    want_response: false,
-                    response_path: None,
-                    action_id: None,
-                }))
+        // 先把输入值写回组件声明的绑定路径（在读取 data_model 快照之前）。
+        // iced 有渲染缓存：写回后必须失效受影响组件，否则 UI 显示旧值
+        if let Some((surface_id, path)) =
+            a2ui_renderer::write_back_user_event(&self.forest, &mut self.data_bindings, &event)?
+        {
+            self.surface_lru.touch(&surface_id);
+            let affected = self.dependency_graph.on_data_change(&path);
+            for component_id in &affected {
+                self.invalidate_component_dynamic_cache(&surface_id, component_id);
             }
-            _ => Ok(None),
+            self.dirty_surfaces.insert(surface_id);
         }
+
+        // 事件名与上下文 key 沿用 app.rs 既有约定，保持服务端消费方兼容
+        let (name, component_id, context_entry): (&str, &ComponentId, Option<(&str, Value)>) =
+            match &event {
+                UserEvent::Click { component_id } => ("click", component_id, None),
+                UserEvent::TextInput {
+                    component_id,
+                    value,
+                } => (
+                    "text_input",
+                    component_id,
+                    Some(("value", Value::String(value.clone()))),
+                ),
+                UserEvent::CheckToggle {
+                    component_id,
+                    checked,
+                } => (
+                    "check_toggle",
+                    component_id,
+                    Some(("checked", Value::Bool(*checked))),
+                ),
+                UserEvent::SliderChange {
+                    component_id,
+                    value,
+                } => (
+                    "slider_change",
+                    component_id,
+                    Some((
+                        "value",
+                        Value::Number(
+                            serde_json::Number::from_f64(*value).unwrap_or_else(|| 0.into()),
+                        ),
+                    )),
+                ),
+                UserEvent::KeyPress { .. } => return Ok(None),
+            };
+
+        let mut ctx = a2ui_core::message::client_to_server::ActionContext::new();
+        if let Some((key, value)) = context_entry {
+            ctx.insert(key.into(), DynamicValue::Literal(value));
+        }
+
+        // 附带 sendDataModel=true 的 surface 数据快照（此时已含刚写回的值）
+        let mut action_surface_id = String::new();
+        for (surface_id, enabled) in &self.send_data_model {
+            if *enabled {
+                if let Some(data_binding) = self.data_bindings.get(surface_id) {
+                    ctx.insert(
+                        "data_model".into(),
+                        DynamicValue::Literal(data_binding.as_value().clone()),
+                    );
+                    action_surface_id = surface_id.clone();
+                    break;
+                }
+            }
+        }
+
+        Ok(Some(a2ui_core::message::client_to_server::ActionMessage {
+            name: name.into(),
+            surface_id: action_surface_id,
+            source_component_id: Some(component_id.as_str().to_string()),
+            context: ctx,
+            want_response: false,
+            response_path: None,
+            action_id: None,
+        }))
     }
 }
 
@@ -486,6 +531,110 @@ fn extract_paths_from_value(value: &Value, paths: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_iced_handle_text_input_writes_back_and_returns_action() {
+        let mut renderer = IcedRenderer::new();
+        let field: Component = serde_json::from_value(json!({
+            "component":"TextField","id":"root","value":{"path":"/form/username"}
+        }))
+        .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: true,
+                components: Some(vec![field]),
+                data_model: Some(json!({"form": {"username": "old"}})),
+            })
+            .await
+            .unwrap();
+        // 预热动态字符串缓存，验证写回后被正确失效
+        let _ = renderer.cached_tree("s1");
+
+        let action = renderer
+            .handle_user_event(UserEvent::TextInput {
+                component_id: ComponentId::new("root").unwrap(),
+                value: "alice".into(),
+            })
+            .await
+            .unwrap()
+            .expect("TextInput 事件应产生 ActionMessage 而非被丢弃");
+
+        // 事件名沿用 app.rs 现有约定
+        assert_eq!(action.name, "text_input");
+        // 绑定路径已更新
+        assert_eq!(
+            renderer
+                .data_bindings
+                .get("s1")
+                .unwrap()
+                .get("/form/username"),
+            Some(&json!("alice"))
+        );
+        // dataModel 快照含新值
+        let Some(a2ui_core::prelude::DynamicValue::Literal(dm)) =
+            action.context.get("data_model").cloned()
+        else {
+            panic!("data_model context should be Literal");
+        };
+        assert_eq!(dm.pointer("/form/username"), Some(&json!("alice")));
+        assert!(renderer.dirty_surfaces.contains("s1"));
+    }
+
+    #[tokio::test]
+    async fn test_iced_handle_check_toggle_and_slider_write_back() {
+        let mut renderer = IcedRenderer::new();
+        let root: Component = serde_json::from_value(json!({
+            "component":"Column","id":"root","children":["cb","sl"]
+        }))
+        .unwrap();
+        let cb: Component = serde_json::from_value(json!({
+            "component":"CheckBox","id":"cb","value":{"path":"/agree"}
+        }))
+        .unwrap();
+        let sl: Component = serde_json::from_value(json!({
+            "component":"Slider","id":"sl","value":{"path":"/volume"},"min":0,"max":100
+        }))
+        .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![root, cb, sl]),
+                data_model: Some(json!({"agree": false, "volume": 0})),
+            })
+            .await
+            .unwrap();
+
+        let toggle_action = renderer
+            .handle_user_event(UserEvent::CheckToggle {
+                component_id: ComponentId::new("cb").unwrap(),
+                checked: true,
+            })
+            .await
+            .unwrap()
+            .expect("CheckToggle 应产生 ActionMessage");
+        assert_eq!(toggle_action.name, "check_toggle");
+
+        let slider_action = renderer
+            .handle_user_event(UserEvent::SliderChange {
+                component_id: ComponentId::new("sl").unwrap(),
+                value: 42.5,
+            })
+            .await
+            .unwrap()
+            .expect("SliderChange 应产生 ActionMessage");
+        assert_eq!(slider_action.name, "slider_change");
+
+        let binding = renderer.data_bindings.get("s1").unwrap();
+        assert_eq!(binding.get("/agree"), Some(&json!(true)));
+        assert_eq!(binding.get("/volume"), Some(&json!(42.5)));
+        assert!(renderer.dirty_surfaces.contains("s1"));
+    }
 
     #[test]
     fn test_iced_renderer_new() {

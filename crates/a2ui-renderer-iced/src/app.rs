@@ -118,50 +118,25 @@ pub fn update(app: &mut IcedApp, message: Message) -> iced::Task<Message> {
             iced::Task::none()
         }
         Message::UserAction(action) => {
-            use a2ui_core::prelude::DynamicValue;
-            use std::collections::HashMap;
-            match action {
-                UserAction::Click { component_id } => {
-                    let msg = a2ui_core::message::client_to_server::ActionMessage {
-                        name: "click".into(),
-                        surface_id: String::new(),
-                        source_component_id: Some(component_id.as_str().to_string()),
-                        context: HashMap::new(),
-                        want_response: false,
-                        response_path: None,
-                        action_id: None,
-                    };
-                    let envelope =
-                        ClientEnvelope::V1_0(a2ui_core::message::V1_0ClientMessage::Action(msg));
-                    let _ = app.action_tx.send(envelope);
-                }
+            use a2ui_renderer::UserEvent;
+
+            // 更新 iced 受控组件的本地状态并失效渲染缓存，
+            // 再把事件交给 renderer（统一走 Renderer trait：写回数据模型 + 构造 ActionMessage）
+            let event = match action {
+                UserAction::Click { component_id } => UserEvent::Click { component_id },
                 UserAction::TextInput {
                     component_id,
                     value,
                 } => {
-                    // 更新本地输入状态（iced 的受控组件需要）
                     app.renderer
                         .text_input_values
                         .borrow_mut()
                         .insert(component_id.as_str().to_string(), value.clone());
                     invalidate_component_cache_for_user_action(app, &component_id);
-                    let mut ctx = HashMap::new();
-                    ctx.insert(
-                        "value".into(),
-                        DynamicValue::Literal(serde_json::Value::String(value)),
-                    );
-                    let msg = a2ui_core::message::client_to_server::ActionMessage {
-                        name: "text_input".into(),
-                        surface_id: String::new(),
-                        source_component_id: Some(component_id.as_str().to_string()),
-                        context: ctx,
-                        want_response: false,
-                        response_path: None,
-                        action_id: None,
-                    };
-                    let envelope =
-                        ClientEnvelope::V1_0(a2ui_core::message::V1_0ClientMessage::Action(msg));
-                    let _ = app.action_tx.send(envelope);
+                    UserEvent::TextInput {
+                        component_id,
+                        value,
+                    }
                 }
                 UserAction::CheckToggle {
                     component_id,
@@ -172,23 +147,10 @@ pub fn update(app: &mut IcedApp, message: Message) -> iced::Task<Message> {
                         .borrow_mut()
                         .insert(component_id.as_str().to_string(), checked);
                     invalidate_component_cache_for_user_action(app, &component_id);
-                    let mut ctx = HashMap::new();
-                    ctx.insert(
-                        "checked".into(),
-                        DynamicValue::Literal(serde_json::Value::Bool(checked)),
-                    );
-                    let msg = a2ui_core::message::client_to_server::ActionMessage {
-                        name: "check_toggle".into(),
-                        surface_id: String::new(),
-                        source_component_id: Some(component_id.as_str().to_string()),
-                        context: ctx,
-                        want_response: false,
-                        response_path: None,
-                        action_id: None,
-                    };
-                    let envelope =
-                        ClientEnvelope::V1_0(a2ui_core::message::V1_0ClientMessage::Action(msg));
-                    let _ = app.action_tx.send(envelope);
+                    UserEvent::CheckToggle {
+                        component_id,
+                        checked,
+                    }
                 }
                 UserAction::SliderChange {
                     component_id,
@@ -199,26 +161,21 @@ pub fn update(app: &mut IcedApp, message: Message) -> iced::Task<Message> {
                         .borrow_mut()
                         .insert(component_id.as_str().to_string(), value);
                     invalidate_component_cache_for_user_action(app, &component_id);
-                    let mut ctx = HashMap::new();
-                    ctx.insert(
-                        "value".into(),
-                        DynamicValue::Literal(serde_json::Value::Number(
-                            serde_json::Number::from_f64(value).unwrap_or(0.into()),
-                        )),
-                    );
-                    let msg = a2ui_core::message::client_to_server::ActionMessage {
-                        name: "slider_change".into(),
-                        surface_id: String::new(),
-                        source_component_id: Some(component_id.as_str().to_string()),
-                        context: ctx,
-                        want_response: false,
-                        response_path: None,
-                        action_id: None,
-                    };
+                    UserEvent::SliderChange {
+                        component_id,
+                        value,
+                    }
+                }
+            };
+
+            match pollster::block_on(app.renderer.handle_user_event(event)) {
+                Ok(Some(msg)) => {
                     let envelope =
                         ClientEnvelope::V1_0(a2ui_core::message::V1_0ClientMessage::Action(msg));
                     let _ = app.action_tx.send(envelope);
                 }
+                Ok(None) => {}
+                Err(e) => tracing::error!("处理用户事件失败: {}", e),
             }
             iced::Task::none()
         }
