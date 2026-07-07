@@ -29,7 +29,7 @@
             "component": "Button",
             "variant": "primary",
             "child": "submit_label",
-            "action": { "name": "submit", "wantResponse": true, "actionId": "submit-1" }
+            "action": { "event": { "name": "submit", "wantResponse": true, "actionId": "submit-1" } }
           },
           { "id": "submit_label", "component": "Text", "text": "提交" }
         ]

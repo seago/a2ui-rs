@@ -114,7 +114,7 @@ export const demoEnvelope: ServerEnvelope = {
         component: "Button",
         child: "bp_l",
         variant: "primary",
-        action: { name: "submit" },
+        action: { event: { name: "submit" } },
       },
       { id: "bp_l", component: "Text", text: "提交" },
       {
@@ -122,7 +122,7 @@ export const demoEnvelope: ServerEnvelope = {
         component: "Button",
         child: "bd_l",
         variant: "default",
-        action: { name: "cancel" },
+        action: { event: { name: "cancel" } },
       },
       { id: "bd_l", component: "Text", text: "取消" },
       {
@@ -130,7 +130,7 @@ export const demoEnvelope: ServerEnvelope = {
         component: "Button",
         child: "bg_l",
         variant: "borderless",
-        action: { name: "more" },
+        action: { event: { name: "more" } },
       },
       { id: "bg_l", component: "Text", text: "更多" },
       {
@@ -144,7 +144,7 @@ export const demoEnvelope: ServerEnvelope = {
         component: "Button",
         child: "mt_l",
         variant: "default",
-        action: { name: "noop" },
+        action: { event: { name: "noop" } },
       },
       { id: "mt_l", component: "Text", text: "打开对话框" },
       {

@@ -27,7 +27,7 @@ function demoComponents(): Record<string, Json>[] {
       component: "Button",
       variant: "primary",
       child: "submit_label",
-      action: { name: "submit", wantResponse: true, actionId: "submit-1" },
+      action: { event: { name: "submit", wantResponse: true, actionId: "submit-1" } },
     },
     { id: "submit_label", component: "Text", text: "提交" },
   ];
@@ -210,12 +210,14 @@ describe("ChildList template + @index", () => {
 });
 
 describe("buildActionMessage + actionResponse writeback", () => {
+  const ISO_SECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
   it("builds a ClientEnvelope and attaches dataModel when sendDataModel", () => {
     const engine = new A2uiEngine();
     engine.ingest(demoEnvelope(true));
     engine.getSurface("s1")!.setDataValue("/form/name", "王五");
     const dispatch = engine.buildActionMessage("s1", "submit_btn")!;
-    expect(dispatch.envelope).toEqual({
+    expect(dispatch.envelope).toMatchObject({
       version: "v1.0",
       action: {
         name: "submit",
@@ -225,6 +227,10 @@ describe("buildActionMessage + actionResponse writeback", () => {
         actionId: "submit-1",
       },
     });
+    // 规范：timestamp 必填（秒精度 ISO 8601）
+    if ("action" in dispatch.envelope) {
+      expect(dispatch.envelope.action.timestamp).toMatch(ISO_SECONDS);
+    }
     expect(dispatch.dataModel).toEqual({ form: { name: "王五" } });
   });
 
@@ -235,7 +241,7 @@ describe("buildActionMessage + actionResponse writeback", () => {
     expect(dispatch.dataModel).toBeUndefined();
   });
 
-  it("writes actionResponse value back to responsePath", () => {
+  it("writes actionResponse value back to responsePath (kept off the wire)", () => {
     const engine = new A2uiEngine();
     engine.ingest({
       version: "v1.0",
@@ -249,24 +255,65 @@ describe("buildActionMessage + actionResponse writeback", () => {
             component: "Button",
             child: "lbl",
             action: {
-              name: "go",
-              wantResponse: true,
-              actionId: "a1",
-              responsePath: "/result",
+              event: {
+                name: "go",
+                wantResponse: true,
+                actionId: "a1",
+                responsePath: "/result",
+              },
             },
           },
           { id: "lbl", component: "Text", text: "go" },
         ],
       },
     });
-    engine.buildActionMessage("s1", "root"); // 登记 pending
+    const dispatch = engine.buildActionMessage("s1", "root")!; // 登记 pending
+    // D4：responsePath 不上线路
+    if ("action" in dispatch.envelope) {
+      expect("responsePath" in dispatch.envelope.action).toBe(false);
+    }
+    // 规范 wire：actionId 在信封层，payload 只含 value/error
     engine.ingest({
       version: "v1.0",
-      actionResponse: { actionId: "a1", value: { ok: true } },
+      actionId: "a1",
+      actionResponse: { value: { ok: true } },
     });
     expect(engine.getSurface("s1")!.getDataValue("/result")).toEqual({
       ok: true,
     });
+  });
+
+  it("auto-generates an actionId when wantResponse is declared without one", () => {
+    const engine = new A2uiEngine();
+    engine.ingest({
+      version: "v1.0",
+      createSurface: {
+        surfaceId: "s1",
+        catalogId: "basic",
+        dataModel: {},
+        components: [
+          {
+            id: "root",
+            component: "Button",
+            child: "lbl",
+            action: {
+              event: { name: "go", wantResponse: true, responsePath: "/result" },
+            },
+          },
+          { id: "lbl", component: "Text", text: "go" },
+        ],
+      },
+    });
+    const dispatch = engine.buildActionMessage("s1", "root")!;
+    if (!("action" in dispatch.envelope)) throw new Error("expected action");
+    const actionId = dispatch.envelope.action.actionId;
+    expect(actionId).toBeTruthy();
+    engine.ingest({
+      version: "v1.0",
+      actionId,
+      actionResponse: { value: 7 },
+    });
+    expect(engine.getSurface("s1")!.getDataValue("/result")).toBe(7);
   });
 });
 

@@ -215,9 +215,10 @@ function makeMockStore(opts: {
       return {
         version: "v1.0",
         action: {
-          name: "name" in action ? action.name : "fn",
+          name: "event" in action ? action.event.name : "fn",
           surfaceId,
           sourceComponentId: source,
+          timestamp: "2026-07-07T00:00:00Z",
         },
       };
     },
@@ -262,7 +263,7 @@ function ref(id: ComponentId): NodeRef {
   return { componentId: id, scope: ROOT_SCOPE };
 }
 
-const EVENT_ACTION: Action = { name: "submit", context: { foo: "bar" } };
+const EVENT_ACTION: Action = { event: { name: "submit", context: { foo: "bar" } } };
 
 function renderSurface(store: MockStore, onClientMessage = vi.fn()) {
   render(
@@ -337,7 +338,7 @@ describe("B2 渲染核心", () => {
 
   it("FunctionCall 型 Button：不生成信封、不回传（M1 本地处理留 TODO）", async () => {
     const user = userEvent.setup();
-    const fnAction: Action = { call: "localFn", args: {} };
+    const fnAction: Action = { functionCall: { call: "localFn", args: {} } };
     const store = makeMockStore({
       nodes: buildTree(fnAction),
       rootId: "card1",

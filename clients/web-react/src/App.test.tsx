@@ -74,7 +74,14 @@ const DEMO_ENVELOPE = {
         component: "Button",
         variant: "primary",
         child: "submit_label",
-        action: { name: "submit", wantResponse: true, actionId: "submit-1" },
+        action: {
+          event: {
+            name: "submit",
+            wantResponse: true,
+            actionId: "submit-1",
+            responsePath: "/result",
+          },
+        },
       },
       { id: "submit_label", component: "Text", text: "提交" },
     ],
@@ -130,5 +137,9 @@ describe("App 端到端集成（M1 活骨架）", () => {
     const envelopes = sock.sent.map((s) => JSON.parse(s));
     const action = envelopes.find((e) => e.action)?.action;
     expect(action?.name).toBe("submit");
+    // 规范必填字段与本地语义字段（responsePath 不上线路）
+    expect(action?.sourceComponentId).toBe("submit_btn");
+    expect(action?.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    expect(action).not.toHaveProperty("responsePath");
   });
 });

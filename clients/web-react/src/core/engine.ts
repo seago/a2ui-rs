@@ -124,7 +124,8 @@ export class A2uiEngine {
 
   /**
    * 为某组件的 event action 生成回传信封，并登记 actionId → responsePath 以便
-   * 后续 actionResponse 写回。返回 undefined 表示该组件无可回传的 event action。
+   * 后续 actionResponse 写回（responsePath 是本地语义，不出现在信封中）。
+   * 返回 undefined 表示该组件无可回传的 event action。
    */
   buildActionMessage(
     surfaceId: string,
@@ -138,7 +139,7 @@ export class A2uiEngine {
       if (a.wantResponse && a.actionId) {
         this.pending.set(a.actionId, {
           surfaceId,
-          responsePath: a.responsePath,
+          responsePath: dispatch.responsePath,
         });
       }
     }

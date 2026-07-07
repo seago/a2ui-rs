@@ -39,7 +39,7 @@ const demoEnvelope: ServerEnvelope = {
         component: "Button",
         variant: "primary",
         child: "submit_label",
-        action: { name: "submit", wantResponse: true, actionId: "submit-1" },
+        action: { event: { name: "submit", wantResponse: true, actionId: "submit-1" } },
       },
       { id: "submit_label", component: "Text", text: "提交" },
     ],
@@ -100,10 +100,11 @@ describe("createSurfaceStore — lifecycle & snapshot", () => {
     const store = createSurfaceStore();
     store.ingest(demoEnvelope);
     store.ingest({ version: "v1.0", deleteSurface: { surfaceId: "s1" } });
-    const envelope = store.buildActionEnvelope("s1", {
-      name: "submit",
-      wantResponse: false,
-    });
+    const envelope = store.buildActionEnvelope(
+      "s1",
+      { event: { name: "submit", wantResponse: false } },
+      "submit_btn",
+    );
     // 已删除 surface 上的 action 不应携带其数据模型
     expect(envelope.metadata).toBeUndefined();
   });
@@ -168,9 +169,7 @@ describe("createSurfaceStore — resolveNode", () => {
     const node = store.resolveNode("s1", ref("submit_btn"))!;
     expect(node.props.variant).toBe("primary");
     expect(node.action).toEqual({
-      name: "submit",
-      wantResponse: true,
-      actionId: "submit-1",
+      event: { name: "submit", wantResponse: true, actionId: "submit-1" },
     });
     expect(node.children).toEqual([ref("submit_label")]);
   });
@@ -300,6 +299,9 @@ describe("createSurfaceStore — ChildList template + @index + collection scope"
 });
 
 describe("createSurfaceStore — buildActionEnvelope", () => {
+  /** 秒精度 ISO 8601 UTC（规范 timestamp 必填格式）。 */
+  const ISO_SECONDS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
   it("builds an action envelope and attaches dataModel metadata when sendDataModel", () => {
     const store = createSurfaceStore();
     store.ingest(demoEnvelope);
@@ -317,6 +319,17 @@ describe("createSurfaceStore — buildActionEnvelope", () => {
     expect(env.metadata).toEqual({ surfaceId: "s1", dataModel: { form: { name: "张三" } } });
   });
 
+  it("carries a required second-precision ISO 8601 timestamp", () => {
+    const store = createSurfaceStore();
+    store.ingest(demoEnvelope);
+    const env = store.buildActionEnvelope(
+      "s1",
+      { event: { name: "submit" } },
+      "submit_btn",
+    );
+    expect(env.action?.timestamp).toMatch(ISO_SECONDS);
+  });
+
   it("omits metadata when sendDataModel is false", () => {
     const store = createSurfaceStore();
     store.ingest({
@@ -328,15 +341,16 @@ describe("createSurfaceStore — buildActionEnvelope", () => {
           {
             id: "root",
             component: "Button",
-            action: { name: "go" },
+            action: { event: { name: "go" } },
             child: "l",
           },
           { id: "l", component: "Text", text: "go" },
         ],
       },
     });
-    const env = store.buildActionEnvelope("s1", { name: "go" }, "root");
+    const env = store.buildActionEnvelope("s1", { event: { name: "go" } }, "root");
     expect(env.action?.name).toBe("go");
+    expect(env.action?.sourceComponentId).toBe("root");
     expect(env.metadata).toBeUndefined();
   });
 
@@ -357,10 +371,69 @@ describe("createSurfaceStore — buildActionEnvelope", () => {
     });
     const scope: Scope = { frames: [{ basePath: "/items", index: 1 }] };
     const action = {
-      name: "pick",
-      context: { itemId: { path: "id" }, i: { call: "@index" } },
+      event: {
+        name: "pick",
+        context: { itemId: { path: "id" }, i: { call: "@index" } },
+      },
     };
     const env = store.buildActionEnvelope("s1", action, "row", scope);
     expect(env.action?.context).toEqual({ itemId: "b", i: 1 });
+  });
+
+  it("keeps responsePath off the wire but still writes the actionResponse back", () => {
+    const store = createSurfaceStore();
+    store.ingest(demoEnvelope);
+    const env = store.buildActionEnvelope(
+      "s1",
+      {
+        event: {
+          name: "fetch",
+          wantResponse: true,
+          actionId: "a-fetch",
+          responsePath: "/result",
+        },
+      },
+      "submit_btn",
+    );
+    // D4：responsePath 是客户端本地语义，消息本体不携带
+    expect(env.action).toBeDefined();
+    expect("responsePath" in env.action!).toBe(false);
+    // 本地登记仍然生效：actionResponse（信封层 actionId）写回 /result
+    store.ingest({
+      version: "v1.0",
+      actionId: "a-fetch",
+      actionResponse: { value: { ok: true } },
+    });
+    expect(store.getDataValue("s1", "/result")).toEqual({ ok: true });
+  });
+
+  it("auto-generates an actionId when wantResponse is set without a declared actionId", () => {
+    const store = createSurfaceStore();
+    store.ingest(demoEnvelope);
+    const env = store.buildActionEnvelope(
+      "s1",
+      { event: { name: "fetch", wantResponse: true, responsePath: "/result" } },
+      "submit_btn",
+    );
+    const actionId = env.action?.actionId;
+    expect(actionId).toBeTruthy();
+    // 写回闭环用自动生成的 id 一样成立
+    store.ingest({
+      version: "v1.0",
+      actionId: actionId!,
+      actionResponse: { value: 42 },
+    });
+    expect(store.getDataValue("s1", "/result")).toBe(42);
+  });
+
+  it("produces no action message for functionCall actions", () => {
+    const store = createSurfaceStore();
+    store.ingest(demoEnvelope);
+    const env = store.buildActionEnvelope(
+      "s1",
+      { functionCall: { call: "localFn" } },
+      "submit_btn",
+    );
+    expect(env.action).toBeUndefined();
   });
 });

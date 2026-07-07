@@ -362,9 +362,9 @@ function handleAction(
   // TODO(M1): ActionFunctionCall —— 派发到本地注册函数，必要时回传 functionResponse。
 }
 
-/** Action 判别：含 `name` 为 Event，含 `call` 为本地函数调用。 */
-function isEventAction(action: Action): action is ActionEvent {
-  return "name" in action;
+/** Action 判别（规范嵌套格式）：含 `event` 为事件回传，含 `functionCall` 为本地函数调用。 */
+function isEventAction(action: Action): action is { event: ActionEvent } {
+  return "event" in action;
 }
 
 // ─── props 归一化辅助 ────────────────────────────────────────────────────────

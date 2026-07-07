@@ -64,11 +64,16 @@ export interface ResolvedNode {
   placeholder?: boolean;
 }
 
-/** 一次交互回传：待发送的信封 + （可选）随附的 data model。 */
+/** 一次交互回传：待发送的信封 + （可选）随附的 data model / 本地写回路径。 */
 export interface ActionDispatch {
   envelope: ClientEnvelope;
   /** 仅当 `sendDataModel` 为真时存在（供 transport 以 metadata 附带）。 */
   dataModel?: Json;
+  /**
+   * 声明的 `responsePath`（客户端本地语义，**不上线路**）。
+   * 供调用方登记 actionId → responsePath 以便 actionResponse 写回。
+   */
+  responsePath?: string;
 }
 
 /** 数据变更通知。 */
@@ -97,6 +102,8 @@ export class Surface {
   private readonly graph = new DependencyGraph();
   private readonly listeners = new Set<Listener>();
   private readonly componentListeners = new Map<string, Set<Listener>>();
+  /** wantResponse 而声明未提供 actionId 时自动生成的单调序号（对齐 Rust `a-N`）。 */
+  private nextActionSeq = 0;
 
   constructor(
     surfaceId: string,
@@ -373,8 +380,9 @@ export class Surface {
       | ActionSpec
       | undefined;
     if (!action || isFunctionCallAction(action)) return undefined;
+    const spec = (action as { event?: EventActionSpec }).event;
+    if (!spec || typeof spec.name !== "string") return undefined;
 
-    const spec = action as EventActionSpec;
     const resolver = this.newResolver();
     const ctx: ResolveContext = {
       resolver,
@@ -386,6 +394,7 @@ export class Surface {
       name: spec.name,
       surfaceId: this.surfaceId,
       sourceComponentId: componentId,
+      timestamp: nowIso8601(),
     };
     if (spec.context && Object.keys(spec.context).length > 0) {
       const context: Record<string, Json> = {};
@@ -395,16 +404,27 @@ export class Surface {
       }
       message.context = context;
     }
-    if (spec.wantResponse) message.wantResponse = true;
-    if (spec.responsePath !== undefined) message.responsePath = spec.responsePath;
-    if (spec.actionId !== undefined) message.actionId = spec.actionId;
+    // wantResponse=true 时 actionId 必填：声明缺失则自动生成（单调序号）。
+    // responsePath 是本地语义，只经 dispatch 透出，不写入 wire 消息。
+    if (spec.wantResponse) {
+      message.wantResponse = true;
+      message.actionId = spec.actionId ?? `a-${++this.nextActionSeq}`;
+    }
 
     const dispatch: ActionDispatch = {
       envelope: { version: "v1.0", action: message },
     };
+    if (spec.wantResponse && spec.responsePath !== undefined) {
+      dispatch.responsePath = spec.responsePath;
+    }
     if (this.sendDataModel) dispatch.dataModel = this.dataModel.value;
     return dispatch;
   }
+}
+
+/** 当前 UTC 时间的 ISO 8601 字符串（秒精度，规范 timestamp 格式）。 */
+function nowIso8601(): string {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /** 从组件属性推断子引用形态（结构层）。 */

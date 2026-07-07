@@ -108,12 +108,13 @@ export interface SurfaceStore {
 
   /**
    * 由一个 Action 构造回传给服务端的客户端信封（含 sendDataModel 时的 metadata）。
-   * scope 用于解析 action.context 中的相对路径 / @index。
+   * `sourceComponentId` 必填（规范 action 消息必填字段）。
+   * scope 用于解析 action.event.context 中的相对路径 / @index。
    */
   buildActionEnvelope(
     surfaceId: SurfaceId,
     action: Action,
-    sourceComponentId?: ComponentId,
+    sourceComponentId: ComponentId,
     scope?: Scope,
   ): ClientEnvelope;
 }

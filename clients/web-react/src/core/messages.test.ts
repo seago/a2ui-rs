@@ -77,25 +77,51 @@ describe("parseServerEnvelope", () => {
     }
   });
 
-  it("parses actionResponse success and error", () => {
+  it("parses actionResponse success and error (actionId at envelope level)", () => {
     const ok = parseServerEnvelope({
       version: "v1.0",
-      actionResponse: { actionId: "a1", value: "done" },
+      actionId: "a1",
+      actionResponse: { value: "done" },
     });
     const err = parseServerEnvelope({
       version: "v1.0",
-      actionResponse: {
-        actionId: "a1",
-        error: { code: "E", message: "bad" },
-      },
+      actionId: "a1",
+      actionResponse: { error: { code: "E", message: "bad" } },
     });
+    expect(ok.ok).toBe(true);
+    expect(err.ok).toBe(true);
     if (ok.ok && ok.message.kind === "actionResponse") {
+      expect(ok.message.message.actionId).toBe("a1");
       expect(ok.message.message.value).toBe("done");
       expect(ok.message.message.error).toBeUndefined();
     }
     if (err.ok && err.message.kind === "actionResponse") {
+      expect(err.message.message.actionId).toBe("a1");
       expect(err.message.message.error).toEqual({ code: "E", message: "bad" });
     }
+  });
+
+  it("rejects actionResponse without envelope-level actionId (payload-level is not spec)", () => {
+    const r = parseServerEnvelope({
+      version: "v1.0",
+      actionResponse: { actionId: "a1", value: "done" },
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects actionResponse unless exactly one of value/error is present", () => {
+    const neither = parseServerEnvelope({
+      version: "v1.0",
+      actionId: "a1",
+      actionResponse: {},
+    });
+    const both = parseServerEnvelope({
+      version: "v1.0",
+      actionId: "a1",
+      actionResponse: { value: 1, error: { code: "E", message: "bad" } },
+    });
+    expect(neither.ok).toBe(false);
+    expect(both.ok).toBe(false);
   });
 
   it("parses callFunction", () => {

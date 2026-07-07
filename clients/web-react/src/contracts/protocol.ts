@@ -54,7 +54,10 @@ export type ChildList = ComponentId[] | ChildListTemplate;
 
 // ─── Action：事件回传 | 本地函数 ────────────────────────────────────────────
 
-/** 发送事件到服务端。 */
+/**
+ * 事件声明体（规范 · Server actions 的 `action.event` 内层）。
+ * `responsePath` 是**客户端本地语义**（响应写回路径），不会出现在 wire 消息中。
+ */
 export interface ActionEvent {
   name: string;
   context?: Record<string, DynamicValue<unknown>>;
@@ -63,14 +66,19 @@ export interface ActionEvent {
   actionId?: string;
 }
 
-/** 执行本地注册函数。 */
+/** 执行本地注册函数（`action.functionCall` 内层）。 */
 export interface ActionFunctionCall {
   call: string;
   args?: Record<string, DynamicValue<unknown>>;
 }
 
-/** 按钮等交互组件的 action：事件或本地函数调用。 */
-export type Action = ActionEvent | ActionFunctionCall;
+/**
+ * 按钮等交互组件的 `action` 属性（规范嵌套格式）：
+ * `{ event: {...} }` 发送事件到服务端；`{ functionCall: {...} }` 本地函数调用。
+ */
+export type Action =
+  | { event: ActionEvent }
+  | { functionCall: ActionFunctionCall };
 
 // ─── 组件（邻接表节点） ─────────────────────────────────────────────────────
 
@@ -150,13 +158,20 @@ export type ServerEnvelope = V1_0ServerMessage;
 
 // ─── 客户端 → 服务端消息 ────────────────────────────────────────────────────
 
+/**
+ * 客户端 action 消息（规范 · action 消息 Properties）。
+ * `name` / `surfaceId` / `sourceComponentId` / `timestamp` 均必填；
+ * `actionId` 在 `wantResponse=true` 时必填（声明缺失时由客户端自动生成）。
+ * 注意：声明里的 `responsePath` 是本地语义，**不在本消息中序列化**。
+ */
 export interface ActionMessage {
   name: string;
   surfaceId: SurfaceId;
-  sourceComponentId?: ComponentId;
+  sourceComponentId: ComponentId;
+  /** 事件发生时刻，ISO 8601 UTC（秒精度，`YYYY-MM-DDTHH:MM:SSZ`）。 */
+  timestamp: string;
   context?: Record<string, unknown>;
   wantResponse?: boolean;
-  responsePath?: string;
   actionId?: string;
 }
 

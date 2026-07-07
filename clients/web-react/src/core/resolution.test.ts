@@ -148,7 +148,7 @@ describe("resolveValue / resolveComponentProps", () => {
         label: "姓名",
         variant: "shortText",
         // structural — must be ignored by prop resolution
-        action: { name: "noop" },
+        action: { event: { name: "noop" } },
       },
     };
     const { props, deps } = resolveComponentProps(

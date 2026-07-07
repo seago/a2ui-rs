@@ -86,7 +86,10 @@ export interface Component {
 // Action — 事件 / 本地函数调用
 // ---------------------------------------------------------------------------
 
-/** 事件型 action（组件属性里的形态，untagged：有 `name`）。 */
+/**
+ * 事件声明体（规范 · Server actions 的 `action.event` 内层）。
+ * `responsePath` 是客户端本地语义（响应写回路径），不上线路。
+ */
 export interface EventActionSpec {
   name: string;
   context?: Record<string, DynamicValue>;
@@ -95,14 +98,19 @@ export interface EventActionSpec {
   actionId?: string;
 }
 
-/** 本地函数调用型 action（untagged：有 `call`）。 */
+/** 本地函数调用声明体（`action.functionCall` 内层）。 */
 export interface FunctionCallActionSpec {
   call: string;
   args?: Record<string, DynamicValue>;
 }
 
-/** 组件 `action` 属性：事件或本地函数调用。 */
-export type ActionSpec = EventActionSpec | FunctionCallActionSpec;
+/**
+ * 组件 `action` 属性（规范嵌套格式）：
+ * `{ event: {...} }` 事件回传，或 `{ functionCall: {...} }` 本地函数调用。
+ */
+export type ActionSpec =
+  | { event: EventActionSpec }
+  | { functionCall: FunctionCallActionSpec };
 
 // ---------------------------------------------------------------------------
 // Server → Client 消息
@@ -141,6 +149,11 @@ export interface ResponseError {
   message: string;
 }
 
+/**
+ * actionResponse 的解析结果。规范 wire 上 `actionId` 位于**信封层**（与
+ * `actionResponse` 键平级）；payload 内 `value` 与 `error` 恰含其一。
+ * 解析时把信封层 actionId 收拢到本结构，便于消费方使用。
+ */
 export interface ActionResponse {
   actionId: string;
   /** 成功时的返回值（与 `error` 互斥）。 */
@@ -171,13 +184,19 @@ export type ServerMessageKind = ServerMessage["kind"];
 // Client → Server 消息
 // ---------------------------------------------------------------------------
 
+/**
+ * 客户端 action 消息（规范 Properties）：`name`/`surfaceId`/`sourceComponentId`/
+ * `timestamp` 必填；`actionId` 在 `wantResponse=true` 时必填。
+ * 声明里的 `responsePath` 是本地语义，不出现在本消息中。
+ */
 export interface ActionMessage {
   name: string;
   surfaceId: string;
-  sourceComponentId?: string;
+  sourceComponentId: string;
+  /** 事件发生时刻，ISO 8601 UTC（秒精度，`YYYY-MM-DDTHH:MM:SSZ`）。 */
+  timestamp: string;
   context?: Record<string, Json>;
   wantResponse?: boolean;
-  responsePath?: string;
   actionId?: string;
 }
 
@@ -235,9 +254,9 @@ export function isTemplateChildList(v: unknown): v is TemplateChildList {
   );
 }
 
-/** 判断 action 规格是否为函数调用型。 */
+/** 判断 action 规格是否为函数调用型（规范嵌套格式：含 `functionCall` 键）。 */
 export function isFunctionCallAction(
   a: ActionSpec,
-): a is FunctionCallActionSpec {
-  return typeof (a as FunctionCallActionSpec).call === "string";
+): a is { functionCall: FunctionCallActionSpec } {
+  return "functionCall" in a;
 }

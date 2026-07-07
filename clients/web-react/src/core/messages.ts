@@ -114,12 +114,13 @@ export function parseServerEnvelope(input: string | unknown): ParseResult {
   if (!isObject(payload)) {
     return { ok: false, error: `${key} payload must be an object` };
   }
-  return dispatch(key, payload);
+  return dispatch(key, payload, envelope);
 }
 
 function dispatch(
   key: (typeof SERVER_KEYS)[number],
   p: Record<string, Json>,
+  envelope: Record<string, Json>,
 ): ParseResult {
   switch (key) {
     case "createSurface": {
@@ -186,11 +187,27 @@ function dispatch(
       };
     }
     case "actionResponse": {
-      const actionId = asString(p.actionId);
+      // 规范：actionId 在信封层（与 actionResponse 键平级），payload 内只有
+      // value（成功）或 error{code,message}（失败）恰含其一。
+      const actionId = asString(envelope.actionId);
       if (actionId === undefined) {
-        return { ok: false, error: "actionResponse missing actionId" };
+        return {
+          ok: false,
+          error: "actionResponse missing envelope-level actionId",
+        };
+      }
+      const hasValue = Object.prototype.hasOwnProperty.call(p, "value");
+      const hasError = Object.prototype.hasOwnProperty.call(p, "error");
+      if (hasValue === hasError) {
+        return {
+          ok: false,
+          error: "actionResponse must contain exactly one of value/error",
+        };
       }
       const errObj = isObject(p.error) ? p.error : undefined;
+      if (hasError && !errObj) {
+        return { ok: false, error: "actionResponse error must be an object" };
+      }
       return {
         ok: true,
         message: {

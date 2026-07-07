@@ -51,7 +51,12 @@ const DEMO_ENVELOPE: ServerEnvelope = {
 
 const ACTION_ENVELOPE: ClientEnvelope = {
   version: "v1.0",
-  action: { name: "submit", surfaceId: "s1" },
+  action: {
+    name: "submit",
+    surfaceId: "s1",
+    sourceComponentId: "submit_btn",
+    timestamp: "2026-07-07T00:00:00Z",
+  },
 };
 
 let fetchMock: ReturnType<typeof vi.fn>;

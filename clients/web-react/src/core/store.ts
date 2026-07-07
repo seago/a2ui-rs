@@ -84,9 +84,15 @@ function isTemplateChildList(
   );
 }
 
-/** 事件型 action（有 `name`）。函数调用型（有 `call`）在回传时被忽略。 */
-function isEventAction(a: Action): a is ActionEvent {
-  return typeof (a as ActionEvent).name === "string";
+/** 规范嵌套 action 判别：`{ event: {...} }` 为事件型；`{ functionCall: {...} }` 在回传时被忽略。 */
+function isEventAction(a: Action): a is { event: ActionEvent } {
+  const event = (a as { event?: unknown }).event;
+  return isObject(event) && typeof event.name === "string";
+}
+
+/** 当前 UTC 时间的 ISO 8601 字符串（秒精度，规范 timestamp 格式）。 */
+function nowIso8601(): string {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /**
@@ -252,6 +258,8 @@ class Store implements SurfaceStore {
   private readonly dispatcher: FunctionDispatcher;
   private readonly listeners = new Set<() => void>();
   private readonly pending = new Map<string, PendingAction>();
+  /** wantResponse 而声明未提供 actionId 时自动生成的单调序号（对齐 Rust `a-N`）。 */
+  private nextActionSeq = 0;
 
   constructor(dispatcher: FunctionDispatcher) {
     this.dispatcher = dispatcher;
@@ -555,7 +563,7 @@ class Store implements SurfaceStore {
   buildActionEnvelope(
     surfaceId: SurfaceId,
     action: Action,
-    sourceComponentId?: ComponentId,
+    sourceComponentId: ComponentId,
     scope: Scope = ROOT_SCOPE,
   ): ClientEnvelope {
     const entry = this.surfaces.get(surfaceId);
@@ -565,31 +573,36 @@ class Store implements SurfaceStore {
     if (!isEventAction(action)) {
       return { version: "v1.0" };
     }
+    const spec = action.event;
 
-    const message: ActionMessage = { name: action.name, surfaceId };
-    if (sourceComponentId !== undefined) message.sourceComponentId = sourceComponentId;
+    const message: ActionMessage = {
+      name: spec.name,
+      surfaceId,
+      sourceComponentId,
+      timestamp: nowIso8601(),
+    };
 
-    if (action.context && Object.keys(action.context).length > 0) {
+    if (spec.context && Object.keys(spec.context).length > 0) {
       const resolver = s
         ? resolverForScope(s.dataModel, scope)
         : new PathResolver(new DataModel({}));
       const ctx: EvalCtx = { resolver, dispatcher: this.dispatcher, deps: new Set() };
       const context: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(action.context)) {
+      for (const [k, v] of Object.entries(spec.context)) {
         const r = evalValue(v, ctx);
         context[k] = r === undefined ? null : r;
       }
       message.context = context;
     }
-    if (action.wantResponse) message.wantResponse = true;
-    if (action.responsePath !== undefined) message.responsePath = action.responsePath;
-    if (action.actionId !== undefined) message.actionId = action.actionId;
 
-    // 登记 actionId → responsePath，供后续 actionResponse 写回。
-    if (message.wantResponse && message.actionId) {
+    // wantResponse=true 时 actionId 必填：声明缺失则自动生成（单调序号，对齐 Rust 参考实现）。
+    // responsePath 是客户端本地语义：只登记 pending，不写入 wire 消息。
+    if (spec.wantResponse) {
+      message.wantResponse = true;
+      message.actionId = spec.actionId ?? `a-${++this.nextActionSeq}`;
       this.pending.set(message.actionId, {
         surfaceId,
-        responsePath: message.responsePath,
+        responsePath: spec.responsePath,
       });
     }
 
