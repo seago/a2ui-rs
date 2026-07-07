@@ -4,4 +4,5 @@ pub mod component;
 
 pub use catalog::Catalog;
 pub use child_list::ChildList;
+pub use component::prop_keys;
 pub use component::{AccessibilityAttributes, ComponentCommon, ComponentId, DynamicValue, TabItem};

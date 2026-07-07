@@ -726,9 +726,257 @@ impl Component {
     }
 
     /// 获取组件特有属性
+    ///
+    /// 逃生门：任意自定义 Catalog 的 props 都可经此读取。
+    /// 新代码优先使用类型化访问器（`prop_*` 系列）与结构化视图
+    /// （`children_decl` / `tabs_decl` / `action_decl` / `style_decl`）。
     pub fn properties(&self) -> &Value {
         &self.properties
     }
+
+    // ---- 类型化 props 访问器（裸标量） ----
+
+    /// 读取字符串 prop（不含动态语义的键：`variant` / `title` 等）。
+    ///
+    /// 键缺失或值非字符串时返回 `None`（宽容语义，对齐 `.as_str()`）。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::Component;
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "Button", "id": "b1", "variant": "primary"
+    /// })).unwrap();
+    /// assert_eq!(c.prop_str("variant"), Some("primary"));
+    /// assert_eq!(c.prop_str("missing"), None);
+    /// ```
+    pub fn prop_str(&self, key: &str) -> Option<&str> {
+        self.properties.get(key)?.as_str()
+    }
+
+    /// 读取布尔 prop。键缺失或值非布尔时返回 `None`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::Component;
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "CheckBox", "id": "cb", "checked": true
+    /// })).unwrap();
+    /// assert_eq!(c.prop_bool("checked"), Some(true));
+    /// ```
+    pub fn prop_bool(&self, key: &str) -> Option<bool> {
+        self.properties.get(key)?.as_bool()
+    }
+
+    /// 读取数值 prop（整数与浮点均按 `f64` 给出）。键缺失或值非数值时返回 `None`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::Component;
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "Slider", "id": "s", "min": 0, "max": 100.5
+    /// })).unwrap();
+    /// assert_eq!(c.prop_f64("min"), Some(0.0));
+    /// assert_eq!(c.prop_f64("max"), Some(100.5));
+    /// ```
+    pub fn prop_f64(&self, key: &str) -> Option<f64> {
+        self.properties.get(key)?.as_f64()
+    }
+
+    /// 读取字符串数组 prop（如 ChoicePicker 的 `options` / `value`）。
+    ///
+    /// 键缺失或值非数组时返回 `None`；数组内的非字符串项被**静默过滤**
+    /// （对齐现有渲染器行为，含 `{"path": ...}` 包装项）。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::Component;
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "ChoicePicker", "id": "cp", "options": ["A", "B", 3]
+    /// })).unwrap();
+    /// assert_eq!(c.prop_str_list("options"), Some(vec!["A", "B"]));
+    /// ```
+    pub fn prop_str_list(&self, key: &str) -> Option<Vec<&str>> {
+        let arr = self.properties.get(key)?.as_array()?;
+        Some(arr.iter().filter_map(|v| v.as_str()).collect())
+    }
+
+    /// 读取组件 ID 引用 prop（`child` / `content` / `trigger` 等）。
+    ///
+    /// 键缺失、值非字符串或不满足 ComponentId 命名规则时返回 `None`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::Component;
+    /// use a2ui_core::ComponentId;
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "Card", "id": "card", "child": "child_1"
+    /// })).unwrap();
+    /// assert_eq!(
+    ///     c.prop_component_id("child"),
+    ///     Some(ComponentId::new("child_1").unwrap())
+    /// );
+    /// ```
+    pub fn prop_component_id(&self, key: &str) -> Option<ComponentId> {
+        ComponentId::new(self.prop_str(key)?).ok()
+    }
+
+    // ---- 类型化 props 访问器（动态值） ----
+
+    /// 读取动态字符串 prop（值可为字面量 / `{"path": ...}` / `{"call": ...}`）。
+    ///
+    /// 只做「JSON 形态 → 类型形态」的转换，**不做路径求值**——求值需要
+    /// 数据绑定上下文，由 `a2ui-renderer` 负责。形态不符时返回 `None`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::{Component, DynamicValue};
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "Text", "id": "t", "text": {"path": "/user/name"}
+    /// })).unwrap();
+    /// assert_eq!(
+    ///     c.prop_dynamic_str("text"),
+    ///     Some(DynamicValue::Path { path: "/user/name".into() })
+    /// );
+    /// ```
+    pub fn prop_dynamic_str(&self, key: &str) -> Option<DynamicValue<String>> {
+        self.prop_dynamic(key)
+    }
+
+    /// 读取动态布尔 prop（如 CheckBox 的 `value`）。形态不符时返回 `None`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::{Component, DynamicValue};
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "CheckBox", "id": "cb", "value": true
+    /// })).unwrap();
+    /// assert_eq!(c.prop_dynamic_bool("value"), Some(DynamicValue::Literal(true)));
+    /// ```
+    pub fn prop_dynamic_bool(&self, key: &str) -> Option<DynamicValue<bool>> {
+        self.prop_dynamic(key)
+    }
+
+    /// 读取动态数值 prop（如 Slider 的 `value`）。形态不符时返回 `None`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::{Component, DynamicValue};
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "Slider", "id": "s", "value": {"path": "/volume"}
+    /// })).unwrap();
+    /// assert_eq!(
+    ///     c.prop_dynamic_f64("value"),
+    ///     Some(DynamicValue::Path { path: "/volume".into() })
+    /// );
+    /// ```
+    pub fn prop_dynamic_f64(&self, key: &str) -> Option<DynamicValue<f64>> {
+        self.prop_dynamic(key)
+    }
+
+    /// `prop_dynamic_*` 的共同实现：untagged 顺序（Path → FunctionCall →
+    /// Literal）由 [`DynamicValue`] 定义保障；解析失败一律返回 `None`
+    /// （与手写 `.as_*()` 分支的宽容语义对齐，不新增报错路径）。
+    fn prop_dynamic<T: serde::de::DeserializeOwned>(&self, key: &str) -> Option<DynamicValue<T>> {
+        let value = self.properties.get(key)?;
+        serde_json::from_value(value.clone()).ok()
+    }
+}
+
+// ---- props 键名常量 ----
+
+/// 组件 props 的键名常量（收录规范 Basic Catalog 中被渲染器消费的键全集）。
+///
+/// 渲染器应引用这些常量而非裸字符串，规避方案 A（开放键访问器）的拼写风险。
+///
+/// # 示例
+///
+/// ```rust
+/// use a2ui_core::component::component::{prop_keys, Component};
+/// use serde::Deserialize;
+/// use serde_json::json;
+///
+/// let c = Component::deserialize(json!({
+///     "component": "Text", "id": "t", "text": "hello"
+/// })).unwrap();
+/// assert_eq!(c.prop_str(prop_keys::TEXT), Some("hello"));
+/// ```
+pub mod prop_keys {
+    /// Text / Button 的展示文本（动态）
+    pub const TEXT: &str = "text";
+    /// CheckBox / DateTimeInput / ChoicePicker / Slider / TextField 的标签（动态）
+    pub const LABEL: &str = "label";
+    /// TextField（string）/ CheckBox（bool）/ Slider（number）/ ChoicePicker（array）的值
+    pub const VALUE: &str = "value";
+    /// CheckBox 的历史键（非规范键；TUI 唯一来源，egui/web 兜底）
+    pub const CHECKED: &str = "checked";
+    /// Slider / DateTimeInput 的下界
+    pub const MIN: &str = "min";
+    /// Slider / DateTimeInput 的上界
+    pub const MAX: &str = "max";
+    /// TextField 的占位文本（动态）
+    pub const PLACEHOLDER: &str = "placeholder";
+    /// Button / TextField / Text 的变体
+    pub const VARIANT: &str = "variant";
+    /// Image / Video / AudioPlayer 的资源地址（动态）
+    pub const URL: &str = "url";
+    /// Icon 的图标名（动态）
+    pub const NAME: &str = "name";
+    /// AudioPlayer 的描述文本（动态）
+    pub const DESCRIPTION: &str = "description";
+    /// Image 的宽度（number 或 "fill"/"shrink"）
+    pub const WIDTH: &str = "width";
+    /// Image 的高度（number 或 "fill"/"shrink"）
+    pub const HEIGHT: &str = "height";
+    /// Button / Card 的子组件 ID 引用
+    pub const CHILD: &str = "child";
+    /// Row / Column / List 的子组件列表（数组或 {template, path} 模板）
+    pub const CHILDREN: &str = "children";
+    /// Modal 的内容组件 ID 引用
+    pub const CONTENT: &str = "content";
+    /// Modal 的触发组件 ID 引用
+    pub const TRIGGER: &str = "trigger";
+    /// Modal 的标题
+    pub const TITLE: &str = "title";
+    /// Tabs 的标签页声明数组
+    pub const TABS: &str = "tabs";
+    /// ChoicePicker 的候选项数组
+    pub const OPTIONS: &str = "options";
+    /// 可交互组件的 action 声明（`action.event.*`）
+    pub const ACTION: &str = "action";
+    /// 通用样式对象
+    pub const STYLE: &str = "style";
 }
 
 // ---- Tests ----
@@ -1558,5 +1806,161 @@ mod tests {
         assert_eq!(json_val["enableTime"], true);
         assert_eq!(json_val["min"], "2024-01-01");
         assert_eq!(json_val["max"], "2024-12-31");
+    }
+}
+
+// ---- 类型化 props 访问器测试 ----
+
+#[cfg(test)]
+mod prop_accessor_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 经协议反序列化路径构造组件（与线路输入同形）
+    fn component(mut props: Value) -> Component {
+        let obj = props.as_object_mut().expect("props must be an object");
+        obj.insert("component".into(), json!("Test"));
+        obj.insert("id".into(), json!("c1"));
+        serde_json::from_value(Value::Object(obj.clone())).expect("valid component")
+    }
+
+    // ---- 裸标量 ----
+
+    #[test]
+    fn prop_str_reads_string_and_rejects_other_types() {
+        let c = component(json!({"variant": "primary", "num": 3}));
+        assert_eq!(c.prop_str("variant"), Some("primary"));
+        assert_eq!(c.prop_str("num"), None); // 类型不符 → None（对齐 .as_str() 宽容语义）
+        assert_eq!(c.prop_str("missing"), None);
+    }
+
+    #[test]
+    fn prop_bool_reads_bool_and_rejects_other_types() {
+        let c = component(json!({"checked": true, "s": "true"}));
+        assert_eq!(c.prop_bool("checked"), Some(true));
+        assert_eq!(c.prop_bool("s"), None);
+        assert_eq!(c.prop_bool("missing"), None);
+    }
+
+    #[test]
+    fn prop_f64_reads_int_and_float_and_rejects_other_types() {
+        let c = component(json!({"min": 5, "max": 0.5, "s": "3"}));
+        assert_eq!(c.prop_f64("min"), Some(5.0));
+        assert_eq!(c.prop_f64("max"), Some(0.5));
+        assert_eq!(c.prop_f64("s"), None);
+        assert_eq!(c.prop_f64("missing"), None);
+    }
+
+    #[test]
+    fn prop_str_list_filters_non_string_entries_silently() {
+        // 对齐现状：options 解析对非字符串项静默过滤（含 {"path":...} 包装）
+        let c = component(json!({
+            "options": ["A", "B"],
+            "mixed": ["A", 3, {"path": "/x"}],
+            "notArray": "A"
+        }));
+        assert_eq!(c.prop_str_list("options"), Some(vec!["A", "B"]));
+        assert_eq!(c.prop_str_list("mixed"), Some(vec!["A"]));
+        assert_eq!(c.prop_str_list("notArray"), None);
+        assert_eq!(c.prop_str_list("missing"), None);
+    }
+
+    #[test]
+    fn prop_component_id_validates_id_rules() {
+        let c = component(json!({"child": "child_1", "bad": "9bad", "num": 3}));
+        assert_eq!(
+            c.prop_component_id("child"),
+            Some(ComponentId::new("child_1").unwrap())
+        );
+        assert_eq!(c.prop_component_id("bad"), None); // 非法 ID → None
+        assert_eq!(c.prop_component_id("num"), None);
+        assert_eq!(c.prop_component_id("missing"), None);
+    }
+
+    // ---- 动态值四象限：字面量 / path / call / 类型不符 ----
+
+    #[test]
+    fn prop_dynamic_str_four_quadrants() {
+        let c = component(json!({
+            "lit": "hello",
+            "bound": {"path": "/user/name"},
+            "called": {"call": "fmt", "args": {"x": 1}},
+            "mismatch": 3,
+            "badPath": {"path": 3}
+        }));
+        assert_eq!(
+            c.prop_dynamic_str("lit"),
+            Some(DynamicValue::Literal("hello".to_string()))
+        );
+        assert_eq!(
+            c.prop_dynamic_str("bound"),
+            Some(DynamicValue::Path {
+                path: "/user/name".to_string()
+            })
+        );
+        assert_eq!(
+            c.prop_dynamic_str("called"),
+            Some(DynamicValue::FunctionCall {
+                call: "fmt".to_string(),
+                args: json!({"x": 1})
+            })
+        );
+        // 类型不符 → None（现状 .as_str() 失败即 None，不新增报错路径）
+        assert_eq!(c.prop_dynamic_str("mismatch"), None);
+        assert_eq!(c.prop_dynamic_str("badPath"), None);
+        assert_eq!(c.prop_dynamic_str("missing"), None);
+    }
+
+    #[test]
+    fn prop_dynamic_bool_four_quadrants() {
+        let c = component(json!({
+            "lit": true,
+            "bound": {"path": "/form/agree"},
+            "mismatch": "true",
+            "callNoArgs": {"call": "f"}
+        }));
+        assert_eq!(
+            c.prop_dynamic_bool("lit"),
+            Some(DynamicValue::Literal(true))
+        );
+        assert_eq!(
+            c.prop_dynamic_bool("bound"),
+            Some(DynamicValue::Path {
+                path: "/form/agree".to_string()
+            })
+        );
+        assert_eq!(c.prop_dynamic_bool("mismatch"), None);
+        // {"call":..} 缺 args：现状手写分支同样解析不出 → None
+        assert_eq!(c.prop_dynamic_bool("callNoArgs"), None);
+    }
+
+    #[test]
+    fn prop_dynamic_f64_four_quadrants() {
+        let c = component(json!({
+            "int": 5,
+            "float": 0.5,
+            "bound": {"path": "/volume"},
+            "mismatch": true
+        }));
+        assert_eq!(c.prop_dynamic_f64("int"), Some(DynamicValue::Literal(5.0)));
+        assert_eq!(
+            c.prop_dynamic_f64("float"),
+            Some(DynamicValue::Literal(0.5))
+        );
+        assert_eq!(
+            c.prop_dynamic_f64("bound"),
+            Some(DynamicValue::Path {
+                path: "/volume".to_string()
+            })
+        );
+        assert_eq!(c.prop_dynamic_f64("mismatch"), None);
+    }
+
+    #[test]
+    fn prop_keys_constants_match_wire_names() {
+        assert_eq!(prop_keys::TEXT, "text");
+        assert_eq!(prop_keys::CHILDREN, "children");
+        assert_eq!(prop_keys::ACTION, "action");
+        assert_eq!(prop_keys::CHECKED, "checked");
     }
 }
