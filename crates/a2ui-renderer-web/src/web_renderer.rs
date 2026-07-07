@@ -635,6 +635,16 @@ impl Renderer for WebRenderer {
     }
 
     async fn handle_user_event(&mut self, event: UserEvent) -> RenderResult<Option<ActionMessage>> {
+        // 先把输入值写回组件声明的绑定路径（在读取 dataModel 快照之前），
+        // 使快照与后续渲染反映最新输入
+        if let Some((surface_id, path)) =
+            a2ui_renderer::write_back_user_event(&self.forest, &mut self.data_bindings, &event)?
+        {
+            self.surface_lru.touch(&surface_id);
+            self.dependency_graph.on_data_change(&path);
+            self.dirty_surfaces.insert(surface_id);
+        }
+
         let send_data_surface = self
             .send_data_model
             .iter()
@@ -897,6 +907,87 @@ mod tests {
         let html = renderer.render_surface_html("s1");
         assert!(html.is_some());
         assert!(html.unwrap().contains("Hello World"));
+    }
+
+    #[tokio::test]
+    async fn test_text_input_writes_back_and_renders_new_value() {
+        let mut renderer = WebRenderer::new();
+        let field: Component = serde_json::from_value(json!({
+            "component":"TextField","id":"root","value":{"path":"/form/username"}
+        }))
+        .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: true,
+                components: Some(vec![field]),
+                data_model: Some(json!({"form": {"username": "old"}})),
+            })
+            .await
+            .unwrap();
+
+        let action = renderer
+            .handle_user_event(UserEvent::TextInput {
+                component_id: ComponentId::new("root").unwrap(),
+                value: "alice".into(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        // 绑定路径已更新
+        assert_eq!(
+            renderer
+                .data_bindings
+                .get("s1")
+                .unwrap()
+                .get("/form/username"),
+            Some(&json!("alice"))
+        );
+        // dataModel 快照含新值
+        let Some(DynamicValue::Literal(dm)) = action.context.get("dataModel").cloned() else {
+            panic!("dataModel context should be Literal");
+        };
+        assert_eq!(dm.pointer("/form/username"), Some(&json!("alice")));
+        // 写回后渲染的 HTML 含新值（脏标记 → 缓存失效链路）
+        let html = renderer.render_surface_html("s1").expect("html");
+        assert!(html.contains("alice"), "HTML 应含写回后的新值: {html}");
+    }
+
+    #[tokio::test]
+    async fn test_check_toggle_writes_back_to_data_model() {
+        let mut renderer = WebRenderer::new();
+        let checkbox: Component = serde_json::from_value(json!({
+            "component":"CheckBox","id":"root","checked":{"path":"/agree"}
+        }))
+        .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![checkbox]),
+                data_model: Some(json!({"agree": false})),
+            })
+            .await
+            .unwrap();
+
+        renderer
+            .handle_user_event(UserEvent::CheckToggle {
+                component_id: ComponentId::new("root").unwrap(),
+                checked: true,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            renderer.data_bindings.get("s1").unwrap().get("/agree"),
+            Some(&json!(true))
+        );
+        assert!(renderer.dirty_surfaces.contains("s1"));
     }
 
     #[tokio::test]
