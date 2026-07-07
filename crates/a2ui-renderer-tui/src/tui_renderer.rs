@@ -416,12 +416,12 @@ impl Renderer for TuiRenderer {
 mod tests {
     use super::*;
     use a2ui_core::message::client_to_server::V1_0ClientMessage;
+    use a2ui_core::prelude::json;
     use a2ui_core::ComponentId;
     use ratatui::{
         style::{Color, Modifier},
         Terminal,
     };
-    use serde_json::json;
 
     #[test]
     fn test_tui_renderer_new() {
@@ -604,7 +604,7 @@ mod tests {
         use ratatui::backend::TestBackend;
 
         let mut renderer = TuiRenderer::new();
-        let comp: Component = serde_json::from_value(json!({
+        let comp: Component = Component::from_value(json!({
             "id": "root",
             "component": "Text",
             "text": "Styled",
@@ -645,7 +645,7 @@ mod tests {
         use ratatui::backend::TestBackend;
 
         let mut renderer = TuiRenderer::new();
-        let comp: Component = serde_json::from_value(json!({
+        let comp: Component = Component::from_value(json!({
             "id": "root",
             "component": "Icon",
             "name": "star",
@@ -834,7 +834,7 @@ mod tests {
                 want_response: true,
                 call: a2ui_core::message::server_to_client::CallFunctionPayload {
                     call: "validate".into(),
-                    args: serde_json::json!({"value": "test"}),
+                    args: json!({"value": "test"}),
                 },
             })
             .await;
@@ -852,7 +852,7 @@ mod tests {
                 want_response: true,
                 call: a2ui_core::message::server_to_client::CallFunctionPayload {
                     call: "fetch".into(),
-                    args: serde_json::json!({"url": "https://example.com"}),
+                    args: json!({"url": "https://example.com"}),
                 },
             })
             .await;
@@ -872,7 +872,7 @@ mod tests {
                 want_response: true,
                 call: a2ui_core::message::server_to_client::CallFunctionPayload {
                     call: "unknown".into(),
-                    args: serde_json::json!({}),
+                    args: json!({}),
                 },
             })
             .await;
@@ -893,7 +893,7 @@ mod tests {
                 want_response: true,
                 call: a2ui_core::message::server_to_client::CallFunctionPayload {
                     call: "formatString".into(),
-                    args: serde_json::json!({"template": "Hello"}),
+                    args: json!({"template": "Hello"}),
                 },
             })
             .await;
@@ -988,7 +988,7 @@ mod tests {
 
         // Parent with ChildList::Object
         let parent: Component =
-            serde_json::from_value(serde_json::json!({"component": "Column", "id": "list", "children": {"template": "item_tmpl", "path": "/items"}}))
+            Component::from_value(json!({"component": "Column", "id": "list", "children": {"template": "item_tmpl", "path": "/items"}}))
                 .unwrap();
 
         renderer
@@ -998,7 +998,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![parent, template]),
-                data_model: Some(serde_json::json!({"items": [{"name": "a"}, {"name": "b"}]})),
+                data_model: Some(json!({"items": [{"name": "a"}, {"name": "b"}]})),
             })
             .await
             .unwrap();
@@ -1011,7 +1011,7 @@ mod tests {
         assert!(comp0.is_some());
         assert_eq!(
             comp0.unwrap().properties().get("text"),
-            Some(&serde_json::json!({"path": "/items/0/name"}))
+            Some(&json!({"path": "/items/0/name"}))
         );
     }
 
@@ -1024,12 +1024,12 @@ mod tests {
             ComponentId::new("idx_tmpl").unwrap(),
             DynamicValue::FunctionCall {
                 call: "@index".into(),
-                args: serde_json::json!({}),
+                args: json!({}),
             },
         );
 
         let parent: Component =
-            serde_json::from_value(serde_json::json!({"component": "Column", "id": "list", "children": {"template": "idx_tmpl", "path": "/items"}}))
+            Component::from_value(json!({"component": "Column", "id": "list", "children": {"template": "idx_tmpl", "path": "/items"}}))
                 .unwrap();
 
         renderer
@@ -1039,7 +1039,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![parent, template]),
-                data_model: Some(serde_json::json!({"items": [1, 2, 3]})),
+                data_model: Some(json!({"items": [1, 2, 3]})),
             })
             .await
             .unwrap();
@@ -1049,10 +1049,7 @@ mod tests {
             .forest()
             .get("s1", &ComponentId::new("idx_tmpl_1").unwrap());
         assert!(comp1.is_some());
-        assert_eq!(
-            comp1.unwrap().properties().get("text"),
-            Some(&serde_json::json!(1))
-        );
+        assert_eq!(comp1.unwrap().properties().get("text"), Some(&json!(1)));
     }
 
     // --- P1-2: responsePath 写回 ---
@@ -1074,7 +1071,7 @@ mod tests {
                     surface_properties: None,
                     send_data_model: false,
                     components: Some(vec![comp]),
-                    data_model: Some(serde_json::json!({"result": "pending"})),
+                    data_model: Some(json!({"result": "pending"})),
                 })
                 .await
                 .unwrap();
@@ -1085,7 +1082,7 @@ mod tests {
             .action_response(ActionResponse {
                 action_id: "action-1".into(),
                 response: a2ui_core::message::server_to_client::ActionResponsePayload::Success(
-                    serde_json::json!("done"),
+                    json!("done"),
                 ),
             })
             .await
@@ -1093,12 +1090,12 @@ mod tests {
 
         assert_eq!(
             renderer.core.binding("s2").unwrap().get("/result"),
-            Some(&serde_json::json!("done")),
+            Some(&json!("done")),
             "注册到 s2 的响应应写入 s2"
         );
         assert_eq!(
             renderer.core.binding("s1").unwrap().get("/result"),
-            Some(&serde_json::json!("pending")),
+            Some(&json!("pending")),
             "s1 不应被误写"
         );
     }
@@ -1117,7 +1114,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"result": "pending"})),
+                data_model: Some(json!({"result": "pending"})),
             })
             .await
             .unwrap();
@@ -1128,7 +1125,7 @@ mod tests {
             .action_response(ActionResponse {
                 action_id: "action-1".into(),
                 response: a2ui_core::message::server_to_client::ActionResponsePayload::Success(
-                    serde_json::json!("done"),
+                    json!("done"),
                 ),
             })
             .await
@@ -1136,7 +1133,7 @@ mod tests {
 
         assert_eq!(
             renderer.core.binding("s1").unwrap().get("/result"),
-            Some(&serde_json::json!("pending")),
+            Some(&json!("pending")),
             "任何 binding 都不应被写入"
         );
     }
@@ -1155,7 +1152,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"result": "pending"})),
+                data_model: Some(json!({"result": "pending"})),
             })
             .await
             .unwrap();
@@ -1168,7 +1165,7 @@ mod tests {
             .action_response(ActionResponse {
                 action_id: "action-1".into(),
                 response: a2ui_core::message::server_to_client::ActionResponsePayload::Success(
-                    serde_json::json!("done"),
+                    json!("done"),
                 ),
             })
             .await
@@ -1176,7 +1173,7 @@ mod tests {
 
         // 验证 DataModel 已被更新
         let binding = renderer.core.binding("s1").unwrap();
-        assert_eq!(binding.get("/result"), Some(&serde_json::json!("done")));
+        assert_eq!(binding.get("/result"), Some(&json!("done")));
     }
 
     #[tokio::test]
@@ -1193,7 +1190,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"error": null})),
+                data_model: Some(json!({"error": null})),
             })
             .await
             .unwrap();
@@ -1214,10 +1211,7 @@ mod tests {
             .unwrap();
 
         let binding = renderer.core.binding("s1").unwrap();
-        assert_eq!(
-            binding.get("/error"),
-            Some(&serde_json::json!("request timed out"))
-        );
+        assert_eq!(binding.get("/error"), Some(&json!("request timed out")));
     }
 
     #[tokio::test]
@@ -1234,7 +1228,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"result": "pending"})),
+                data_model: Some(json!({"result": "pending"})),
             })
             .await
             .unwrap();
@@ -1244,7 +1238,7 @@ mod tests {
             .action_response(ActionResponse {
                 action_id: "unknown-action".into(),
                 response: a2ui_core::message::server_to_client::ActionResponsePayload::Success(
-                    serde_json::json!("done"),
+                    json!("done"),
                 ),
             })
             .await;
@@ -1252,15 +1246,15 @@ mod tests {
 
         // DataModel 应未被修改
         let binding = renderer.core.binding("s1").unwrap();
-        assert_eq!(binding.get("/result"), Some(&serde_json::json!("pending")));
+        assert_eq!(binding.get("/result"), Some(&json!("pending")));
     }
 
     // --- 用户事件（docs/refactor-step0 规范语义）---
 
     /// 创建含单个绑定组件的 surface，返回 renderer
-    async fn renderer_with_bound_component(component: serde_json::Value) -> TuiRenderer {
+    async fn renderer_with_bound_component(component: a2ui_core::Value) -> TuiRenderer {
         let mut renderer = TuiRenderer::new();
-        let comp: Component = serde_json::from_value(component).unwrap();
+        let comp: Component = Component::from_value(component).unwrap();
         renderer
             .create_surface(CreateSurface {
                 surface_id: "s1".into(),
@@ -1363,7 +1357,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: true,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
             })
             .await
             .unwrap();
@@ -1382,10 +1376,10 @@ mod tests {
     /// 创建含声明式 action Button 的 surface
     async fn renderer_with_action_button(
         send_data_model: bool,
-        data_model: serde_json::Value,
+        data_model: a2ui_core::Value,
     ) -> TuiRenderer {
         let mut renderer = TuiRenderer::new();
-        let btn: Component = serde_json::from_value(json!({
+        let btn: Component = Component::from_value(json!({
             "id":"btn","component":"Button","child":"lbl",
             "action":{"event":{"name":"submit"}}
         }))
@@ -1490,7 +1484,7 @@ mod tests {
         use ratatui::backend::TestBackend;
 
         let mut renderer = TuiRenderer::new();
-        let tf: Component = serde_json::from_str(
+        let tf: Component = Component::from_json(
             r#"{"id":"name_input","component":"TextField","value":"Alice","placeholder":"Enter name"}"#
         ).unwrap();
         renderer
@@ -1520,7 +1514,7 @@ mod tests {
         use ratatui::backend::TestBackend;
 
         let mut renderer = TuiRenderer::new();
-        let cb: Component = serde_json::from_str(
+        let cb: Component = Component::from_json(
             r#"{"id":"agree","component":"CheckBox","checked":true,"label":"I agree"}"#,
         )
         .unwrap();
@@ -1551,7 +1545,7 @@ mod tests {
         use ratatui::backend::TestBackend;
 
         let mut renderer = TuiRenderer::new();
-        let sl: Component = serde_json::from_str(
+        let sl: Component = Component::from_json(
             r#"{"id":"volume","component":"Slider","value":50,"min":0,"max":100}"#,
         )
         .unwrap();
@@ -1617,7 +1611,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
             })
             .await
             .unwrap();
@@ -1655,7 +1649,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
             })
             .await
             .unwrap();
@@ -1690,7 +1684,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"result": "pending"})),
+                data_model: Some(json!({"result": "pending"})),
             })
             .await
             .unwrap();
@@ -1704,7 +1698,7 @@ mod tests {
             .action_response(ActionResponse {
                 action_id: "action-1".into(),
                 response: a2ui_core::message::server_to_client::ActionResponsePayload::Success(
-                    serde_json::json!("done"),
+                    json!("done"),
                 ),
             })
             .await
@@ -1732,7 +1726,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
             })
             .await
             .unwrap();
@@ -1774,7 +1768,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
             })
             .await
             .unwrap();
@@ -1829,16 +1823,16 @@ mod tests {
     #[tokio::test]
     async fn test_focus_manager_collects_focusable_after_render() {
         let mut renderer = TuiRenderer::new();
-        let btn: Component = serde_json::from_str(
+        let btn: Component = Component::from_json(
             r#"{"id":"btn","component":"Button","child":"lbl","text":"Click"}"#,
         )
         .unwrap();
-        let tf: Component = serde_json::from_str(
+        let tf: Component = Component::from_json(
             r#"{"id":"tf","component":"TextField","value":"","placeholder":"Enter"}"#,
         )
         .unwrap();
         let root: Component =
-            serde_json::from_str(r#"{"id":"root","component":"Column","children":["btn","tf"]}"#)
+            Component::from_json(r#"{"id":"root","component":"Column","children":["btn","tf"]}"#)
                 .unwrap();
         renderer
             .create_surface(CreateSurface {
@@ -1861,10 +1855,10 @@ mod tests {
     async fn test_tab_key_navigates_focus() {
         let mut renderer = TuiRenderer::new();
         let btn: Component =
-            serde_json::from_str(r#"{"id":"btn","component":"Button","child":"lbl","text":"OK"}"#)
+            Component::from_json(r#"{"id":"btn","component":"Button","child":"lbl","text":"OK"}"#)
                 .unwrap();
         let root: Component =
-            serde_json::from_str(r#"{"id":"root","component":"Column","children":["btn"]}"#)
+            Component::from_json(r#"{"id":"root","component":"Column","children":["btn"]}"#)
                 .unwrap();
         renderer
             .create_surface(CreateSurface {
@@ -1892,13 +1886,13 @@ mod tests {
         // KeyPress 本地转译（docs/refactor-step0 D7）：Enter = 焦点组件的
         // Click，交核心按声明式 action 构造消息
         let mut renderer = TuiRenderer::new();
-        let btn: Component = serde_json::from_value(json!({
+        let btn: Component = Component::from_value(json!({
             "id":"btn","component":"Button","child":"lbl",
             "action":{"event":{"name":"submit"}}
         }))
         .unwrap();
         let root: Component =
-            serde_json::from_str(r#"{"id":"root","component":"Column","children":["btn"]}"#)
+            Component::from_json(r#"{"id":"root","component":"Column","children":["btn"]}"#)
                 .unwrap();
         renderer
             .create_surface(CreateSurface {

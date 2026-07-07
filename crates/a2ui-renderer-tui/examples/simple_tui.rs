@@ -5,6 +5,7 @@
 //! 运行：`cargo run --example simple_tui -p a2ui-renderer-tui`
 
 use a2ui_core::message::server_to_client::CreateSurface;
+use a2ui_core::prelude::json;
 use a2ui_core::prelude::*;
 use a2ui_renderer::Renderer;
 use a2ui_renderer_tui::TuiRenderer;
@@ -14,7 +15,6 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::backend::CrosstermBackend;
-use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,12 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     renderer.register_function("openUrl", a2ui_renderer::CallableFrom::ClientOnly);
 
     // 注册 Basic Catalog
-    let catalog: a2ui_core::Catalog = serde_json::from_value(json!({
-        "catalogId": "basic",
-        "instructions": "Basic catalog",
-        "components": {},
-        "functions": {}
-    }))?;
+    let catalog = a2ui_core::Catalog::new("basic").with_instructions("Basic catalog");
     renderer.register_catalog(catalog).ok();
 
     // 构建演示组件树
@@ -54,35 +49,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     );
 
-    let title: Component = serde_json::from_value(json!({
+    let title: Component = Component::from_value(json!({
         "id": "title",
         "component": "Text",
         "text": "🖥  A2UI TUI Renderer Demo"
     }))?;
-    let subtitle: Component = serde_json::from_value(json!({
+    let subtitle: Component = Component::from_value(json!({
         "id": "subtitle",
         "component": "Text",
         "text": "终端界面渲染演示 · 按 q 退出"
     }))?;
-    let div1: Component = serde_json::from_value(json!({
+    let div1: Component = Component::from_value(json!({
         "id": "div1", "component": "Divider"
     }))?;
-    let div2: Component = serde_json::from_value(json!({
+    let div2: Component = Component::from_value(json!({
         "id": "div2", "component": "Divider"
     }))?;
-    let tf: Component = serde_json::from_value(json!({
+    let tf: Component = Component::from_value(json!({
         "id": "tf",
         "component": "TextField",
         "value": "Hello TUI",
         "placeholder": "输入文本..."
     }))?;
-    let cb: Component = serde_json::from_value(json!({
+    let cb: Component = Component::from_value(json!({
         "id": "cb",
         "component": "CheckBox",
         "checked": true,
         "label": "启用通知"
     }))?;
-    let sl: Component = serde_json::from_value(json!({
+    let sl: Component = Component::from_value(json!({
         "id": "sl",
         "component": "Slider",
         "value": 60,
@@ -94,29 +89,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         DynamicValue::Literal("点击我".to_string()),
     );
     // 声明式 server action：激活（Enter/空格）时发送 "demo_submit"
-    let btn: Component = serde_json::from_value(json!({
+    let btn: Component = Component::from_value(json!({
         "id": "btn",
         "component": "Button",
         "child": "btn_label",
         "variant": "primary",
         "action": { "event": { "name": "demo_submit" } }
     }))?;
-    let item1: Component = serde_json::from_value(json!({
+    let item1: Component = Component::from_value(json!({
         "id": "item1",
         "component": "Text",
         "text": "  ✅  ratatui 终端渲染"
     }))?;
-    let item2: Component = serde_json::from_value(json!({
+    let item2: Component = Component::from_value(json!({
         "id": "item2",
         "component": "Text",
         "text": "  ⌨   声明式 action → action 消息"
     }))?;
-    let item3: Component = serde_json::from_value(json!({
+    let item3: Component = Component::from_value(json!({
         "id": "item3",
         "component": "Text",
         "text": "  🔄  增量渲染 + DependencyGraph"
     }))?;
-    let footer: Component = serde_json::from_value(json!({
+    let footer: Component = Component::from_value(json!({
         "id": "footer",
         "component": "Text",
         "text": "A2UI Protocol v1.0 · a2ui-rs"

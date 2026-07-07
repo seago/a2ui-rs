@@ -91,7 +91,6 @@ dependencies = [
  "async-trait",
  "crossterm",
  "ratatui",
- "serde_json",
  "tokio",
  "tracing",
 ]

@@ -1,6 +1,7 @@
 use crate::widget_builder::component_style_to_tui;
+use a2ui_core::component::prop_keys;
 use a2ui_core::prelude::*;
-use a2ui_renderer::{resolve_dynamic_string_prop, ComponentStyle};
+use a2ui_renderer::{resolve_str, ComponentStyle};
 use ratatui::{
     layout::Constraint,
     style::{Color, Style},
@@ -21,21 +22,17 @@ impl WidgetMapper {
 
     /// 从组件属性中提取文本内容
     pub fn extract_text(&self, component: &Component) -> String {
-        resolve_dynamic_string_prop(
-            component.properties(),
-            "text",
-            None,
-            &format!("[{}]", component.component_type()),
-        )
+        match component.prop_dynamic_value(prop_keys::TEXT) {
+            Some(dv) => resolve_str(&dv, None),
+            None => format!("[{}]", component.component_type()),
+        }
     }
 
     /// 获取组件类型对应的样式
     pub fn component_style(&self, component: &Component) -> Style {
         match component.component_type() {
             "Button" => Style::default().fg(Color::Cyan),
-            "Text" | "Icon" => component_style_to_tui(&ComponentStyle::from_component_props(
-                component.properties(),
-            )),
+            "Text" | "Icon" => component_style_to_tui(&ComponentStyle::from_component(component)),
             "TextField" => Style::default(),
             "CheckBox" => Style::default(),
             "Divider" => Style::default().fg(Color::Gray),
@@ -138,7 +135,7 @@ mod tests {
     #[test]
     fn test_component_style_text_uses_shared_style_contract() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_value(serde_json::json!({
+        let comp: Component = Component::from_value(json!({
             "id": "t",
             "component": "Text",
             "text": "hi",
@@ -161,7 +158,7 @@ mod tests {
     #[test]
     fn test_component_style_icon_uses_shared_style_contract() {
         let mapper = WidgetMapper;
-        let comp: Component = serde_json::from_value(serde_json::json!({
+        let comp: Component = Component::from_value(json!({
             "id": "i",
             "component": "Icon",
             "name": "star",

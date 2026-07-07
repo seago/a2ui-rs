@@ -1,8 +1,8 @@
+use a2ui_core::component::{prop_keys, ChildrenDecl};
 use a2ui_core::prelude::*;
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
-    resolve_dynamic_string_prop, ComponentForest, ComponentStyle, CustomComponentRegistry,
-    DataBinding,
+    resolve_str, ComponentForest, ComponentStyle, CustomComponentRegistry, DataBinding,
 };
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -220,7 +220,7 @@ impl<'a> WidgetBuilder<'a> {
             "Modal" => return,
             // Tabs 仅渲染激活（第 0 个）tab 的子组件，按 id 从 children 中选取
             "Tabs" => {
-                let (_, tab_children) = parse_tabs(comp.properties());
+                let (_, tab_children) = parse_tabs(comp);
                 if let Some(active_id) = tab_children.first() {
                     if let Some(child_node) =
                         children.iter().find(|c| c.component.id() == active_id)
@@ -253,32 +253,27 @@ impl<'a> WidgetBuilder<'a> {
 
     /// 从组件属性中提取子组件 ID 列表
     fn get_child_ids(&self, component: &Component) -> Vec<ComponentId> {
-        let props = component.properties();
         let mut ids = Vec::new();
 
         // 检查 children 属性 — 支持两种格式：
-        // 1. 数组格式: {"children": ["id1", "id2"]}（Component::column() 生成）
-        // 2. 对象格式: {"children": {"children": [...]}}（旧版兼容）
-        if let Some(children_val) = props.get("children") {
-            // 数组格式
-            if let Some(children_arr) = children_val.as_array() {
-                for id_val in children_arr {
-                    if let Some(id_str) = id_val.as_str() {
-                        if let Ok(id) = ComponentId::new(id_str) {
-                            ids.push(id);
-                        }
-                    }
-                }
-            }
-            // 对象格式（兼容）
-            if let Some(children_obj) = children_val.as_object() {
-                if let Some(ids_val) = children_obj.get("children") {
-                    if let Some(ids_arr) = ids_val.as_array() {
-                        for id_val in ids_arr {
-                            if let Some(id_str) = id_val.as_str() {
-                                if let Ok(id) = ComponentId::new(id_str) {
-                                    ids.push(id);
-                                }
+        // 1. 数组格式: {"children": ["id1", "id2"]}（Component::column() 生成，
+        //    经 core 的 children_decl() 视图解析）
+        // 2. 对象格式: {"children": {"children": [...]}}（旧版兼容——历史
+        //    包袱不进 core，此处私有兜底；模板形态在核心层已展开为数组）
+        match component.children_decl() {
+            Some(ChildrenDecl::Ids(list)) => ids.extend(list),
+            _ => {
+                if let Some(ids_arr) = component
+                    .properties()
+                    .get(prop_keys::CHILDREN)
+                    .and_then(|v| v.as_object())
+                    .and_then(|obj| obj.get("children"))
+                    .and_then(|v| v.as_array())
+                {
+                    for id_val in ids_arr {
+                        if let Some(id_str) = id_val.as_str() {
+                            if let Ok(id) = ComponentId::new(id_str) {
+                                ids.push(id);
                             }
                         }
                     }
@@ -287,23 +282,19 @@ impl<'a> WidgetBuilder<'a> {
         }
 
         // 检查单个 child 属性
-        if let Some(child_str) = props.get("child").and_then(|v| v.as_str()) {
-            if let Ok(id) = ComponentId::new(child_str) {
+        if let Some(id) = component.prop_component_id(prop_keys::CHILD) {
+            ids.push(id);
+        }
+
+        // Modal 的 content/trigger 引用（缺失时同样产生占位符）
+        for key in [prop_keys::CONTENT, prop_keys::TRIGGER] {
+            if let Some(id) = component.prop_component_id(key) {
                 ids.push(id);
             }
         }
 
-        // Modal 的 content/trigger 引用（缺失时同样产生占位符）
-        for key in ["content", "trigger"] {
-            if let Some(s) = props.get(key).and_then(|v| v.as_str()) {
-                if let Ok(id) = ComponentId::new(s) {
-                    ids.push(id);
-                }
-            }
-        }
-
         // Tabs 的 tabs[].child 引用
-        let (_, tab_children) = parse_tabs(props);
+        let (_, tab_children) = parse_tabs(component);
         ids.extend(tab_children);
 
         ids
@@ -320,13 +311,11 @@ impl<'a> WidgetBuilder<'a> {
                 title: format!("[{}]", ctype),
             },
             "Button" => {
-                let props = component.properties();
-                let child_id = props.get("child").and_then(|v| v.as_str()).unwrap_or("");
+                let child_id = component.prop_str(prop_keys::CHILD).unwrap_or("");
                 // 尝试从引用的子 Text 组件获取 label
                 let label = self.resolve_child_text(component, child_id);
-                let variant = props
-                    .get("variant")
-                    .and_then(|v| v.as_str())
+                let variant = component
+                    .prop_str(prop_keys::VARIANT)
                     .unwrap_or("default")
                     .to_string();
                 RenderableWidget::Button {
@@ -345,19 +334,17 @@ impl<'a> WidgetBuilder<'a> {
                 area,
             },
             "Icon" => {
-                let props = component.properties();
-                let name = resolve_dynamic_string_prop(props, "name", Some(self.binding), "?");
+                let name = resolve_string_prop(component, prop_keys::NAME, self.binding, "?");
                 let symbol = icon_to_symbol(name);
                 RenderableWidget::Icon {
                     id: component.id().clone(),
                     area,
                     symbol,
-                    style: ComponentStyle::from_component_props(props),
+                    style: ComponentStyle::from_component(component),
                 }
             }
             "Image" => {
-                let props = component.properties();
-                let url = resolve_dynamic_string_prop(props, "url", Some(self.binding), "");
+                let url = resolve_string_prop(component, prop_keys::URL, self.binding, "");
                 RenderableWidget::Image {
                     id: component.id().clone(),
                     area,
@@ -365,8 +352,7 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             "Tabs" => {
-                let props = component.properties();
-                let (titles, children_ids) = parse_tabs(props);
+                let (titles, children_ids) = parse_tabs(component);
                 RenderableWidget::Tabs {
                     id: component.id().clone(),
                     area,
@@ -375,24 +361,13 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             "ChoicePicker" => {
-                let props = component.properties();
-                let options: Vec<String> = props
-                    .get("options")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|o| o.as_str().map(String::from))
-                            .collect()
-                    })
+                let options: Vec<String> = component
+                    .prop_str_list(prop_keys::OPTIONS)
+                    .map(|list| list.into_iter().map(String::from).collect())
                     .unwrap_or_default();
-                let selected: Vec<String> = props
-                    .get("value")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|s| s.as_str().map(String::from))
-                            .collect()
-                    })
+                let selected: Vec<String> = component
+                    .prop_str_list(prop_keys::VALUE)
+                    .map(|list| list.into_iter().map(String::from).collect())
                     .unwrap_or_default();
                 RenderableWidget::ChoicePicker {
                     id: component.id().clone(),
@@ -402,12 +377,7 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             "Video" => {
-                let url = resolve_dynamic_string_prop(
-                    component.properties(),
-                    "url",
-                    Some(self.binding),
-                    "",
-                );
+                let url = resolve_string_prop(component, prop_keys::URL, self.binding, "");
                 RenderableWidget::Video {
                     id: component.id().clone(),
                     area,
@@ -415,10 +385,8 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             "AudioPlayer" => {
-                let props = component.properties();
-                let url = resolve_dynamic_string_prop(props, "url", Some(self.binding), "");
-                let desc =
-                    resolve_dynamic_string_prop(props, "description", Some(self.binding), "");
+                let url = resolve_string_prop(component, prop_keys::URL, self.binding, "");
+                let desc = resolve_string_prop(component, prop_keys::DESCRIPTION, self.binding, "");
                 RenderableWidget::AudioPlayer {
                     id: component.id().clone(),
                     area,
@@ -427,15 +395,12 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             "Modal" => {
-                let props = component.properties();
-                let trigger = props
-                    .get("trigger")
-                    .and_then(|v| v.as_str())
+                let trigger = component
+                    .prop_str(prop_keys::TRIGGER)
                     .unwrap_or("")
                     .to_string();
-                let content = props
-                    .get("content")
-                    .and_then(|v| v.as_str())
+                let content = component
+                    .prop_str(prop_keys::CONTENT)
                     .unwrap_or("")
                     .to_string();
                 RenderableWidget::Modal {
@@ -446,12 +411,7 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             "DateTimeInput" => {
-                let label = resolve_dynamic_string_prop(
-                    component.properties(),
-                    "label",
-                    Some(self.binding),
-                    "",
-                );
+                let label = resolve_string_prop(component, prop_keys::LABEL, self.binding, "");
                 RenderableWidget::DateTimeInput {
                     id: component.id().clone(),
                     area,
@@ -459,10 +419,9 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             "TextField" => {
-                let props = component.properties();
-                let value = resolve_dynamic_string_prop(props, "value", Some(self.binding), "");
+                let value = resolve_string_prop(component, prop_keys::VALUE, self.binding, "");
                 let placeholder =
-                    resolve_dynamic_string_prop(props, "placeholder", Some(self.binding), "");
+                    resolve_string_prop(component, prop_keys::PLACEHOLDER, self.binding, "");
                 RenderableWidget::TextField {
                     id: component.id().clone(),
                     area,
@@ -471,12 +430,8 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             "CheckBox" => {
-                let props = component.properties();
-                let label = resolve_dynamic_string_prop(props, "label", Some(self.binding), "");
-                let checked = props
-                    .get("checked")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                let label = resolve_string_prop(component, prop_keys::LABEL, self.binding, "");
+                let checked = component.prop_bool(prop_keys::CHECKED).unwrap_or(false);
                 RenderableWidget::CheckBox {
                     id: component.id().clone(),
                     area,
@@ -485,10 +440,9 @@ impl<'a> WidgetBuilder<'a> {
                 }
             }
             "Slider" => {
-                let props = component.properties();
-                let value = props.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let min = props.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let max = props.get("max").and_then(|v| v.as_f64()).unwrap_or(100.0);
+                let value = component.prop_f64(prop_keys::VALUE).unwrap_or(0.0);
+                let min = component.prop_f64(prop_keys::MIN).unwrap_or(0.0);
+                let max = component.prop_f64(prop_keys::MAX).unwrap_or(100.0);
                 RenderableWidget::Slider {
                     id: component.id().clone(),
                     area,
@@ -520,7 +474,7 @@ impl<'a> WidgetBuilder<'a> {
                             id: component.id().clone(),
                             area,
                             text,
-                            style: ComponentStyle::from_component_props(component.properties()),
+                            style: ComponentStyle::from_component(component),
                         }
                     }
                 }
@@ -530,10 +484,10 @@ impl<'a> WidgetBuilder<'a> {
 
     /// 从组件属性中提取文本，并在可用时解析 DataBinding 路径。
     fn extract_text(&self, component: &Component) -> String {
-        resolve_dynamic_string_prop(
-            component.properties(),
-            "text",
-            Some(self.binding),
+        resolve_string_prop(
+            component,
+            prop_keys::TEXT,
+            self.binding,
             &format!("[{}]", component.component_type()),
         )
     }
@@ -655,31 +609,35 @@ fn icon_to_symbol(name: impl AsRef<str>) -> String {
     }
 }
 
-/// 从 Tabs 组件的 properties 中解析标题和子组件列表
-fn parse_tabs(props: &serde_json::Value) -> (Vec<String>, Vec<ComponentId>) {
-    let mut titles = Vec::new();
-    let mut children = Vec::new();
-    if let Some(arr) = props.get("tabs").and_then(|v| v.as_array()) {
-        for tab in arr {
-            if let Some(title) = tab.get("title").and_then(|v| v.as_str()) {
-                titles.push(title.to_string());
-            }
-            if let Some(child) = tab.get("child").and_then(|v| v.as_str()) {
-                if let Ok(cid) = ComponentId::new(child) {
-                    children.push(cid);
-                }
-            }
-        }
+/// 从 Tabs 组件解析标题和子组件列表（委托 core 的 tabs_decl 视图）
+fn parse_tabs(component: &Component) -> (Vec<String>, Vec<ComponentId>) {
+    component
+        .tabs_decl()
+        .map(|tabs| tabs.into_iter().map(|tab| (tab.title, tab.child)).unzip())
+        .unwrap_or_default()
+}
+
+/// 经类型化访问器解析动态字符串 prop；键缺失时给 fallback
+/// （语义对齐旧 resolve_dynamic_string_prop：字面量原样、path 经绑定、
+/// call 与未命中 path 给占位符、非字符串字面量按显示文本）
+fn resolve_string_prop(
+    component: &Component,
+    key: &str,
+    binding: &DataBinding,
+    fallback: &str,
+) -> String {
+    match component.prop_dynamic_value(key) {
+        Some(dv) => resolve_str(&dv, Some(binding)),
+        None => fallback.to_string(),
     }
-    (titles, children)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use a2ui_core::prelude::json;
     use a2ui_renderer::CustomComponentRegistry;
     use ratatui::style::{Color, Modifier};
-    use serde_json::json;
 
     #[test]
     fn test_build_widget_tree_from_components() {
@@ -724,7 +682,7 @@ mod tests {
         let binding = DataBinding::new(DataModel::new(json!({})));
         let reg = CustomComponentRegistry::new();
 
-        let modal: Component = serde_json::from_value(
+        let modal: Component = Component::from_value(
             json!({"component":"Modal","id":"root","content":"body","trigger":"btn"}),
         )
         .unwrap();
@@ -733,8 +691,7 @@ mod tests {
             DynamicValue::Literal("modal body".to_string()),
         );
         let btn: Component =
-            serde_json::from_value(json!({"component":"Button","id":"btn","label":"open"}))
-                .unwrap();
+            Component::from_value(json!({"component":"Button","id":"btn","label":"open"})).unwrap();
         forest.upsert("s1", modal).unwrap();
         forest.upsert("s1", body).unwrap();
         forest.upsert("s1", btn).unwrap();
@@ -758,7 +715,7 @@ mod tests {
         let binding = DataBinding::new(DataModel::new(json!({})));
         let reg = CustomComponentRegistry::new();
 
-        let tabs: Component = serde_json::from_value(json!({
+        let tabs: Component = Component::from_value(json!({
             "component":"Tabs","id":"root",
             "tabs":[{"title":"T1","child":"a"},{"title":"T2","child":"b"}]
         }))
@@ -795,7 +752,7 @@ mod tests {
         let reg = CustomComponentRegistry::new();
 
         let modal: Component =
-            serde_json::from_value(json!({"component":"Modal","id":"root","content":"ghost"}))
+            Component::from_value(json!({"component":"Modal","id":"root","content":"ghost"}))
                 .unwrap();
         forest.upsert("s1", modal).unwrap();
 
@@ -866,52 +823,52 @@ mod tests {
         })));
         let reg = CustomComponentRegistry::new();
 
-        let root: Component = serde_json::from_value(json!({
+        let root: Component = Component::from_value(json!({
             "id": "root",
             "component": "Column",
             "children": ["icon", "image", "video", "audio", "field", "check", "date"]
         }))
         .unwrap();
-        let icon: Component = serde_json::from_value(json!({
+        let icon: Component = Component::from_value(json!({
             "id": "icon",
             "component": "Icon",
             "name": {"path": "/icon"}
         }))
         .unwrap();
-        let image: Component = serde_json::from_value(json!({
+        let image: Component = Component::from_value(json!({
             "id": "image",
             "component": "Image",
             "url": {"path": "/image"}
         }))
         .unwrap();
-        let video: Component = serde_json::from_value(json!({
+        let video: Component = Component::from_value(json!({
             "id": "video",
             "component": "Video",
             "url": {"path": "/video"}
         }))
         .unwrap();
-        let audio: Component = serde_json::from_value(json!({
+        let audio: Component = Component::from_value(json!({
             "id": "audio",
             "component": "AudioPlayer",
             "url": {"path": "/audio/url"},
             "description": {"path": "/audio/description"}
         }))
         .unwrap();
-        let field: Component = serde_json::from_value(json!({
+        let field: Component = Component::from_value(json!({
             "id": "field",
             "component": "TextField",
             "value": {"path": "/form/value"},
             "placeholder": {"path": "/form/placeholder"}
         }))
         .unwrap();
-        let check: Component = serde_json::from_value(json!({
+        let check: Component = Component::from_value(json!({
             "id": "check",
             "component": "CheckBox",
             "checked": true,
             "label": {"path": "/form/label"}
         }))
         .unwrap();
-        let date: Component = serde_json::from_value(json!({
+        let date: Component = Component::from_value(json!({
             "id": "date",
             "component": "DateTimeInput",
             "label": {"path": "/date"}
@@ -1013,7 +970,7 @@ mod tests {
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("name_input").unwrap()],
         );
-        let tf: Component = serde_json::from_str(
+        let tf: Component = Component::from_json(
             r#"{"id":"name_input","component":"TextField","value":"Alice","placeholder":"Enter name"}"#
         ).unwrap();
         forest.upsert("s1", root).unwrap();
@@ -1040,7 +997,7 @@ mod tests {
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("agree").unwrap()],
         );
-        let cb: Component = serde_json::from_str(
+        let cb: Component = Component::from_json(
             r#"{"id":"agree","component":"CheckBox","checked":true,"label":"I agree"}"#,
         )
         .unwrap();
@@ -1068,7 +1025,7 @@ mod tests {
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("volume").unwrap()],
         );
-        let sl: Component = serde_json::from_str(
+        let sl: Component = Component::from_json(
             r#"{"id":"volume","component":"Slider","value":50,"min":0,"max":100}"#,
         )
         .unwrap();
@@ -1097,7 +1054,7 @@ mod tests {
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("btn").unwrap()],
         );
-        let btn: Component = serde_json::from_str(
+        let btn: Component = Component::from_json(
             r#"{"id":"btn","component":"Button","child":"lbl","variant":"primary"}"#,
         )
         .unwrap();
@@ -1119,7 +1076,7 @@ mod tests {
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("div").unwrap()],
         );
-        let div: Component = serde_json::from_str(r#"{"id":"div","component":"Divider"}"#).unwrap();
+        let div: Component = Component::from_json(r#"{"id":"div","component":"Divider"}"#).unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", div).unwrap();
         let reg = CustomComponentRegistry::new();
@@ -1139,7 +1096,7 @@ mod tests {
             vec![ComponentId::new("ic").unwrap()],
         );
         let icon: Component =
-            serde_json::from_str(r#"{"id":"ic","component":"Icon","name":"star"}"#).unwrap();
+            Component::from_json(r#"{"id":"ic","component":"Icon","name":"star"}"#).unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", icon).unwrap();
         let reg = CustomComponentRegistry::new();
@@ -1154,7 +1111,7 @@ mod tests {
     fn test_styled_text_maps_to_paragraph_with_degraded_tui_style() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let root: Component = serde_json::from_value(json!({
+        let root: Component = Component::from_value(json!({
             "id": "root",
             "component": "Text",
             "text": "Styled",
@@ -1202,7 +1159,7 @@ mod tests {
     fn test_styled_icon_maps_to_icon_with_degraded_tui_style() {
         let mut forest = ComponentForest::new();
         let binding = DataBinding::new(DataModel::empty());
-        let root: Component = serde_json::from_value(json!({
+        let root: Component = Component::from_value(json!({
             "id": "root",
             "component": "Icon",
             "name": "star",
@@ -1248,7 +1205,7 @@ mod tests {
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("img").unwrap()],
         );
-        let img: Component = serde_json::from_str(
+        let img: Component = Component::from_json(
             r#"{"id":"img","component":"Image","url":"https://example.com/pic.png"}"#,
         )
         .unwrap();
@@ -1271,7 +1228,7 @@ mod tests {
             vec![ComponentId::new("card").unwrap()],
         );
         let card: Component =
-            serde_json::from_str(r#"{"id":"card","component":"Card","child":"inner"}"#).unwrap();
+            Component::from_json(r#"{"id":"card","component":"Card","child":"inner"}"#).unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", card).unwrap();
         let reg = CustomComponentRegistry::new();
@@ -1290,7 +1247,7 @@ mod tests {
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("tabs").unwrap()],
         );
-        let tabs: Component = serde_json::from_str(
+        let tabs: Component = Component::from_json(
             r#"{"id":"tabs","component":"Tabs","tabs":[{"title":"A","child":"a"},{"title":"B","child":"b"}]}"#,
         ).unwrap();
         forest.upsert("s1", root).unwrap();
@@ -1311,7 +1268,7 @@ mod tests {
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("cp").unwrap()],
         );
-        let cp: Component = serde_json::from_str(
+        let cp: Component = Component::from_json(
             r#"{"id":"cp","component":"ChoicePicker","options":["A","B","C"],"value":["A"]}"#,
         )
         .unwrap();
@@ -1334,7 +1291,7 @@ mod tests {
             vec![ComponentId::new("vid").unwrap()],
         );
         let vid: Component =
-            serde_json::from_str(r#"{"id":"vid","component":"Video","url":"http://x.mp4"}"#)
+            Component::from_json(r#"{"id":"vid","component":"Video","url":"http://x.mp4"}"#)
                 .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", vid).unwrap();
@@ -1354,7 +1311,7 @@ mod tests {
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("aud").unwrap()],
         );
-        let aud: Component = serde_json::from_str(
+        let aud: Component = Component::from_json(
             r#"{"id":"aud","component":"AudioPlayer","url":"http://x.mp3","description":"Song"}"#,
         )
         .unwrap();
@@ -1376,7 +1333,7 @@ mod tests {
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("modal").unwrap()],
         );
-        let modal: Component = serde_json::from_str(
+        let modal: Component = Component::from_json(
             r#"{"id":"modal","component":"Modal","content":"body","trigger":"btn"}"#,
         )
         .unwrap();
@@ -1399,7 +1356,7 @@ mod tests {
             vec![ComponentId::new("dt").unwrap()],
         );
         let dt: Component =
-            serde_json::from_str(r#"{"id":"dt","component":"DateTimeInput","label":"Pick date"}"#)
+            Component::from_json(r#"{"id":"dt","component":"DateTimeInput","label":"Pick date"}"#)
                 .unwrap();
         forest.upsert("s1", root).unwrap();
         forest.upsert("s1", dt).unwrap();
