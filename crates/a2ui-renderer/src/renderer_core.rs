@@ -590,6 +590,11 @@ impl RendererCore {
     }
 
     fn expand_templates_and_register(&mut self, surface_id: &str) -> RenderResult<()> {
+        // 无组件的 surface（createSurface 空建、组件待后续 updateComponents
+        // 到达）没有模板可展开，且 forest 中尚无该 surface 条目——直接跳过。
+        if self.forest.component_count(surface_id) == 0 {
+            return Ok(());
+        }
         let Some(binding) = self.data_bindings.get(surface_id) else {
             return Ok(());
         };
@@ -722,6 +727,33 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_surface_without_components_then_update() {
+        // 规范：createSurface 先行、组件经后续 updateComponents 到达是标准流程
+        // （"A surface must be created before any updateComponents"）
+        let mut core = RendererCore::new();
+        let mut msg = create_msg("s1", vec![]);
+        msg.components = None;
+        core.create_surface(msg)
+            .await
+            .expect("无组件的 createSurface 必须合法");
+
+        core.update_components(UpdateComponents {
+            surface_id: "s1".into(),
+            components: vec![serde_json::from_value(
+                json!({"id":"root","component":"Text","text":"hi"}),
+            )
+            .unwrap()],
+        })
+        .await
+        .expect("后续 updateComponents 补组件必须成功");
+
+        assert_eq!(core.forest().component_count("s1"), 1);
+        core.forest()
+            .build_tree("s1")
+            .expect("补齐组件后 build_tree 应可用");
     }
 
     #[tokio::test]
