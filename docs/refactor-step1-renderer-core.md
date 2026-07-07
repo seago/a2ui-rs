@@ -134,7 +134,9 @@ impl RendererCore {
 
 **action_response / call_function**：上一批次已同构/逐字相同，原样迁入；action_response 的受影响组件进 `invalidated_components`。
 
-**handle_user_event**：`write_back_user_event`（已有共享 helper）→ 受影响组件失效 + 标脏 → 按第 0 步格式构造消息：`surface_of` 反查必填 `surfaceId`（失败丢弃+warn）、Click/activate 查组件声明 `action` 属性、原生 JSON 值类型、`sourceComponentId` 字段、sendDataModel 时经信封 `metadata` 附带**本 surface** 数据、`wantResponse+actionId` 自动登记 pending。KeyPress 不进核心（渲染器本地转译，见 §3.4）。
+**handle_user_event**：`write_back_user_event`（已有共享 helper）→ 受影响组件失效 + 标脏。消息构造按第 0 步规范：输入类事件（TextInput/CheckToggle/SliderChange）**只写回不发消息**（返回 `None`，规范：被动变更不触发网络请求）；Click 解析组件声明的 `action.event.*`（无声明返回 `None`），`surface_of` 反查必填 `surfaceId`（失败丢弃+warn）、context 绑定求值为原生 JSON 值、填 `sourceComponentId` 与 `timestamp`、sendDataModel 时经信封 `metadata` 附带**本 surface** 数据、`wantResponse+actionId` 时自动登记 pending（`responsePath` 不上线路）。KeyPress 不进核心（渲染器本地转译，见 §3.4）。
+
+注：返回类型随之调整为 `RenderResult<(Option<ClientEnvelope>, CoreEffects)>`——metadata 在信封层，核心需返回完整信封而非裸 `ActionMessage`；`Renderer` trait 的 `handle_user_event` 签名是否同步调整在 C1 定稿（倾向 trait 不动、渲染器内部包装）。
 
 ### 3.4 各渲染器保留内容
 
@@ -167,13 +169,13 @@ impl RendererCore {
 
 | # | Commit | 内容 | 验证 |
 |---|---|---|---|
-| C0 | a2ui-core：`ClientEnvelope` 增加可选 `metadata`（第 0 步 D6，先人工对照规范确认字段名） | 消息类型 + 序列化测试 | core 及全下游测试 |
-| C1 | `renderer_core.rs`：结构体 + 全部消息流水线 + 状态机 + `CoreEffects` + `handle_user_event`（第 0 步格式） | 核心单测覆盖 §3.3 每条流水线、§4 全部非法转换、事件格式样例 | 仅新增，workspace 绿 |
-| C2 | TUI 迁移（最简：只有 focus_manager 一个平台字段；验证 KeyPress 本地转译形状） | 现有 95 测试 + 事件格式断言更新 | workspace 绿 |
+| C0 | a2ui-core 规范符合性修复（第 0 步 C0 清单）：`ClientEnvelope` 加可选 `metadata`（D5）；`ActionMessage` 加必填 `timestamp`、`source_component_id` 改必填（D3）；`ActionResponse` wire 格式修正为信封层 `actionId` + `value`/`error` 包装（D6） | 消息类型 + 序列化测试逐项对照规范样例 | core 及全下游测试 |
+| C1 | `renderer_core.rs`：结构体 + 全部消息流水线 + 状态机 + `CoreEffects` + `handle_user_event`（第 0 步格式：声明式 action 解析 `action.event.*`、输入事件只写回不发消息） | 核心单测覆盖 §3.3 每条流水线、§4 全部非法转换、第 0 步 §3 样例 | 仅新增，workspace 绿 |
+| C2 | TUI 迁移（最简：只有 focus_manager 一个平台字段；验证 KeyPress 本地转译形状） | 现有测试 + 事件断言按第 0 步重写 | workspace 绿 |
 | C3 | egui 迁移 | 同上 | workspace 绿 |
 | C4 | Web 迁移（验证 `CoreEffects` → `last_html` 失效链路） | 同上 | workspace 绿 |
-| C5 | iced 迁移（最难：effects → RefCell 缓存、pub 字段改访问器、app.rs 收敛、事件名迁移 D2） | 同上 + 缓存失效断言 | workspace 绿 |
-| C6 | 清理与文档：删除四家残留死代码、更新 ARCHITECTURE.md/README 的状态机与消息流描述 | — | workspace 绿 + clippy 无新警告 |
+| C5 | iced 迁移（最难：effects → RefCell 缓存、pub 字段改访问器、app.rs 收敛） | 同上 + 缓存失效断言 | workspace 绿 |
+| C6 | 清理与文档：删除四家残留死代码、demo/示例改为声明式 action（serve_demo 等原依赖合成事件推进流程）、更新 ARCHITECTURE.md/README | — | workspace 绿 + clippy 无新警告 |
 
 顺序依据：TUI 平台字段最少先趟通形状；iced 缓存交互最复杂放最后；每步之间已迁移与未迁移渲染器并存（核心与旧代码互不干扰）。
 
@@ -195,5 +197,6 @@ impl RendererCore {
 
 1. **改动面**：四个渲染器结构体全部重构，是全项目最大单批变更——靠 C1 先行的核心单测 + 每 commit workspace 全绿控制。
 2. **行为收紧**：状态机使原先「宽容接受」的乱序消息（先 update 后 create、重复 create）变为报错。现有测试若依赖宽容行为需逐个审视是「测试错」还是「真实用例」——发现真实用例时回到本文档修订 §4。
-3. **事件格式为破坏性变更**（消费方影响见第 0 步 §4）：C2–C5 各 commit 信息中显式声明。
+3. **事件行为为破坏性变更**（消费方影响见第 0 步 §4）：合成事件全部消失，只有声明式 action 产生消息。依赖合成事件的现有测试与 demo（serve_demo 等待 action 推进、e2e 输入事件断言）在 C2–C6 逐一改造为声明式 action；各 commit 信息中显式声明。
 4. **iced pub 字段改访问器**：形态变更，风险限于 crate 内测试（已核实无外部使用者）。
+5. **C0 是协议类型变更**：`ActionMessage` 加必填字段、`ActionResponse` wire 重构直接影响所有解析双方；好在当前无外部生产消费者，此时是修正规范偏差的最低成本窗口。`timestamp` 生成的依赖选择（手写 vs `time` crate）在 C0 动工前确认。
