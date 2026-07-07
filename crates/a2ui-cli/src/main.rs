@@ -2,9 +2,8 @@ use a2ui_core::message::Capabilities;
 use a2ui_core::prelude::*;
 use a2ui_renderer_tui::TuiRenderer;
 use a2ui_transport::jsonl::JsonlTransport;
-use a2ui_transport::Transport;
+use a2ui_transport::{Transport, TransportError};
 use clap::{Parser, Subcommand};
-use std::time::Duration;
 use tracing::{error, info, warn};
 
 use a2ui_cli::process_server_envelope;
@@ -29,7 +28,11 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    // stdout 是 JSONL 协议输出通道（JsonlTransport 的 writer），
+    // 日志必须写 stderr，否则会污染协议流导致对端反序列化失败
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
 
     let cli = Cli::parse();
 
@@ -72,30 +75,17 @@ impl InputTransport {
         }
     }
 
-    /// 接收服务端信封消息（Agent → Renderer）
+    /// 接收服务端信封消息（Agent → Renderer）。
+    /// 流正常结束（EOF）返回 `Ok(None)`；真实 IO/协议错误向上传播。
     async fn receive(&mut self) -> anyhow::Result<Option<ServerEnvelope>> {
-        match self {
-            InputTransport::File(t) => match Transport::receive(t).await {
-                Ok(envelope) => Ok(Some(envelope)),
-                Err(e) => {
-                    // EOF 或读取错误
-                    if e.to_string().contains("EOF") || e.to_string().contains("read error") {
-                        Ok(None)
-                    } else {
-                        Err(e.into())
-                    }
-                }
-            },
-            InputTransport::Stdin(t) => match Transport::receive(t).await {
-                Ok(envelope) => Ok(Some(envelope)),
-                Err(e) => {
-                    if e.to_string().contains("EOF") || e.to_string().contains("read error") {
-                        Ok(None)
-                    } else {
-                        Err(e.into())
-                    }
-                }
-            },
+        let result = match self {
+            InputTransport::File(t) => Transport::receive(t).await,
+            InputTransport::Stdin(t) => Transport::receive(t).await,
+        };
+        match result {
+            Ok(envelope) => Ok(Some(envelope)),
+            Err(TransportError::Eof) => Ok(None),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -155,42 +145,29 @@ async fn run_render(input: Option<std::path::PathBuf>) -> anyhow::Result<()> {
         server_caps.version, server_caps.features
     );
 
-    // 仅 STDIN 模式打印欢迎信息
+    // 仅 STDIN 模式打印欢迎信息（stdout 是协议通道，人类可读提示走 stderr）
     if matches!(transport, InputTransport::Stdin(_)) {
-        println!("A2UI TUI Renderer ready. Send JSONL messages on stdin.");
-        println!("Waiting for createSurface...");
+        eprintln!("A2UI TUI Renderer ready. Send JSONL messages on stdin.");
+        eprintln!("Waiting for createSurface...");
     }
 
-    // 消息处理主循环（stdin 模式带 5 秒超时，避免 EOF 检测延迟导致卡住）
-    let stdin_timeout = Duration::from_secs(5);
-    let file_timeout = Duration::from_secs(3600); // 文件模式超时时间很长，基本不会触发
+    // 消息处理主循环。对端（Agent）间隔任意长时间发消息都是正常的，
+    // 不设空闲超时——流结束由 receive() 的 EOF 语义（Ok(None)）判定
     loop {
-        let timeout = match transport {
-            InputTransport::Stdin(_) => stdin_timeout,
-            InputTransport::File(_) => file_timeout,
-        };
-
-        let result = tokio::time::timeout(timeout, transport.receive()).await;
-
-        match result {
-            Ok(Ok(Some(envelope))) => {
+        match transport.receive().await {
+            Ok(Some(envelope)) => {
                 if let Err(e) =
                     process_server_envelope(&mut renderer, envelope, &mut terminal).await
                 {
                     error!("Error processing message: {}", e);
                 }
             }
-            Ok(Ok(None)) => {
+            Ok(None) => {
                 info!("Input stream closed");
                 break;
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 warn!("Transport receive error: {}", e);
-                break;
-            }
-            Err(_) => {
-                // STDIN 超时：说明 EOF 已到达但 tokio 还没完全感知，退出
-                info!("Input stream EOF detected (timeout)");
                 break;
             }
         }
