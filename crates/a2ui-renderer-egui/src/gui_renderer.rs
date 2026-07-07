@@ -10,13 +10,11 @@ use a2ui_core::message::{
 use a2ui_core::prelude::*;
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
-    CatalogRegistry, ComponentForest, CustomComponentRegistry, DataBinding, DependencyGraph,
-    FunctionDispatcher, PathResolver, RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
+    CustomComponentRegistry, RenderResult, Renderer, RendererCore, SurfaceHandle, UserEvent,
 };
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Read;
-use std::time::Duration;
 
 /// egui 示例页面的内容最大宽度
 const CONTENT_MAX_WIDTH: f32 = 720.0;
@@ -33,64 +31,43 @@ impl std::fmt::Debug for CachedTexture {
 }
 
 /// GUI 渲染器实现
+///
+/// 协议状态与消息处理全部委托 [`RendererCore`]，本类型只保留平台特有部分：
+/// 键盘激活转译（Enter/空格 → 焦点组件 Click）与 egui 图片纹理缓存。
+/// egui 无 surface 级渲染缓存，核心返回的 [`a2ui_renderer::CoreEffects`] 被忽略。
 #[derive(Debug)]
 pub struct GuiRenderer {
-    /// Surface 句柄 → SurfaceId 映射
-    pub surfaces: HashMap<SurfaceHandle, String>,
-    /// 组件森林（所有 Surface 的组件树）
-    forest: ComponentForest,
-    /// DataModel 绑定（使用字符串作为 Surface 标识）
-    data_bindings: HashMap<String, DataBinding>,
-    /// 依赖图
-    dependency_graph: DependencyGraph,
-    /// 函数调度器（用于 callableFrom enforcement）
-    dispatcher: FunctionDispatcher,
-    /// Catalog 注册表（用于 catalogId 信任链校验）
-    catalog_registry: CatalogRegistry,
-    /// 当前聚焦的组件
+    /// 渲染器公共核心（协议状态 + 消息流水线；pub 供同 crate 测试访问）
+    pub core: RendererCore,
+    /// 当前聚焦的组件（现为死代码：无写入路径，保留待焦点专项）
     focused_component: Option<ComponentId>,
-    /// action_id → (surface_id, response_path) 映射（responsePath 写回用）
-    pending_responses: HashMap<String, (String, String)>,
-    /// Surface 的 sendDataModel 标记（为 true 时 action 附带完整 data model）
-    send_data_model: HashMap<String, bool>,
-    /// 需要增量重渲染的 surface 集合
-    dirty_surfaces: HashSet<String>,
-    /// Surface LRU 驱逐管理器
-    surface_lru: SurfaceLru,
-    /// 自定义组件注册表
-    custom_registry: CustomComponentRegistry,
-    /// 图片纹理缓存（URL → CachedTexture，需保持存活以免纹理被释放）
+    /// 图片纹理缓存（URL → CachedTexture，按 URL 键控、与 surface 生命周期
+    /// 无关，需保持存活以免纹理被释放）
     image_cache: HashMap<String, CachedTexture>,
 }
 
 /// 最大并发 Surface 数量（DoS 防护）
+// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_SURFACES），C6 统一清理
+#[allow(dead_code)]
 const MAX_SURFACES: usize = 100;
 /// 单 Surface 最大组件数量（DoS 防护）
+// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_COMPONENTS_PER_SURFACE），C6 统一清理
+#[allow(dead_code)]
 const MAX_COMPONENTS_PER_SURFACE: usize = 1000;
 
 impl GuiRenderer {
     /// 创建新的 GUI 渲染器
     pub fn new() -> Self {
         Self {
-            surfaces: HashMap::new(),
-            forest: ComponentForest::new(),
-            data_bindings: HashMap::new(),
-            dependency_graph: DependencyGraph::new(),
-            dispatcher: FunctionDispatcher::new(),
-            catalog_registry: CatalogRegistry::with_defaults(),
+            core: RendererCore::new(),
             focused_component: None,
-            pending_responses: HashMap::new(),
-            send_data_model: HashMap::new(),
-            dirty_surfaces: HashSet::new(),
-            surface_lru: SurfaceLru::new(MAX_SURFACES, Some(Duration::from_secs(600))),
-            custom_registry: CustomComponentRegistry::new(),
             image_cache: HashMap::new(),
         }
     }
 
     /// 获取依赖图的只读引用（用于测试和查询）
-    pub fn dependency_graph(&self) -> &DependencyGraph {
-        &self.dependency_graph
+    pub fn dependency_graph(&self) -> &a2ui_renderer::DependencyGraph {
+        self.core.dependency_graph()
     }
 
     /// 注册客户端函数（供 callableFrom enforcement 使用）
@@ -99,22 +76,22 @@ impl GuiRenderer {
         name: impl Into<String>,
         callable_from: a2ui_renderer::CallableFrom,
     ) {
-        self.dispatcher.register(name, callable_from);
+        self.core.register_function(name, callable_from);
     }
 
     /// 获取已注册函数列表
     pub fn registered_functions(&self) -> Vec<&String> {
-        self.dispatcher.registered_names()
+        self.core.registered_functions()
     }
 
     /// 注册 Catalog（用于 catalogId 信任链校验）
     pub fn register_catalog(&mut self, catalog: a2ui_core::Catalog) -> RenderResult<()> {
-        self.catalog_registry.register(catalog)
+        self.core.register_catalog(catalog)
     }
 
     /// 获取 Catalog 注册表的只读引用
-    pub fn catalog_registry(&self) -> &CatalogRegistry {
-        &self.catalog_registry
+    pub fn catalog_registry(&self) -> &a2ui_renderer::CatalogRegistry {
+        self.core.catalog_registry()
     }
 
     /// 注册自定义组件类型
@@ -122,7 +99,7 @@ impl GuiRenderer {
         &mut self,
         def: a2ui_renderer::CustomComponentDef,
     ) -> Result<(), String> {
-        self.custom_registry.register(def)
+        self.core.register_custom_component(def)
     }
 
     /// 注册待响应的 action_id → (surface_id, response_path) 映射
@@ -133,8 +110,8 @@ impl GuiRenderer {
         surface_id: impl Into<String>,
         response_path: impl Into<String>,
     ) {
-        self.pending_responses
-            .insert(action_id.into(), (surface_id.into(), response_path.into()));
+        self.core
+            .register_pending_response(action_id, surface_id, response_path);
     }
 
     /// 加载图片到 egui 纹理缓存（如未缓存）
@@ -177,28 +154,28 @@ impl GuiRenderer {
         let mut all_actions: Vec<a2ui_core::ClientEnvelope> = Vec::new();
 
         // 确定要渲染的 surface 列表
-        let surfaces_to_render: Vec<_> = if self.dirty_surfaces.is_empty() {
-            self.surfaces.values().cloned().collect()
+        let surfaces_to_render: Vec<_> = if self.core.dirty_surfaces().is_empty() {
+            self.core.surfaces().values().cloned().collect()
         } else {
-            self.dirty_surfaces.iter().cloned().collect()
+            self.core.dirty_surfaces().iter().cloned().collect()
         };
 
         for surface_id in &surfaces_to_render {
             // 使用 build_tree 构建组件树
-            let tree = match self.forest.build_tree(surface_id) {
+            let tree = match self.core.forest().build_tree(surface_id) {
                 Ok(t) => t,
                 Err(_) => continue,
             };
 
-            // 从组件树构建 flat widget map（传入 data model 用于路径解析）
+            // 从组件树构建 flat widget map（传入 data model 用于路径解析）；
+            // 先收集完 widget_map（core 只读借用结束）再加载图片（&mut self）
             let mut widget_map: HashMap<String, RenderableGuiWidget> = HashMap::new();
-            let data_model = self.data_bindings.get(surface_id);
             Self::flatten_tree_to_widget_map(
                 &tree,
                 &mapper,
                 &mut widget_map,
-                &self.custom_registry,
-                data_model,
+                self.core.custom_registry(),
+                self.core.binding(surface_id),
             );
 
             // 第二遍：回填 Button 的 label — 从 child Text 组件取文字
@@ -261,7 +238,7 @@ impl GuiRenderer {
             }
         }
 
-        self.dirty_surfaces.clear();
+        self.core.clear_dirty();
         Ok(all_actions)
     }
 
@@ -321,182 +298,38 @@ impl Default for GuiRenderer {
 #[async_trait::async_trait]
 impl Renderer for GuiRenderer {
     async fn create_surface(&mut self, msg: CreateSurface) -> RenderResult<SurfaceHandle> {
-        // LRU 驱逐：检查是否需要驱逐最久未用的 surface
-        if let Some(victim_id) = self.surface_lru.find_victim(self.surfaces.len()) {
-            // 驱逐最久未用的 surface
-            self.forest.remove_surface(&victim_id).ok();
-            self.data_bindings.remove(&victim_id);
-            self.surfaces.retain(|_, sid| sid != &victim_id);
-            self.dirty_surfaces.remove(&victim_id);
-            self.send_data_model.remove(&victim_id);
-            self.surface_lru.remove(&victim_id);
-        }
-
-        // enforcing surface limit（最后保护）
-        if self.surfaces.len() >= MAX_SURFACES {
-            return Err(a2ui_renderer::error::RendererError::SurfaceLimitExceeded {
-                current: self.surfaces.len(),
-                max: MAX_SURFACES,
-            });
-        }
-
-        // Catalog 信任链 — catalogId 校验
-        if !self.catalog_registry.registered_ids().is_empty() {
-            if !self.catalog_registry.has_catalog(&msg.catalog_id) {
-                return Err(a2ui_renderer::error::RendererError::CatalogNotFound(
-                    msg.catalog_id.clone(),
-                ));
-            }
-        }
-
-        let handle = SurfaceHandle::new();
-        let surface_id = msg.surface_id.clone();
-
-        // 注册组件
-        if let Some(components) = msg.components.clone() {
-            // enforcing component limit
-            let new_count = components.len();
-            let existing_count = self.forest.component_count(&surface_id);
-            if existing_count + new_count > MAX_COMPONENTS_PER_SURFACE {
-                return Err(
-                    a2ui_renderer::error::RendererError::ComponentLimitExceeded {
-                        surface_id: surface_id.clone(),
-                        current: existing_count + new_count,
-                        max: MAX_COMPONENTS_PER_SURFACE,
-                    },
-                );
-            }
-
-            for comp in &components {
-                self.forest.upsert(&surface_id, comp.clone())?;
-            }
-            // 注册依赖关系到 DependencyGraph
-            for comp in components {
-                let paths = extract_paths(&comp);
-                for path in paths {
-                    self.dependency_graph
-                        .register_dependency(comp.id().clone(), path);
-                }
-            }
-        }
-
-        // 注册 DataModel
-        let data_model = msg.data_model.unwrap_or(Value::Object(Default::default()));
-        self.data_bindings.insert(
-            surface_id.clone(),
-            DataBinding::new(DataModel::new(data_model.clone())),
-        );
-
-        // 记录 sendDataModel 标记
-        self.send_data_model
-            .insert(surface_id.clone(), msg.send_data_model);
-
-        // 展开 ChildList::Object 模板（@index 作用域系统）
-        if let Some(binding) = self.data_bindings.get(&surface_id) {
-            let resolver = PathResolver::new(DataModel::new(binding.as_value().clone()));
-            self.forest
-                .expand_templates(&surface_id, binding, &resolver, &self.dispatcher)?;
-        }
-
-        // 记录 Surface 映射
-        self.surfaces.insert(handle, surface_id.clone());
-
-        // 记录 LRU 访问
-        self.surface_lru.touch(&surface_id);
-
-        Ok(handle)
+        tracing::trace!(surface_id = %msg.surface_id, "createSurface");
+        // egui 无 surface 级渲染缓存，CoreEffects 忽略
+        self.core
+            .create_surface(msg)
+            .await
+            .map(|(handle, _)| handle)
     }
 
     async fn update_components(&mut self, msg: UpdateComponents) -> RenderResult<()> {
-        let surface_id = msg.surface_id.clone();
-        self.surface_lru.touch(&surface_id);
-        for comp in msg.components {
-            self.forest.upsert(&surface_id, comp)?;
-        }
-        Ok(())
+        self.core.update_components(msg).await.map(|_| ())
     }
 
     async fn update_data_model(&mut self, msg: UpdateDataModel) -> RenderResult<()> {
-        let surface_id = msg.surface_id.clone();
-        self.surface_lru.touch(&surface_id);
-        if let Some(binding) = self.data_bindings.get_mut(&surface_id) {
-            if let Some(path) = &msg.path {
-                binding.set(path, msg.value.unwrap_or(Value::Null))?;
-                // 查询依赖图，获取需要重渲染的组件
-                let affected = self.dependency_graph.on_data_change(path);
-                // 记录受影响的 surface 需要重渲染
-                if !affected.is_empty() {
-                    self.dirty_surfaces.insert(surface_id);
-                }
-            }
-        }
-        Ok(())
+        tracing::debug!(surface_id = %msg.surface_id, path = ?msg.path, "updateDataModel");
+        self.core.update_data_model(msg).await.map(|_| ())
     }
 
     async fn delete_surface(&mut self, msg: DeleteSurface) -> RenderResult<()> {
-        let surface_id = msg.surface_id.clone();
-        self.forest.remove_surface(&surface_id)?;
-        self.data_bindings.remove(&surface_id);
-        // 移除 surface 映射
-        self.surfaces.retain(|_, sid| sid != &surface_id);
-        // 移除 LRU 追踪
-        self.surface_lru.remove(&surface_id);
-        Ok(())
+        tracing::info!(surface_id = %msg.surface_id, "deleteSurface");
+        self.core.delete_surface(msg).await.map(|_| ())
     }
 
     async fn action_response(&mut self, msg: ActionResponse) -> RenderResult<()> {
-        // responsePath 写回 — 按注册时记录的 surface 精确定位写回目标
-        let action_id = msg.action_id.clone();
-        if let Some((surface_id, response_path)) = self.pending_responses.remove(&action_id) {
-            // 确定要写入的值
-            let write_value = match &msg.response {
-                a2ui_core::message::server_to_client::ActionResponsePayload::Success(v) => {
-                    v.clone()
-                }
-                a2ui_core::message::server_to_client::ActionResponsePayload::Error(err) => {
-                    Value::String(err.message.clone())
-                }
-            };
-
-            match self.data_bindings.get_mut(&surface_id) {
-                Some(binding) => {
-                    self.surface_lru.touch(&surface_id);
-                    binding.set(&response_path, write_value)?;
-                    // 查询依赖图，标记受影响的 surface 为脏
-                    let affected = self.dependency_graph.on_data_change(&response_path);
-                    if !affected.is_empty() {
-                        self.dirty_surfaces.insert(surface_id);
-                    }
-                }
-                None => {
-                    tracing::warn!(
-                        "action response {} targets missing surface {}, dropped",
-                        action_id,
-                        surface_id
-                    );
-                }
-            }
-        }
-        Ok(())
+        self.core.action_response(msg).await.map(|_| ())
     }
 
     async fn call_function(&mut self, msg: CallFunction) -> RenderResult<FunctionResponse> {
-        let function_name = msg.call.call.clone();
-        // dispatch() 内部强制执行 callableFrom 边界检查
-        let result = self.dispatcher.dispatch(
-            &function_name,
-            msg.call.args,
-            a2ui_renderer::CallableFrom::ClientOnly,
-        )?;
-        Ok(FunctionResponse {
-            function_call_id: msg.function_call_id,
-            call: function_name,
-            value: result,
-        })
+        self.core.call_function(msg).await
     }
 
     async fn render(&mut self) -> RenderResult<()> {
-        // 实际渲染由平台 crate 处理
+        // 实际渲染由 render_frame（需要 egui::Context）执行
         Ok(())
     }
 
@@ -504,132 +337,30 @@ impl Renderer for GuiRenderer {
         &mut self,
         event: UserEvent,
     ) -> RenderResult<Option<a2ui_core::ClientEnvelope>> {
-        // 先把输入值写回组件声明的绑定路径（在读取 dataModel 快照之前），
-        // 使快照与后续渲染反映最新输入
-        if let Some((surface_id, path)) =
-            a2ui_renderer::write_back_user_event(&self.forest, &mut self.data_bindings, &event)?
-        {
-            self.surface_lru.touch(&surface_id);
-            self.dependency_graph.on_data_change(&path);
-            self.dirty_surfaces.insert(surface_id);
-        }
-
-        let send_data_surface = self
-            .send_data_model
-            .iter()
-            .find(|(_, &enabled)| enabled)
-            .map(|(sid, _)| sid.clone());
-
-        match event {
-            UserEvent::Click { component_id } => {
-                let mut action = ActionMessage::event("click", "", component_id.as_str())
-                    .with_context(
-                        "source",
-                        DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
-                    );
-                if let Some(ref surface_id) = send_data_surface {
-                    if let Some(binding) = self.data_bindings.get(surface_id) {
-                        action = action.with_context(
-                            "dataModel",
-                            DynamicValue::Literal(binding.as_value().clone()),
-                        );
-                    }
-                }
-                Ok(Some(action_envelope(action)))
-            }
-            UserEvent::KeyPress { key } => {
-                if key == "Enter" || key == " " {
-                    if let Some(ref comp_id) = self.focused_component {
-                        let mut action = ActionMessage::event("activate", "", comp_id.as_str())
-                            .with_context(
-                                "source",
-                                DynamicValue::Literal(Value::String(comp_id.as_str().to_string())),
-                            );
-                        if let Some(ref surface_id) = send_data_surface {
-                            if let Some(binding) = self.data_bindings.get(surface_id) {
-                                action = action.with_context(
-                                    "dataModel",
-                                    DynamicValue::Literal(binding.as_value().clone()),
-                                );
-                            }
-                        }
-                        return Ok(Some(action_envelope(action)));
-                    }
-                }
-                Ok(None)
-            }
-            UserEvent::TextInput {
-                component_id,
-                value,
-            } => {
-                let mut action = ActionMessage::event("input", "", component_id.as_str())
-                    .with_context(
-                        "component",
-                        DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
-                    )
-                    .with_context("value", DynamicValue::Literal(Value::String(value)));
-                if let Some(ref surface_id) = send_data_surface {
-                    if let Some(binding) = self.data_bindings.get(surface_id) {
-                        action = action.with_context(
-                            "dataModel",
-                            DynamicValue::Literal(binding.as_value().clone()),
-                        );
-                    }
-                }
-                Ok(Some(action_envelope(action)))
-            }
-            UserEvent::CheckToggle {
-                component_id,
-                checked,
-            } => {
-                let mut action = ActionMessage::event("toggle", "", component_id.as_str())
-                    .with_context(
-                        "component",
-                        DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
-                    )
-                    .with_context(
-                        "checked",
-                        DynamicValue::Literal(Value::String(checked.to_string())),
-                    );
-                if let Some(ref surface_id) = send_data_surface {
-                    if let Some(binding) = self.data_bindings.get(surface_id) {
-                        action = action.with_context(
-                            "dataModel",
-                            DynamicValue::Literal(binding.as_value().clone()),
-                        );
-                    }
-                }
-                Ok(Some(action_envelope(action)))
-            }
-            UserEvent::SliderChange {
-                component_id,
-                value,
-            } => {
-                let mut action = ActionMessage::event("slider_change", "", component_id.as_str())
-                    .with_context(
-                        "component",
-                        DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
-                    )
-                    .with_context(
-                        "value",
-                        DynamicValue::Literal(Value::String(value.to_string())),
-                    );
-                if let Some(ref surface_id) = send_data_surface {
-                    if let Some(binding) = self.data_bindings.get(surface_id) {
-                        action = action.with_context(
-                            "dataModel",
-                            DynamicValue::Literal(binding.as_value().clone()),
-                        );
-                    }
-                }
-                Ok(Some(action_envelope(action)))
-            }
-        }
+        // KeyPress 是渲染器本地行为（docs/refactor-step0 D7）：
+        // Enter/空格 转译为焦点组件的 Click 再交公共核心（有声明 action
+        // 才发消息）；egui 的常规事件由 render_frame 内部产生，Tab 导航
+        // egui 原本没有。focused_component 现无写入路径（待焦点专项）。
+        let event = match event {
+            UserEvent::KeyPress { key } => match key.as_str() {
+                "Enter" | " " => match self.focused_component.clone() {
+                    Some(comp_id) => UserEvent::Click {
+                        component_id: comp_id,
+                    },
+                    None => return Ok(None),
+                },
+                _ => return Ok(None),
+            },
+            other => other,
+        };
+        let (envelope, _effects) = self.core.handle_user_event(&event).await?;
+        Ok(envelope)
     }
 }
 
-/// 把裸 ActionMessage 包装为 v1.0 客户端信封（trait 签名要求完整信封；
-/// egui 尚未迁移 RendererCore，仍发合成事件——C3 迁移）
+/// 把裸 ActionMessage 包装为 v1.0 客户端信封
+// 已由 RendererCore 接管（信封构造随 handle_user_event 迁入核心），C6 统一清理
+#[allow(dead_code)]
 fn action_envelope(action: ActionMessage) -> a2ui_core::ClientEnvelope {
     a2ui_core::ClientEnvelope::v1_0(
         a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action),
@@ -637,6 +368,8 @@ fn action_envelope(action: ActionMessage) -> a2ui_core::ClientEnvelope {
 }
 
 /// 从组件的 properties 中递归提取所有 JSON Pointer 路径
+// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
+#[allow(dead_code)]
 fn extract_paths(component: &Component) -> Vec<String> {
     let mut paths = Vec::new();
     extract_paths_from_value(component.properties(), &mut paths);
@@ -644,10 +377,13 @@ fn extract_paths(component: &Component) -> Vec<String> {
 }
 
 /// 递归遍历 serde_json::Value，收集所有 DynamicValue::Path 中的路径字符串
+// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
+#[allow(dead_code)]
 fn extract_paths_from_value(value: &Value, paths: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
             for (_, v) in map {
+                // 检测 {"path": "..."} 结构
                 if let Value::Object(inner) = v {
                     if inner.len() == 1 {
                         if let Some(Value::String(p)) = inner.get("path") {
@@ -671,11 +407,12 @@ fn extract_paths_from_value(value: &Value, paths: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_gui_renderer_new() {
         let renderer = GuiRenderer::new();
-        assert!(renderer.surfaces.is_empty());
+        assert!(renderer.core.surfaces().is_empty());
     }
 
     #[test]
@@ -701,10 +438,12 @@ mod tests {
         assert!(renderer.register_catalog(catalog).is_ok());
     }
 
-    // --- Incremental rendering with DependencyGraph ---
+    // --- 用户事件（docs/refactor-step0 规范语义）---
 
     #[tokio::test]
     async fn test_text_input_writes_back_to_data_model() {
+        // 旧断言（合成 input 消息 + context dataModel 快照）→ 新断言：
+        // 规范：被动输入变更不触发网络请求，只写回数据模型并标脏
         let mut renderer = GuiRenderer::new();
         let field: Component = serde_json::from_value(json!({
             "component":"TextField","id":"root","value":{"path":"/form/username"}
@@ -721,6 +460,8 @@ mod tests {
             })
             .await
             .unwrap();
+        // createSurface 本身标脏（核心语义），先清空以聚焦本测试
+        renderer.core.clear_dirty();
 
         let envelope = renderer
             .handle_user_event(UserEvent::TextInput {
@@ -728,37 +469,20 @@ mod tests {
                 value: "alice".into(),
             })
             .await
-            .unwrap()
             .unwrap();
-        // egui 尚未迁移 RendererCore，仍发合成事件（C3 迁移），此处解包信封
-        let a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action) =
-            envelope.message()
-        else {
-            panic!("envelope should carry an action message");
-        };
 
+        assert!(envelope.is_none(), "TextInput 不应产生消息");
         assert_eq!(
-            renderer
-                .data_bindings
-                .get("s1")
-                .unwrap()
-                .get("/form/username"),
+            renderer.core.binding("s1").unwrap().get("/form/username"),
             Some(&json!("alice")),
             "输入值应写回 DataModel"
         );
-        let Some(DynamicValue::Literal(dm)) = action.context.get("dataModel").cloned() else {
-            panic!("dataModel context should be Literal");
-        };
-        assert_eq!(
-            dm.pointer("/form/username"),
-            Some(&json!("alice")),
-            "dataModel 快照应含刚输入的值"
-        );
-        assert!(renderer.dirty_surfaces.contains("s1"));
+        assert!(renderer.core.dirty_surfaces().contains("s1"));
     }
 
     #[tokio::test]
     async fn test_check_toggle_and_slider_write_back_to_data_model() {
+        // 旧断言（合成 toggle/slider_change 消息）→ 新断言：只写回 + 标脏
         let mut renderer = GuiRenderer::new();
         let checkbox: Component = serde_json::from_value(json!({
             "component":"CheckBox","id":"cb","checked":{"path":"/agree"}
@@ -783,15 +507,16 @@ mod tests {
             })
             .await
             .unwrap();
+        renderer.core.clear_dirty();
 
-        renderer
+        let toggle_envelope = renderer
             .handle_user_event(UserEvent::CheckToggle {
                 component_id: ComponentId::new("cb").unwrap(),
                 checked: true,
             })
             .await
             .unwrap();
-        renderer
+        let slider_envelope = renderer
             .handle_user_event(UserEvent::SliderChange {
                 component_id: ComponentId::new("sl").unwrap(),
                 value: 42.5,
@@ -799,11 +524,90 @@ mod tests {
             .await
             .unwrap();
 
-        let binding = renderer.data_bindings.get("s1").unwrap();
+        assert!(toggle_envelope.is_none(), "CheckToggle 不应产生消息");
+        assert!(slider_envelope.is_none(), "SliderChange 不应产生消息");
+        let binding = renderer.core.binding("s1").unwrap();
         assert_eq!(binding.get("/agree"), Some(&json!(true)));
         assert_eq!(binding.get("/volume"), Some(&json!(42.5)));
-        assert!(renderer.dirty_surfaces.contains("s1"));
+        assert!(renderer.core.dirty_surfaces().contains("s1"));
     }
+
+    #[tokio::test]
+    async fn test_click_without_declared_action_emits_nothing() {
+        let mut renderer = GuiRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("root").unwrap(),
+            DynamicValue::Literal("Hello".to_string()),
+        );
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: true,
+                components: Some(vec![comp]),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
+            })
+            .await
+            .unwrap();
+
+        let envelope = renderer
+            .handle_user_event(UserEvent::Click {
+                component_id: ComponentId::new("root").unwrap(),
+            })
+            .await
+            .unwrap();
+        assert!(envelope.is_none(), "无声明 action 的组件交互不发送消息");
+    }
+
+    #[tokio::test]
+    async fn test_click_with_declared_action_emits_spec_envelope() {
+        let mut renderer = GuiRenderer::new();
+        let btn: Component = serde_json::from_value(json!({
+            "id":"btn","component":"Button","child":"lbl",
+            "action":{"event":{"name":"submit"}}
+        }))
+        .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![btn]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let envelope = renderer
+            .handle_user_event(UserEvent::Click {
+                component_id: ComponentId::new("btn").unwrap(),
+            })
+            .await
+            .unwrap()
+            .expect("声明式 action 应产生消息");
+        let value = envelope.to_value().unwrap();
+        assert_eq!(value["action"]["name"], "submit");
+        assert_eq!(value["action"]["surfaceId"], "s1");
+        assert_eq!(value["action"]["sourceComponentId"], "btn");
+    }
+
+    #[tokio::test]
+    async fn test_enter_without_focus_emits_nothing() {
+        // egui 的 focused_component 现无写入路径（待焦点专项）：
+        // Enter/空格 无焦点时不产生消息
+        let mut renderer = GuiRenderer::new();
+        let envelope = renderer
+            .handle_user_event(UserEvent::KeyPress {
+                key: "Enter".into(),
+            })
+            .await
+            .unwrap();
+        assert!(envelope.is_none());
+    }
+
+    // --- Incremental rendering with DependencyGraph ---
 
     #[tokio::test]
     async fn test_incremental_render_marks_dirty_on_update_data_model() {
@@ -826,7 +630,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(renderer.dirty_surfaces.is_empty());
+        // createSurface 本身标脏（核心语义），先清空以聚焦本测试
+        renderer.core.clear_dirty();
+        assert!(renderer.core.dirty_surfaces().is_empty());
 
         renderer
             .update_data_model(UpdateDataModel {
@@ -837,7 +643,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(renderer.dirty_surfaces.contains("s1"));
+        assert!(renderer.core.dirty_surfaces().contains("s1"));
     }
 
     #[tokio::test]
@@ -860,6 +666,7 @@ mod tests {
             })
             .await
             .unwrap();
+        renderer.core.clear_dirty();
 
         renderer
             .update_data_model(UpdateDataModel {
@@ -870,7 +677,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(renderer.dirty_surfaces.is_empty());
+        assert!(renderer.core.dirty_surfaces().is_empty());
     }
 
     #[test]
@@ -880,7 +687,7 @@ mod tests {
             .register_custom_component(a2ui_renderer::CustomComponentDef::new("MyChart"))
             .unwrap();
         // 注册成功，不会 panic
-        assert!(renderer.custom_registry.is_registered("MyChart"));
+        assert!(renderer.core.custom_registry().is_registered("MyChart"));
     }
 
     #[test]
@@ -942,6 +749,8 @@ mod tests {
             })
             .await
             .unwrap();
+        // createSurface 现在会标脏（核心语义），断言前先清空
+        renderer.core.clear_dirty();
 
         renderer.register_pending_response("action-1", "s1", "/result");
 
@@ -955,6 +764,6 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(renderer.dirty_surfaces.contains("s1"));
+        assert!(renderer.core.dirty_surfaces().contains("s1"));
     }
 }

@@ -175,7 +175,7 @@ mod tests {
         let (action_tx, _action_rx) = A2uiApp::create_action_channel();
 
         let app = A2uiApp::new(renderer, msg_rx, action_tx);
-        assert!(app.renderer().surfaces.is_empty());
+        assert!(app.renderer().core.surfaces().is_empty());
     }
 
     #[test]
@@ -224,7 +224,7 @@ mod tests {
         assert!(result.is_ok());
         assert!(result.unwrap()); // had_updates = true
                                   // 验证 surface 已创建
-        assert_eq!(app.renderer().surfaces.len(), 1);
+        assert_eq!(app.renderer().core.surfaces().len(), 1);
     }
 
     #[test]

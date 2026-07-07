@@ -20,7 +20,7 @@ fn test_gui_full_flow() {
     };
 
     // 验证结构
-    assert!(renderer.surfaces.is_empty());
+    assert!(renderer.core.surfaces().is_empty());
 }
 
 #[test]
