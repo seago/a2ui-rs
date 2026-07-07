@@ -597,6 +597,16 @@ impl Renderer for TuiRenderer {
     }
 
     async fn handle_user_event(&mut self, event: UserEvent) -> RenderResult<Option<ActionMessage>> {
+        // 先把输入值写回组件声明的绑定路径（必须在读取 dataModel 快照之前，
+        // 使快照与后续渲染反映最新输入；写回不受 sendDataModel 开关影响）
+        if let Some((surface_id, path)) =
+            a2ui_renderer::write_back_user_event(&self.forest, &mut self.data_bindings, &event)?
+        {
+            self.surface_lru.touch(&surface_id);
+            self.dependency_graph.on_data_change(&path);
+            self.dirty_surfaces.insert(surface_id);
+        }
+
         // 确定性地查找 event 所属的 surface: 使用 component_id 反向索引
         let surface_for = |comp_id: &ComponentId| -> Option<String> {
             self.forest
@@ -1435,6 +1445,107 @@ mod tests {
     }
 
     // --- P2-2: sendDataModel targeting ---
+
+    /// 创建含单个绑定组件的 surface，返回 renderer
+    async fn renderer_with_bound_component(component: serde_json::Value) -> TuiRenderer {
+        let mut renderer = TuiRenderer::new();
+        let comp: Component = serde_json::from_value(component).unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: true,
+                components: Some(vec![comp]),
+                data_model: Some(json!({"form": {"username": "old"}})),
+            })
+            .await
+            .unwrap();
+        renderer
+    }
+
+    #[tokio::test]
+    async fn test_text_input_writes_back_to_data_model() {
+        let mut renderer = renderer_with_bound_component(json!({
+            "component":"TextField","id":"root","value":{"path":"/form/username"}
+        }))
+        .await;
+
+        let action = renderer
+            .handle_user_event(UserEvent::TextInput {
+                component_id: ComponentId::new("root").unwrap(),
+                value: "alice".into(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        // (a) 绑定路径已更新
+        assert_eq!(
+            renderer
+                .data_bindings
+                .get("s1")
+                .unwrap()
+                .get("/form/username"),
+            Some(&json!("alice")),
+            "输入值应写回 DataModel"
+        );
+        // (b) action 附带的 dataModel 快照包含新值（而非过期快照）
+        let Some(DynamicValue::Literal(dm)) = action.context.get("dataModel").cloned() else {
+            panic!("dataModel context should be Literal");
+        };
+        assert_eq!(
+            dm.pointer("/form/username"),
+            Some(&json!("alice")),
+            "dataModel 快照应含刚输入的值"
+        );
+        // (c) surface 被标脏
+        assert!(renderer.dirty_surfaces.contains("s1"));
+    }
+
+    #[tokio::test]
+    async fn test_check_toggle_writes_back_to_data_model() {
+        let mut renderer = renderer_with_bound_component(json!({
+            "component":"CheckBox","id":"root","checked":{"path":"/agree"}
+        }))
+        .await;
+
+        renderer
+            .handle_user_event(UserEvent::CheckToggle {
+                component_id: ComponentId::new("root").unwrap(),
+                checked: true,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            renderer.data_bindings.get("s1").unwrap().get("/agree"),
+            Some(&json!(true))
+        );
+        assert!(renderer.dirty_surfaces.contains("s1"));
+    }
+
+    #[tokio::test]
+    async fn test_slider_change_writes_back_to_data_model() {
+        let mut renderer = renderer_with_bound_component(json!({
+            "component":"Slider","id":"root","value":{"path":"/volume"},"min":0,"max":100
+        }))
+        .await;
+
+        renderer
+            .handle_user_event(UserEvent::SliderChange {
+                component_id: ComponentId::new("root").unwrap(),
+                value: 42.5,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            renderer.data_bindings.get("s1").unwrap().get("/volume"),
+            Some(&json!(42.5))
+        );
+        assert!(renderer.dirty_surfaces.contains("s1"));
+    }
 
     #[tokio::test]
     async fn test_send_data_model_includes_datamodel_in_action() {
