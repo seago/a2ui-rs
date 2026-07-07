@@ -12,7 +12,10 @@ use a2ui_core::message::{
 };
 use a2ui_core::prelude::*;
 use a2ui_core::ClientEnvelope;
-use a2ui_renderer::{RenderResult, Renderer, RendererCore, SurfaceHandle, UserEvent};
+use a2ui_renderer::{
+    choice_options, choice_selected, toggle_choice, RenderResult, Renderer, RendererCore,
+    SurfaceHandle, UserEvent,
+};
 use ratatui::{
     layout::Rect,
     widgets::{Block, Paragraph},
@@ -29,6 +32,8 @@ pub struct TuiRenderer {
     pub core: RendererCore,
     /// 焦点管理器
     pub focus_manager: FocusManager,
+    /// ChoicePicker 的选项游标（component_id → 选项下标，平台本地 UI 状态）
+    pub choice_cursors: std::collections::HashMap<String, usize>,
     /// 最近一帧构建的 widget 数量（render() 填充，测试用）
     pub last_frame_widget_count: usize,
 }
@@ -39,6 +44,7 @@ impl TuiRenderer {
         Self {
             core: RendererCore::new(),
             focus_manager: FocusManager::new(),
+            choice_cursors: std::collections::HashMap::new(),
             last_frame_widget_count: 0,
         }
     }
@@ -46,6 +52,61 @@ impl TuiRenderer {
     /// 获取依赖图的只读引用（用于测试和查询）
     pub fn dependency_graph(&self) -> &a2ui_renderer::DependencyGraph {
         self.core.dependency_graph()
+    }
+
+    /// 焦点 ChoicePicker 的选项游标移动（焦点不是 ChoicePicker 时 no-op）
+    fn move_choice_cursor(&mut self, component_id: &ComponentId, forward: bool) {
+        let Some(count) = self.choice_option_count(component_id) else {
+            return;
+        };
+        if count == 0 {
+            return;
+        }
+        let cursor = self
+            .choice_cursors
+            .entry(component_id.as_str().to_string())
+            .or_insert(0);
+        *cursor = if forward {
+            (*cursor + 1) % count
+        } else {
+            (*cursor + count - 1) % count
+        };
+    }
+
+    fn choice_option_count(&self, component_id: &ComponentId) -> Option<usize> {
+        let surface_id = self.core.forest().surface_of(component_id)?.to_string();
+        let component = self.core.forest().get(&surface_id, component_id)?;
+        if component.component_type() != "ChoicePicker" {
+            return None;
+        }
+        Some(choice_options(component, self.core.binding(&surface_id)).len())
+    }
+
+    /// 焦点组件是 ChoicePicker 时构造 ChoiceSelect：游标指向的选项经
+    /// toggle_choice（单选替换/多选切换）计算完整新选中集
+    fn choice_select_event(&self, component_id: &ComponentId) -> Option<UserEvent> {
+        let surface_id = self.core.forest().surface_of(component_id)?.to_string();
+        let component = self.core.forest().get(&surface_id, component_id)?;
+        if component.component_type() != "ChoicePicker" {
+            return None;
+        }
+        let binding = self.core.binding(&surface_id);
+        let options = choice_options(component, binding);
+        if options.is_empty() {
+            return None;
+        }
+        let cursor = self
+            .choice_cursors
+            .get(component_id.as_str())
+            .copied()
+            .unwrap_or(0)
+            .min(options.len() - 1);
+        let selected = choice_selected(component, binding);
+        let variant = component.prop_str(a2ui_core::component::prop_keys::VARIANT);
+        Some(UserEvent::ChoiceSelect {
+            component_id: component_id.clone(),
+            values: toggle_choice(&selected, &options[cursor].value, variant),
+        })
     }
 
     /// 注册客户端函数（供 callableFrom enforcement 使用）
@@ -275,21 +336,36 @@ impl TuiRenderer {
                 frame.render_widget(Paragraph::new(header), area);
             }
             RenderableWidget::ChoicePicker {
+                id,
                 area,
                 options,
                 selected,
-                ..
             } => {
+                // 焦点时以 ▸ 标记选项游标（键盘 Left/Right 移动、Enter 切换）
+                let cursor = if is_focused && !options.is_empty() {
+                    Some(
+                        self.choice_cursors
+                            .get(id.as_str())
+                            .copied()
+                            .unwrap_or(0)
+                            .min(options.len() - 1),
+                    )
+                } else {
+                    None
+                };
                 let display: Vec<String> = options
                     .iter()
-                    .map(|o| {
+                    .enumerate()
+                    .map(|(i, o)| {
                         // 选中匹配按选项稳定值，展示用 label（两者在裸字符串
                         // 兼容形态下相同）
-                        if selected.contains(&o.value) {
-                            format!("(●) {}", o.label)
+                        let marker = if selected.contains(&o.value) {
+                            "(●)"
                         } else {
-                            format!("( ) {}", o.label)
-                        }
+                            "( )"
+                        };
+                        let prefix = if cursor == Some(i) { "▸" } else { "" };
+                        format!("{}{} {}", prefix, marker, o.label)
                     })
                     .collect();
                 frame.render_widget(Paragraph::new(display.join("  ")), area);
@@ -387,8 +463,9 @@ impl Renderer for TuiRenderer {
         event: UserEvent,
     ) -> RenderResult<Option<ClientEnvelope>> {
         // KeyPress 是渲染器本地行为（docs/refactor-step0 D7）：
-        // Tab/Up/Down 导航焦点不产消息；Enter/空格 转译为焦点组件的
-        // Click 再交公共核心（有声明 action 才发消息）
+        // Tab/Up/Down 导航焦点不产消息；Left/Right 移动焦点 ChoicePicker
+        // 的选项游标；Enter/空格 对 ChoicePicker 产生 ChoiceSelect（经
+        // toggle_choice），其余组件转译为 Click，再交公共核心
         let event = match event {
             UserEvent::KeyPress { key } => match key.as_str() {
                 "Tab" | "Down" => {
@@ -399,9 +476,18 @@ impl Renderer for TuiRenderer {
                     self.focus_manager.previous();
                     return Ok(None);
                 }
+                "Left" | "Right" => {
+                    if let Some(comp_id) = self.focus_manager.current().cloned() {
+                        self.move_choice_cursor(&comp_id, key == "Right");
+                    }
+                    return Ok(None);
+                }
                 "Enter" | " " => match self.focus_manager.current().cloned() {
-                    Some(comp_id) => UserEvent::Click {
-                        component_id: comp_id,
+                    Some(comp_id) => match self.choice_select_event(&comp_id) {
+                        Some(select) => select,
+                        None => UserEvent::Click {
+                            component_id: comp_id,
+                        },
                     },
                     None => return Ok(None),
                 },
@@ -1943,5 +2029,130 @@ mod tests {
             .await
             .unwrap();
         assert!(envelope.is_none());
+    }
+
+    async fn renderer_with_choice_picker(variant: Option<&str>) -> TuiRenderer {
+        let mut renderer = TuiRenderer::new();
+        let mut cp = json!({
+            "id":"cp","component":"ChoicePicker",
+            "options":[{"label":"Email","value":"email"},{"label":"SMS","value":"sms"}],
+            "value":{"path":"/pref"}
+        });
+        if let Some(v) = variant {
+            cp["variant"] = json!(v);
+        }
+        let root: Component =
+            Component::from_json(r#"{"id":"root","component":"Column","children":["cp"]}"#)
+                .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![root, Component::from_value(cp).unwrap()]),
+                data_model: Some(json!({"pref": []})),
+            })
+            .await
+            .unwrap();
+        renderer.render().await.unwrap();
+        // Tab 聚焦到 cp（唯一可聚焦组件）
+        renderer
+            .handle_user_event(UserEvent::KeyPress { key: "Tab".into() })
+            .await
+            .unwrap();
+        assert_eq!(
+            renderer.focus_manager.current().map(|id| id.as_str()),
+            Some("cp")
+        );
+        renderer
+    }
+
+    #[tokio::test]
+    async fn test_choice_picker_keys_move_cursor_and_toggle_selection() {
+        // 多选：Right 移动选项游标，Enter 经 toggle_choice 写回完整选中集
+        let mut renderer = renderer_with_choice_picker(Some("multipleSelection")).await;
+
+        renderer
+            .handle_user_event(UserEvent::KeyPress {
+                key: "Right".into(),
+            })
+            .await
+            .unwrap();
+        let envelope = renderer
+            .handle_user_event(UserEvent::KeyPress {
+                key: "Enter".into(),
+            })
+            .await
+            .unwrap();
+        assert!(envelope.is_none(), "ChoiceSelect 不应产生消息");
+        assert_eq!(
+            renderer.core.binding("s1").unwrap().get("/pref"),
+            Some(&json!(["sms"]))
+        );
+
+        // 多选再次 Enter 反选回空集
+        renderer
+            .handle_user_event(UserEvent::KeyPress {
+                key: "Enter".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            renderer.core.binding("s1").unwrap().get("/pref"),
+            Some(&json!([]))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_render_frame_marks_choice_cursor_when_focused() {
+        use ratatui::backend::TestBackend;
+
+        // 键盘交互需要可见的游标反馈：焦点 ChoicePicker 的游标选项前缀 ▸
+        let mut renderer = renderer_with_choice_picker(None).await;
+        renderer
+            .handle_user_event(UserEvent::KeyPress {
+                key: "Right".into(),
+            })
+            .await
+            .unwrap();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        renderer.render_frame(&mut terminal).await.unwrap();
+
+        let buf = terminal.backend().buffer();
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+        assert!(
+            text.contains("▸( ) SMS"),
+            "游标应标记在 SMS 选项前，got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_choice_picker_enter_defaults_to_first_option_single_select() {
+        // 无 variant（规范默认单选）：游标默认第 0 项，Enter 整体替换
+        let mut renderer = renderer_with_choice_picker(None).await;
+        renderer
+            .handle_user_event(UserEvent::KeyPress {
+                key: "Enter".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            renderer.core.binding("s1").unwrap().get("/pref"),
+            Some(&json!(["email"]))
+        );
+        // 单选重复激活保持选中（不反选）
+        renderer
+            .handle_user_event(UserEvent::KeyPress {
+                key: "Enter".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            renderer.core.binding("s1").unwrap().get("/pref"),
+            Some(&json!(["email"]))
+        );
     }
 }
