@@ -390,12 +390,33 @@ fn build_image(
     }
 }
 
+/// 在 node.children 中按 props\[prop_key\] 指定的组件 id 查找子节点。
+/// 组件树的 children 顺序是构建细节，消费端一律按 id 匹配。
+fn select_child_by_prop<'a>(
+    node: &'a ComponentTreeNode,
+    prop_key: &str,
+) -> Option<&'a ComponentTreeNode> {
+    let target = node.component.properties().get(prop_key)?.as_str()?;
+    node.children
+        .iter()
+        .find(|c| c.component.id().as_str() == target)
+}
+
+/// 按 tabs\[index\].child 的组件 id 在 node.children 中查找对应子节点。
+fn select_tab_child(node: &ComponentTreeNode, index: usize) -> Option<&ComponentTreeNode> {
+    let tabs = node.component.properties().get("tabs")?.as_array()?;
+    let target = tabs.get(index)?.get("child")?.as_str()?;
+    node.children
+        .iter()
+        .find(|c| c.component.id().as_str() == target)
+}
+
 fn build_tabs(
     node: &ComponentTreeNode,
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    // 用简单的按钮行 + 第一个 tab 内容近似实现
+    // 用简单的按钮行 + 激活（第 0 个）tab 内容近似实现
     let tab_labels: Vec<String> = node
         .component
         .properties()
@@ -413,8 +434,15 @@ fn build_tabs(
         .map(|title| iced::widget::button(text(title.clone()).shaping(Shaping::Advanced)).into())
         .collect();
 
-    let content = if let Some(first_child) = node.children.first() {
-        build_element_tree(first_child, renderer, surface_id)
+    // 按 id 匹配激活 tab 的子节点；无 tabs 元数据时降级取第一个子节点
+    // （有元数据但组件缺失时不降级，避免渲染到错误的子节点）
+    let active_child = if node.component.properties().get("tabs").is_some() {
+        select_tab_child(node, 0)
+    } else {
+        node.children.first()
+    };
+    let content = if let Some(child) = active_child {
+        build_element_tree(child, renderer, surface_id)
     } else {
         text("[Tabs: no content]").shaping(Shaping::Advanced).into()
     };
@@ -433,7 +461,15 @@ fn build_modal(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    if let Some(content_child) = node.children.first() {
+    // 按 props.content 的 id 匹配（children 可能同时含 trigger）；
+    // 无 content 元数据时降级取第一个子节点
+    // （有元数据但组件缺失时不降级，避免把 trigger 当 content 渲染）
+    let content_child = if node.component.properties().get("content").is_some() {
+        select_child_by_prop(node, "content")
+    } else {
+        node.children.first()
+    };
+    if let Some(content_child) = content_child {
         let content = build_element_tree(content_child, renderer, surface_id);
         iced::widget::container(content).padding(16).into()
     } else {
@@ -667,6 +703,50 @@ mod tests {
     use a2ui_core::DataModel;
     use a2ui_renderer::DataBinding;
     use serde_json::json;
+
+    fn tree_node(json: serde_json::Value) -> ComponentTreeNode {
+        ComponentTreeNode::new(serde_json::from_value(json).unwrap())
+    }
+
+    #[test]
+    fn test_select_child_by_prop_matches_by_id_not_position() {
+        // children 故意乱序为 [trigger, content]，必须按 props.content 的 id 匹配
+        let modal = tree_node(json!({
+            "component":"Modal","id":"m","content":"body","trigger":"btn"
+        }))
+        .with_children(vec![
+            tree_node(json!({"component":"Button","id":"btn","label":"open"})),
+            tree_node(json!({"component":"Text","id":"body","text":"hello"})),
+        ]);
+
+        let selected = select_child_by_prop(&modal, "content").expect("content child");
+        assert_eq!(selected.component.id().as_str(), "body");
+    }
+
+    #[test]
+    fn test_select_child_by_prop_missing_returns_none() {
+        let modal = tree_node(json!({"component":"Modal","id":"m","content":"ghost"}));
+        assert!(select_child_by_prop(&modal, "content").is_none());
+    }
+
+    #[test]
+    fn test_select_tab_child_matches_by_id() {
+        let tabs = tree_node(json!({
+            "component":"Tabs","id":"t",
+            "tabs":[{"title":"T1","child":"a"},{"title":"T2","child":"b"}]
+        }))
+        .with_children(vec![
+            // 乱序：b 在前
+            tree_node(json!({"component":"Text","id":"b","text":"tab b"})),
+            tree_node(json!({"component":"Text","id":"a","text":"tab a"})),
+        ]);
+
+        let first = select_tab_child(&tabs, 0).expect("tab 0 child");
+        assert_eq!(first.component.id().as_str(), "a");
+        let second = select_tab_child(&tabs, 1).expect("tab 1 child");
+        assert_eq!(second.component.id().as_str(), "b");
+        assert!(select_tab_child(&tabs, 2).is_none());
+    }
 
     #[test]
     fn test_resolve_button_label_from_props() {

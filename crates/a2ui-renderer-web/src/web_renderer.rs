@@ -190,216 +190,239 @@ impl WebRenderer {
         let ctype = component.component_type();
         let props = component.properties();
 
-        // 递归构建子 widget
-        let mut child_widgets: Vec<RenderableHtmlWidget> = Vec::new();
+        // 递归构建子 widget，保留源组件 id 以便 Modal/Tabs 按 id 匹配
+        // （组件树 children 的顺序是构建细节，不可按位置消费）
+        let mut child_pairs: Vec<(String, RenderableHtmlWidget)> = Vec::new();
         for child in &node.children {
             if let Some(widget) = Self::build_widget_tree(child, binding, registry) {
-                child_widgets.push(widget);
+                child_pairs.push((child.component.id().as_str().to_string(), widget));
             }
         }
 
-        let widget =
-            match ctype {
-                "Text" => {
-                    let text = extract_text(props, binding);
-                    let variant = props
-                        .get("variant")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("body")
-                        .to_string();
-                    RenderableHtmlWidget::Text {
-                        id: component.id().clone(),
-                        text,
-                        variant,
-                    }
-                }
-                "Button" => {
-                    let label = extract_text(props, binding);
-                    let variant = props
-                        .get("variant")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("default")
-                        .to_string();
-                    RenderableHtmlWidget::Button {
-                        id: component.id().clone(),
-                        label,
-                        variant,
-                    }
-                }
-                "Column" => RenderableHtmlWidget::Column {
+        let widget = match ctype {
+            "Text" => {
+                let text = extract_text(props, binding);
+                let variant = props
+                    .get("variant")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("body")
+                    .to_string();
+                RenderableHtmlWidget::Text {
                     id: component.id().clone(),
-                    children: child_widgets,
-                },
-                "Row" => RenderableHtmlWidget::Row {
+                    text,
+                    variant,
+                }
+            }
+            "Button" => {
+                let label = extract_text(props, binding);
+                let variant = props
+                    .get("variant")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default")
+                    .to_string();
+                RenderableHtmlWidget::Button {
                     id: component.id().clone(),
-                    children: child_widgets,
-                },
-                "Image" => {
-                    let url = extract_string_value(props, "url", binding).unwrap_or_default();
-                    RenderableHtmlWidget::Image {
-                        id: component.id().clone(),
-                        url,
-                    }
+                    label,
+                    variant,
                 }
-                "Card" => {
-                    let child = child_widgets.into_iter().next().unwrap_or(
-                        RenderableHtmlWidget::Placeholder {
-                            id: component.id().clone(),
-                            reason: "empty card".to_string(),
-                        },
-                    );
-                    RenderableHtmlWidget::Card {
-                        id: component.id().clone(),
-                        child: Box::new(child),
-                    }
-                }
-                "CheckBox" => {
-                    let checked = resolve_bool_value(props, "value", binding)
-                        .or_else(|| resolve_bool_value(props, "checked", binding))
-                        .unwrap_or(false);
-                    let label = extract_string_value(props, "label", binding).unwrap_or_default();
-                    RenderableHtmlWidget::CheckBox {
-                        id: component.id().clone(),
-                        checked,
-                        label,
-                    }
-                }
-                "Divider" => RenderableHtmlWidget::Divider {
+            }
+            "Column" => RenderableHtmlWidget::Column {
+                id: component.id().clone(),
+                children: child_pairs.into_iter().map(|(_, w)| w).collect(),
+            },
+            "Row" => RenderableHtmlWidget::Row {
+                id: component.id().clone(),
+                children: child_pairs.into_iter().map(|(_, w)| w).collect(),
+            },
+            "Image" => {
+                let url = extract_string_value(props, "url", binding).unwrap_or_default();
+                RenderableHtmlWidget::Image {
                     id: component.id().clone(),
-                },
-                "Icon" => {
-                    let name =
-                        extract_string_value(props, "name", binding).unwrap_or("?".to_string());
-                    RenderableHtmlWidget::Icon {
-                        id: component.id().clone(),
-                        name,
-                    }
+                    url,
                 }
-                "List" => RenderableHtmlWidget::List {
+            }
+            "Card" => {
+                let child = child_pairs.into_iter().next().map(|(_, w)| w).unwrap_or(
+                    RenderableHtmlWidget::Placeholder {
+                        id: component.id().clone(),
+                        reason: "empty card".to_string(),
+                    },
+                );
+                RenderableHtmlWidget::Card {
                     id: component.id().clone(),
-                    children: child_widgets,
-                },
-                "Tabs" => {
-                    // Tabs 子组件已由 build_tree 展开为 children
-                    // 尝试从 props 读取 tabs 元数据
-                    let tabs_data: Vec<(String, Vec<RenderableHtmlWidget>)> = props
-                        .get("tabs")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|tab| {
-                                    let title = tab.get("title")?.as_str()?.to_string();
-                                    Some((title, Vec::new()))
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    child: Box::new(child),
+                }
+            }
+            "CheckBox" => {
+                let checked = resolve_bool_value(props, "value", binding)
+                    .or_else(|| resolve_bool_value(props, "checked", binding))
+                    .unwrap_or(false);
+                let label = extract_string_value(props, "label", binding).unwrap_or_default();
+                RenderableHtmlWidget::CheckBox {
+                    id: component.id().clone(),
+                    checked,
+                    label,
+                }
+            }
+            "Divider" => RenderableHtmlWidget::Divider {
+                id: component.id().clone(),
+            },
+            "Icon" => {
+                let name = extract_string_value(props, "name", binding).unwrap_or("?".to_string());
+                RenderableHtmlWidget::Icon {
+                    id: component.id().clone(),
+                    name,
+                }
+            }
+            "List" => RenderableHtmlWidget::List {
+                id: component.id().clone(),
+                children: child_pairs.into_iter().map(|(_, w)| w).collect(),
+            },
+            "Tabs" => {
+                // 按 tabs[].child 的 id 从 child_pairs 中匹配各 tab 内容
+                let mut remaining = child_pairs;
+                let tabs_data: Vec<(String, Vec<RenderableHtmlWidget>)> = props
+                    .get("tabs")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|tab| {
+                                let title = tab.get("title")?.as_str()?.to_string();
+                                let children = tab
+                                    .get("child")
+                                    .and_then(|v| v.as_str())
+                                    .and_then(|child_id| {
+                                        remaining
+                                            .iter()
+                                            .position(|(id, _)| id == child_id)
+                                            .map(|pos| vec![remaining.remove(pos).1])
+                                    })
+                                    .unwrap_or_default();
+                                Some((title, children))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
-                    // 如果从 props 读取到了 tabs 数据，使用该数据
-                    if !tabs_data.is_empty() {
-                        RenderableHtmlWidget::Tabs {
-                            id: component.id().clone(),
-                            tabs: tabs_data,
-                        }
-                    } else {
-                        // 否则使用 child_widgets 作为 flat children
-                        RenderableHtmlWidget::Tabs {
-                            id: component.id().clone(),
-                            tabs: vec![("Tab".to_string(), child_widgets)],
-                        }
-                    }
-                }
-                "Modal" => {
-                    let title = extract_string_value(props, "title", binding)
-                        .or_else(|| extract_string_value(props, "label", binding))
-                        .unwrap_or_default();
-                    let content = child_widgets.into_iter().next().unwrap_or(
-                        RenderableHtmlWidget::Placeholder {
-                            id: component.id().clone(),
-                            reason: "empty modal".to_string(),
-                        },
-                    );
-                    RenderableHtmlWidget::Modal {
+                // 如果从 props 读取到了 tabs 数据，使用该数据
+                if !tabs_data.is_empty() {
+                    RenderableHtmlWidget::Tabs {
                         id: component.id().clone(),
-                        title,
-                        content: Box::new(content),
+                        tabs: tabs_data,
                     }
-                }
-                "Slider" => {
-                    let value = resolve_number_value(props, "value", binding).unwrap_or(0.0);
-                    let min = resolve_number_value(props, "min", binding).unwrap_or(0.0);
-                    let max = resolve_number_value(props, "max", binding).unwrap_or(100.0);
-                    RenderableHtmlWidget::Slider {
+                } else {
+                    // 否则使用全部子 widget 作为单一 tab（无元数据的降级路径）
+                    RenderableHtmlWidget::Tabs {
                         id: component.id().clone(),
-                        value,
-                        min,
-                        max,
+                        tabs: vec![(
+                            "Tab".to_string(),
+                            remaining.into_iter().map(|(_, w)| w).collect(),
+                        )],
                     }
                 }
-                "TextField" => {
-                    let value = extract_string_value(props, "value", binding).unwrap_or_default();
-                    let placeholder =
-                        extract_string_value(props, "placeholder", binding).unwrap_or_default();
-                    RenderableHtmlWidget::TextField {
+            }
+            "Modal" => {
+                let title = extract_string_value(props, "title", binding)
+                    .or_else(|| extract_string_value(props, "label", binding))
+                    .unwrap_or_default();
+                // 按 props.content 的 id 匹配（children 可能同时含 trigger）；
+                // 无 content 元数据时降级取第一个非 trigger 的子 widget
+                let trigger_id = props.get("trigger").and_then(|v| v.as_str());
+                let content_widget = match props.get("content").and_then(|v| v.as_str()) {
+                    Some(content_id) => child_pairs
+                        .into_iter()
+                        .find(|(id, _)| id == content_id)
+                        .map(|(_, w)| w),
+                    None => child_pairs
+                        .into_iter()
+                        .find(|(id, _)| Some(id.as_str()) != trigger_id)
+                        .map(|(_, w)| w),
+                };
+                let content = content_widget.unwrap_or(RenderableHtmlWidget::Placeholder {
+                    id: component.id().clone(),
+                    reason: "empty modal".to_string(),
+                });
+                RenderableHtmlWidget::Modal {
+                    id: component.id().clone(),
+                    title,
+                    content: Box::new(content),
+                }
+            }
+            "Slider" => {
+                let value = resolve_number_value(props, "value", binding).unwrap_or(0.0);
+                let min = resolve_number_value(props, "min", binding).unwrap_or(0.0);
+                let max = resolve_number_value(props, "max", binding).unwrap_or(100.0);
+                RenderableHtmlWidget::Slider {
+                    id: component.id().clone(),
+                    value,
+                    min,
+                    max,
+                }
+            }
+            "TextField" => {
+                let value = extract_string_value(props, "value", binding).unwrap_or_default();
+                let placeholder =
+                    extract_string_value(props, "placeholder", binding).unwrap_or_default();
+                RenderableHtmlWidget::TextField {
+                    id: component.id().clone(),
+                    value,
+                    placeholder,
+                }
+            }
+            "ChoicePicker" => {
+                let options = props
+                    .get("options")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(extract_static_string).collect())
+                    .unwrap_or_default();
+                let selected = props
+                    .get("value")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(extract_static_string).collect())
+                    .unwrap_or_default();
+                RenderableHtmlWidget::ChoicePicker {
+                    id: component.id().clone(),
+                    options,
+                    selected,
+                }
+            }
+            "DateTimeInput" => {
+                let label = extract_string_value(props, "label", binding)
+                    .unwrap_or("Select date/time".to_string());
+                RenderableHtmlWidget::DateTimeInput {
+                    id: component.id().clone(),
+                    label,
+                }
+            }
+            "Video" => {
+                let url = extract_string_value(props, "url", binding).unwrap_or_default();
+                RenderableHtmlWidget::Video {
+                    id: component.id().clone(),
+                    url,
+                }
+            }
+            "AudioPlayer" => {
+                let url = extract_string_value(props, "url", binding).unwrap_or_default();
+                RenderableHtmlWidget::AudioPlayer {
+                    id: component.id().clone(),
+                    url,
+                }
+            }
+            _ => {
+                // 先检查自定义组件注册表
+                if registry.is_registered(ctype) {
+                    RenderableHtmlWidget::Placeholder {
                         id: component.id().clone(),
-                        value,
-                        placeholder,
+                        reason: format!("custom component: {}", ctype),
                     }
-                }
-                "ChoicePicker" => {
-                    let options = props
-                        .get("options")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter_map(extract_static_string).collect())
-                        .unwrap_or_default();
-                    let selected = props
-                        .get("value")
-                        .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter_map(extract_static_string).collect())
-                        .unwrap_or_default();
-                    RenderableHtmlWidget::ChoicePicker {
+                } else {
+                    RenderableHtmlWidget::Placeholder {
                         id: component.id().clone(),
-                        options,
-                        selected,
+                        reason: format!("unknown component type: {}", ctype),
                     }
                 }
-                "DateTimeInput" => {
-                    let label = extract_string_value(props, "label", binding)
-                        .unwrap_or("Select date/time".to_string());
-                    RenderableHtmlWidget::DateTimeInput {
-                        id: component.id().clone(),
-                        label,
-                    }
-                }
-                "Video" => {
-                    let url = extract_string_value(props, "url", binding).unwrap_or_default();
-                    RenderableHtmlWidget::Video {
-                        id: component.id().clone(),
-                        url,
-                    }
-                }
-                "AudioPlayer" => {
-                    let url = extract_string_value(props, "url", binding).unwrap_or_default();
-                    RenderableHtmlWidget::AudioPlayer {
-                        id: component.id().clone(),
-                        url,
-                    }
-                }
-                _ => {
-                    // 先检查自定义组件注册表
-                    if registry.is_registered(ctype) {
-                        RenderableHtmlWidget::Placeholder {
-                            id: component.id().clone(),
-                            reason: format!("custom component: {}", ctype),
-                        }
-                    } else {
-                        RenderableHtmlWidget::Placeholder {
-                            id: component.id().clone(),
-                            reason: format!("unknown component type: {}", ctype),
-                        }
-                    }
-                }
-            };
+            }
+        };
 
         let style = ComponentStyle::from_component_props(props);
         let widget = if supports_web_style(ctype) && style != ComponentStyle::default() {
@@ -874,6 +897,116 @@ mod tests {
         let html = renderer.render_surface_html("s1");
         assert!(html.is_some());
         assert!(html.unwrap().contains("Hello World"));
+    }
+
+    #[tokio::test]
+    async fn test_modal_widget_gets_content_by_id() {
+        let mut renderer = WebRenderer::new();
+        let components: Vec<Component> = vec![
+            serde_json::from_value(json!({
+                "id":"root","component":"Modal",
+                "title":"Confirm","content":"body","trigger":"btn"
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id":"body","component":"Text","text":"HELLO_MODAL"
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id":"btn","component":"Button","label":"open"
+            }))
+            .unwrap(),
+        ];
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(components),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let html = renderer.render_surface_html("s1").expect("html");
+        assert!(
+            html.contains("HELLO_MODAL"),
+            "Modal content 组件应被渲染，got: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tabs_widget_populates_tab_children() {
+        let mut renderer = WebRenderer::new();
+        let components: Vec<Component> = vec![
+            serde_json::from_value(json!({
+                "id":"root","component":"Tabs",
+                "tabs":[{"title":"First","child":"a"},{"title":"Second","child":"b"}]
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({"id":"a","component":"Text","text":"TAB_A_TEXT"}))
+                .unwrap(),
+            serde_json::from_value(json!({"id":"b","component":"Text","text":"TAB_B_TEXT"}))
+                .unwrap(),
+        ];
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(components),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let html = renderer.render_surface_html("s1").expect("html");
+        assert!(
+            html.contains("TAB_A_TEXT"),
+            "tab 0 内容应被渲染，got: {html}"
+        );
+        assert!(
+            html.contains("TAB_B_TEXT"),
+            "tab 1 内容应被渲染，got: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_modal_without_content_does_not_render_trigger_as_body() {
+        // Modal 只有 trigger 无 content：按位置取第一个子 widget 会把
+        // trigger 误当 content 塞进 modal body——必须按 id 匹配
+        let mut renderer = WebRenderer::new();
+        let components: Vec<Component> = vec![
+            serde_json::from_value(json!({
+                "id":"root","component":"Modal","title":"T","trigger":"btn"
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({
+                "id":"btn","component":"Button","label":"TRIGGER_LABEL"
+            }))
+            .unwrap(),
+        ];
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(components),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let html = renderer.render_surface_html("s1").expect("html");
+        // trigger 不应出现在 modal body 中
+        let body_start = html.find("a2ui-modal-body").expect("modal body present");
+        assert!(
+            !html[body_start..].contains("TRIGGER_LABEL"),
+            "trigger 不应被当作 modal content 渲染，got: {html}"
+        );
     }
 
     #[tokio::test]
