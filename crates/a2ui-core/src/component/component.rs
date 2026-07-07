@@ -734,6 +734,44 @@ impl Component {
         &self.properties
     }
 
+    // ---- 协议形态构造器 ----
+
+    /// 从协议 JSON 值构造组件（`{"component": ..., "id": ..., <props>}`）。
+    ///
+    /// 下游 crate（渲染器测试、示例）经此构造任意 props 的组件，
+    /// 无需直接依赖 `serde_json`。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::Component;
+    /// use a2ui_core::prelude::json;
+    ///
+    /// let comp = Component::from_value(json!({
+    ///     "component": "Text", "id": "t1", "text": "hello"
+    /// })).unwrap();
+    /// assert_eq!(comp.component_type(), "Text");
+    /// ```
+    pub fn from_value(value: Value) -> crate::error::Result<Self> {
+        Ok(serde_json::from_value(value)?)
+    }
+
+    /// 从协议 JSON 字符串构造组件（[`Component::from_value`] 的字符串版）。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::Component;
+    ///
+    /// let comp = Component::from_json(
+    ///     r#"{"component":"Button","id":"b1","child":"lbl"}"#
+    /// ).unwrap();
+    /// assert_eq!(comp.component_type(), "Button");
+    /// ```
+    pub fn from_json(json: &str) -> crate::error::Result<Self> {
+        Ok(serde_json::from_str(json)?)
+    }
+
     // ---- 类型化 props 访问器（裸标量） ----
 
     /// 读取字符串 prop（不含动态语义的键：`variant` / `title` 等）。
@@ -2021,5 +2059,31 @@ mod prop_accessor_tests {
         assert_eq!(prop_keys::CHILDREN, "children");
         assert_eq!(prop_keys::ACTION, "action");
         assert_eq!(prop_keys::CHECKED, "checked");
+    }
+
+    // ---- Component::from_value / from_json 构造器 ----
+
+    #[test]
+    fn component_from_value_parses_protocol_shape() {
+        let comp = Component::from_value(json!({
+            "component": "Button", "id": "b1", "child": "lbl", "variant": "primary"
+        }))
+        .expect("valid component");
+        assert_eq!(comp.component_type(), "Button");
+        assert_eq!(comp.id().as_str(), "b1");
+        assert_eq!(comp.prop_str("variant"), Some("primary"));
+        // 非法 ID → Err（走 ComponentId 校验）
+        assert!(Component::from_value(json!({"component": "Text", "id": "9bad"})).is_err());
+        // 缺必填字段 → Err
+        assert!(Component::from_value(json!({"id": "x"})).is_err());
+    }
+
+    #[test]
+    fn component_from_json_parses_protocol_shape() {
+        let comp = Component::from_json(r#"{"component":"Text","id":"t1","text":"hi"}"#)
+            .expect("valid component");
+        assert_eq!(comp.component_type(), "Text");
+        assert_eq!(comp.prop_str("text"), Some("hi"));
+        assert!(Component::from_json("not json").is_err());
     }
 }
