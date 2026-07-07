@@ -13,6 +13,7 @@ pub mod dynamic_value;
 pub mod error;
 pub mod format_string;
 pub mod function_dispatcher;
+pub mod input_state;
 pub mod input_writeback;
 pub mod path_resolver;
 pub mod renderer;
@@ -34,6 +35,7 @@ pub use dynamic_value::{
 };
 pub use error::{RenderResult, RendererError};
 pub use function_dispatcher::{CallableFrom, FunctionDispatcher};
+pub use input_state::checkbox_checked;
 pub use input_writeback::{write_back_input, write_back_user_event};
 pub use path_resolver::PathResolver;
 pub use renderer::{Renderer, SurfaceHandle, UserEvent};

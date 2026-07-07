@@ -51,6 +51,15 @@ pub enum UserEvent {
         component_id: ComponentId,
         value: f64,
     },
+    /// ChoicePicker 选择变更事件。
+    ///
+    /// `values` 是交互后的**完整**新选中值集合（非增量）：单选/多选的
+    /// 切换语义由交互发生地经 [`crate::choice::toggle_choice`] 计算，
+    /// 写回层保持纯写。
+    ChoiceSelect {
+        component_id: ComponentId,
+        values: Vec<String>,
+    },
 }
 
 /// 渲染器 trait — 各平台 crate 必须实现此 trait

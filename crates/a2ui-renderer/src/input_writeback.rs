@@ -81,6 +81,7 @@ pub fn write_back_input(
 /// - `CheckToggle` → `["value", "checked"]`（各渲染器读取 key 不一，
 ///   按此顺序取第一个是路径绑定的属性），写布尔
 /// - `SliderChange` → `["value"]`，写数值
+/// - `ChoiceSelect` → `["value"]`（规范唯一绑定键），写字符串数组
 /// - `Click`/`KeyPress` → 无值可写，返回 `Ok(None)`
 ///
 /// # 示例
@@ -149,6 +150,16 @@ pub fn write_back_user_event(
                 Value::Number(num),
             )
         }
+        UserEvent::ChoiceSelect {
+            component_id,
+            values,
+        } => write_back_input(
+            forest,
+            bindings,
+            component_id,
+            &["value"],
+            Value::Array(values.iter().cloned().map(Value::String).collect()),
+        ),
         UserEvent::Click { .. } | UserEvent::KeyPress { .. } => Ok(None),
     }
 }
@@ -249,6 +260,28 @@ mod tests {
         };
         let written = write_back_user_event(&forest, &mut bindings, &event).unwrap();
         assert_eq!(written, None);
+    }
+
+    #[test]
+    fn write_back_choice_select_writes_string_array() {
+        let (forest, mut bindings) = setup(json!({
+            "component":"ChoicePicker","id":"root",
+            "options":[{"label":"Email","value":"email"},{"label":"SMS","value":"sms"}],
+            "value":{"path":"/contact/preference"}
+        }));
+        let event = UserEvent::ChoiceSelect {
+            component_id: ComponentId::new("root").unwrap(),
+            values: vec!["email".to_string(), "sms".to_string()],
+        };
+        let written = write_back_user_event(&forest, &mut bindings, &event).unwrap();
+        assert_eq!(
+            written,
+            Some(("s1".to_string(), "/contact/preference".to_string()))
+        );
+        assert_eq!(
+            bindings["s1"].get("/contact/preference"),
+            Some(&json!(["email", "sms"]))
+        );
     }
 
     #[test]

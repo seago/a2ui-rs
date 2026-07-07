@@ -991,6 +991,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn choice_select_writes_back_array_without_emitting_message() {
+        let mut core = RendererCore::new();
+        let mut msg = create_msg(
+            "s1",
+            vec![json!({
+                "id":"root","component":"ChoicePicker",
+                "options":[{"label":"Email","value":"email"},{"label":"SMS","value":"sms"}],
+                "value":{"path":"/contact/preference"}
+            })],
+        );
+        msg.data_model = Some(json!({"contact":{"preference":["email"]}}));
+        core.create_surface(msg).await.unwrap();
+        core.clear_dirty();
+
+        let (envelope, _effects) = core
+            .handle_user_event(&UserEvent::ChoiceSelect {
+                component_id: ComponentId::new("root").unwrap(),
+                values: vec!["email".to_string(), "sms".to_string()],
+            })
+            .await
+            .unwrap();
+
+        assert!(envelope.is_none(), "规范：被动输入变更不触发网络请求");
+        assert_eq!(
+            core.binding("s1").unwrap().get("/contact/preference"),
+            Some(&json!(["email", "sms"]))
+        );
+        assert!(core.dirty_surfaces().contains("s1"));
+    }
+
+    #[tokio::test]
     async fn click_without_declared_action_emits_nothing() {
         let mut core = core_with_surface(json!({})).await;
         let (envelope, _) = core
