@@ -146,6 +146,17 @@ Web 端存在两条**互补而非替代**的渲染路线，分别服务不同象
 
 两侧**同跑同一批 JSON**，任一实现与向量不符即红灯。此机制作为闸门，实际发现并修正过 Rust/TS 之间的 `formatString` 语义、根组件识别、`updateDataModel` 的 `null` 语义等分歧——改协议逻辑时，两份实现必须继续对齐同一份向量。
 
+## 规范扩展登记
+
+本仓库对 basic catalog schema 之外的键/形态的**全部**扩展登记如下（依据 [docs/refactor-step3-renderer-behavior-alignment.md](docs/refactor-step3-renderer-behavior-alignment.md) §3.7）。这些扩展**冻结现状、不再扩散**：新增任何规范外的键或兼容形态前，必须先在此登记并说明理由。
+
+| 扩展 | 涉及方 | 理由与语义 |
+|---|---|---|
+| CheckBox `checked` 回退键 | 读：四家（经公共 `checkbox_checked`，`value` 优先）；写：`input_writeback` 候选键第二位 | 历史兼容。规范键是 `value`（DynamicBoolean，必填）；`checked` 支持既有「只声明 checked 绑定」的服务端 |
+| ChoicePicker 裸字符串 options | 四家（经 `options_decl` 兼容分支） | 历史兼容。规范形态是 `{label, value}` 对象数组；裸字符串按 `label == value` 退化 |
+| Image `width` / `height` | egui / iced | 先于规范实现的像素尺寸。规范用 `variant` 尺寸档位（icon/avatar/…）；档位落地时再评估收敛 |
+| Modal `title`（`label` 兜底） | web | 规范 Modal 无标题键（`unevaluatedProperties: false`），规范合法输入下该代码永不触发，无害保留 |
+
 ## 核心概念详解
 
 ### Surface（表面）
