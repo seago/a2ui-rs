@@ -7,16 +7,12 @@ use a2ui_core::message::{
 };
 use a2ui_core::prelude::*;
 use a2ui_renderer::component_forest::ComponentTreeNode;
-use a2ui_renderer::{
-    CatalogRegistry, ComponentForest, CustomComponentRegistry, DataBinding, DependencyGraph,
-    FunctionDispatcher, PathResolver, RenderResult, Renderer, SurfaceHandle, SurfaceLru, UserEvent,
-};
+use a2ui_renderer::{CoreEffects, RenderResult, Renderer, RendererCore, SurfaceHandle, UserEvent};
 use iced::widget::image;
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::Read;
-use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct IcedRenderProfile {
@@ -37,29 +33,13 @@ pub(crate) struct DynamicStringCacheKey {
 }
 
 /// Iced 渲染器实现
+///
+/// 协议状态与消息处理全部委托 [`RendererCore`]，本类型只保留平台特有部分：
+/// RefCell 渲染缓存（组件树 / 动态字符串 / 图片，按核心返回的
+/// [`CoreEffects`] 失效）与受控组件本地状态（text_input/checkbox/slider）。
 pub struct IcedRenderer {
-    /// Surface 句柄 → SurfaceId 映射
-    pub surfaces: HashMap<SurfaceHandle, String>,
-    /// 组件森林（所有 Surface 的组件树）
-    pub forest: ComponentForest,
-    /// DataModel 绑定（surface_id → DataBinding）
-    pub data_bindings: HashMap<String, DataBinding>,
-    /// 依赖图
-    pub dependency_graph: DependencyGraph,
-    /// 函数调度器
-    pub dispatcher: FunctionDispatcher,
-    /// Catalog 注册表
-    catalog_registry: CatalogRegistry,
-    /// action_id → (surface_id, response_path) 映射（responsePath 写回用）
-    pub pending_responses: HashMap<String, (String, String)>,
-    /// Surface 的 sendDataModel 标记
-    pub send_data_model: HashMap<String, bool>,
-    /// 需要增量重渲染的 surface 集合
-    pub dirty_surfaces: HashSet<String>,
-    /// Surface LRU 驱逐管理器
-    surface_lru: SurfaceLru,
-    /// 自定义组件注册表
-    pub custom_registry: CustomComponentRegistry,
+    /// 渲染器公共核心（协议状态 + 消息流水线；pub 供同 crate 测试访问）
+    pub core: RendererCore,
     /// 文本输入框本地状态（component_id → 当前输入值）
     pub text_input_values: RefCell<HashMap<String, String>>,
     /// 复选框本地状态（component_id → 当前选中状态）
@@ -76,27 +56,21 @@ pub struct IcedRenderer {
     pub(crate) dynamic_string_cache: RefCell<HashMap<DynamicStringCacheKey, String>>,
     /// iced view/build 热点计数
     profile: RefCell<IcedRenderProfile>,
-    /// Surface ID 列表（保持顺序）
-    pub surface_order: Vec<String>,
 }
 
+/// 最大并发 Surface 数量（DoS 防护）
+// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_SURFACES），C6 统一清理
+#[allow(dead_code)]
 const MAX_SURFACES: usize = 100;
+/// 单 Surface 最大组件数量（DoS 防护）
+// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_COMPONENTS_PER_SURFACE），C6 统一清理
+#[allow(dead_code)]
 const MAX_COMPONENTS_PER_SURFACE: usize = 1000;
 
 impl IcedRenderer {
     pub fn new() -> Self {
         Self {
-            surfaces: HashMap::new(),
-            forest: ComponentForest::new(),
-            data_bindings: HashMap::new(),
-            dependency_graph: DependencyGraph::new(),
-            dispatcher: FunctionDispatcher::new(),
-            catalog_registry: CatalogRegistry::with_defaults(),
-            pending_responses: HashMap::new(),
-            send_data_model: HashMap::new(),
-            dirty_surfaces: HashSet::new(),
-            surface_lru: SurfaceLru::new(MAX_SURFACES, Some(Duration::from_secs(600))),
-            custom_registry: CustomComponentRegistry::new(),
+            core: RendererCore::new(),
             text_input_values: RefCell::new(HashMap::new()),
             checkbox_values: RefCell::new(HashMap::new()),
             slider_values: RefCell::new(HashMap::new()),
@@ -105,7 +79,6 @@ impl IcedRenderer {
             tree_cache: RefCell::new(HashMap::new()),
             dynamic_string_cache: RefCell::new(HashMap::new()),
             profile: RefCell::new(IcedRenderProfile::default()),
-            surface_order: Vec::new(),
         }
     }
 
@@ -135,7 +108,7 @@ impl IcedRenderer {
             return Ok(tree);
         }
 
-        let tree = self.forest.build_tree(surface_id)?;
+        let tree = self.core.forest().build_tree(surface_id)?;
         self.tree_cache
             .borrow_mut()
             .insert(surface_id.to_string(), tree.clone());
@@ -157,23 +130,14 @@ impl IcedRenderer {
             .retain(|key, _| !(key.surface_id == surface_id && key.component_id == component_id));
     }
 
-    fn register_component_dependencies(&mut self, comp: &Component) {
-        self.dependency_graph.remove_component(comp.id());
-        for path in extract_paths(comp) {
-            self.dependency_graph
-                .register_dependency(comp.id().clone(), path);
+    /// 消费核心返回的缓存失效回执：整 surface 失效清树缓存与该 surface 的
+    /// 动态字符串缓存；组件级失效只清该组件的动态字符串缓存条目
+    fn apply_effects(&self, effects: &CoreEffects) {
+        for surface_id in &effects.invalidated_surfaces {
+            self.invalidate_surface_render_cache(surface_id);
         }
-    }
-
-    fn register_expanded_dependencies(
-        &mut self,
-        surface_id: &str,
-        component_ids: Vec<ComponentId>,
-    ) {
-        for component_id in component_ids {
-            if let Some(comp) = self.forest.get(surface_id, &component_id).cloned() {
-                self.register_component_dependencies(&comp);
-            }
+        for (surface_id, component_id) in &effects.invalidated_components {
+            self.invalidate_component_dynamic_cache(surface_id, component_id);
         }
     }
 
@@ -182,26 +146,26 @@ impl IcedRenderer {
         name: impl Into<String>,
         callable_from: a2ui_renderer::CallableFrom,
     ) {
-        self.dispatcher.register(name, callable_from);
+        self.core.register_function(name, callable_from);
     }
 
     pub fn registered_functions(&self) -> Vec<&String> {
-        self.dispatcher.registered_names()
+        self.core.registered_functions()
     }
 
     pub fn register_catalog(&mut self, catalog: a2ui_core::Catalog) -> RenderResult<()> {
-        self.catalog_registry.register(catalog)
+        self.core.register_catalog(catalog)
     }
 
-    pub fn catalog_registry(&self) -> &CatalogRegistry {
-        &self.catalog_registry
+    pub fn catalog_registry(&self) -> &a2ui_renderer::CatalogRegistry {
+        self.core.catalog_registry()
     }
 
     pub fn register_custom_component(
         &mut self,
         def: a2ui_renderer::CustomComponentDef,
     ) -> Result<(), String> {
-        self.custom_registry.register(def)
+        self.core.register_custom_component(def)
     }
 
     /// 注册待响应的 action_id → (surface_id, response_path) 映射
@@ -212,8 +176,8 @@ impl IcedRenderer {
         surface_id: impl Into<String>,
         response_path: impl Into<String>,
     ) {
-        self.pending_responses
-            .insert(action_id.into(), (surface_id.into(), response_path.into()));
+        self.core
+            .register_pending_response(action_id, surface_id, response_path);
     }
 
     /// 下载图片并缓存字节（如未缓存）
@@ -247,174 +211,49 @@ impl IcedRenderer {
     }
 }
 
+impl Default for IcedRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl Renderer for IcedRenderer {
     async fn create_surface(&mut self, msg: CreateSurface) -> RenderResult<SurfaceHandle> {
-        if let Some(victim_id) = self.surface_lru.find_victim(self.surfaces.len()) {
-            self.forest.remove_surface(&victim_id).ok();
-            self.data_bindings.remove(&victim_id);
-            self.surfaces.retain(|_, sid| sid != &victim_id);
-            self.dirty_surfaces.remove(&victim_id);
-            self.send_data_model.remove(&victim_id);
-            self.surface_lru.remove(&victim_id);
-            self.invalidate_surface_render_cache(&victim_id);
-            self.surface_order.retain(|s| s != &victim_id);
-        }
-
-        if self.surfaces.len() >= MAX_SURFACES {
-            return Err(a2ui_renderer::error::RendererError::SurfaceLimitExceeded {
-                current: self.surfaces.len(),
-                max: MAX_SURFACES,
-            });
-        }
-
-        if !self.catalog_registry.registered_ids().is_empty() {
-            if !self.catalog_registry.has_catalog(&msg.catalog_id) {
-                return Err(a2ui_renderer::error::RendererError::CatalogNotFound(
-                    msg.catalog_id.clone(),
-                ));
-            }
-        }
-
-        let handle = SurfaceHandle::new();
-        let surface_id = msg.surface_id.clone();
-
-        if let Some(components) = msg.components.clone() {
-            let new_count = components.len();
-            let existing_count = self.forest.component_count(&surface_id);
-            if existing_count + new_count > MAX_COMPONENTS_PER_SURFACE {
-                return Err(
-                    a2ui_renderer::error::RendererError::ComponentLimitExceeded {
-                        surface_id: surface_id.clone(),
-                        current: existing_count + new_count,
-                        max: MAX_COMPONENTS_PER_SURFACE,
-                    },
-                );
-            }
-
-            for comp in &components {
-                self.forest.upsert(&surface_id, comp.clone())?;
-            }
-            for comp in components {
-                self.register_component_dependencies(&comp);
-            }
-        }
-
-        let data_model = msg.data_model.unwrap_or(Value::Object(Default::default()));
-        self.data_bindings.insert(
-            surface_id.clone(),
-            DataBinding::new(DataModel::new(data_model.clone())),
-        );
-
-        self.send_data_model
-            .insert(surface_id.clone(), msg.send_data_model);
-
-        if let Some(binding) = self.data_bindings.get(&surface_id) {
-            let resolver = PathResolver::new(DataModel::new(binding.as_value().clone()));
-            let expanded_ids =
-                self.forest
-                    .expand_templates(&surface_id, binding, &resolver, &self.dispatcher)?;
-            self.register_expanded_dependencies(&surface_id, expanded_ids);
-        }
-        self.invalidate_surface_render_cache(&surface_id);
-
-        self.surfaces.insert(handle, surface_id.clone());
-        self.surface_lru.touch(&surface_id);
-        self.surface_order.push(surface_id);
-
+        tracing::trace!(surface_id = %msg.surface_id, "createSurface");
+        let (handle, effects) = self.core.create_surface(msg).await?;
+        self.apply_effects(&effects);
         Ok(handle)
     }
 
     async fn update_components(&mut self, msg: UpdateComponents) -> RenderResult<()> {
-        let surface_id = msg.surface_id.clone();
-        self.surface_lru.touch(&surface_id);
-        for comp in msg.components {
-            self.forest.upsert(&surface_id, comp.clone())?;
-            self.register_component_dependencies(&comp);
-        }
-        self.invalidate_surface_render_cache(&surface_id);
+        let effects = self.core.update_components(msg).await?;
+        self.apply_effects(&effects);
         Ok(())
     }
 
     async fn update_data_model(&mut self, msg: UpdateDataModel) -> RenderResult<()> {
-        let surface_id = msg.surface_id.clone();
-        self.surface_lru.touch(&surface_id);
-        if let Some(binding) = self.data_bindings.get_mut(&surface_id) {
-            if let Some(path) = &msg.path {
-                binding.set(path, msg.value.unwrap_or(Value::Null))?;
-                let affected = self.dependency_graph.on_data_change(path);
-                if !affected.is_empty() {
-                    for component_id in &affected {
-                        self.invalidate_component_dynamic_cache(&surface_id, component_id);
-                    }
-                    self.dirty_surfaces.insert(surface_id);
-                }
-            }
-        }
+        tracing::debug!(surface_id = %msg.surface_id, path = ?msg.path, "updateDataModel");
+        let effects = self.core.update_data_model(msg).await?;
+        self.apply_effects(&effects);
         Ok(())
     }
 
     async fn delete_surface(&mut self, msg: DeleteSurface) -> RenderResult<()> {
-        let surface_id = msg.surface_id.clone();
-        self.forest.remove_surface(&surface_id)?;
-        self.data_bindings.remove(&surface_id);
-        self.surfaces.retain(|_, sid| sid != &surface_id);
-        self.surface_lru.remove(&surface_id);
-        self.dirty_surfaces.remove(&surface_id);
-        self.send_data_model.remove(&surface_id);
-        self.invalidate_surface_render_cache(&surface_id);
-        self.surface_order.retain(|s| s != &surface_id);
+        tracing::info!(surface_id = %msg.surface_id, "deleteSurface");
+        let effects = self.core.delete_surface(msg).await?;
+        self.apply_effects(&effects);
         Ok(())
     }
 
     async fn action_response(&mut self, msg: ActionResponse) -> RenderResult<()> {
-        let action_id = msg.action_id.clone();
-        if let Some((surface_id, response_path)) = self.pending_responses.remove(&action_id) {
-            let write_value = match &msg.response {
-                a2ui_core::message::server_to_client::ActionResponsePayload::Success(v) => {
-                    v.clone()
-                }
-                a2ui_core::message::server_to_client::ActionResponsePayload::Error(err) => {
-                    Value::String(err.message.clone())
-                }
-            };
-
-            match self.data_bindings.get_mut(&surface_id) {
-                Some(binding) => {
-                    self.surface_lru.touch(&surface_id);
-                    binding.set(&response_path, write_value)?;
-                    let affected = self.dependency_graph.on_data_change(&response_path);
-                    if !affected.is_empty() {
-                        self.dirty_surfaces.insert(surface_id.clone());
-                        for component_id in &affected {
-                            self.invalidate_component_dynamic_cache(&surface_id, component_id);
-                        }
-                    }
-                }
-                None => {
-                    tracing::warn!(
-                        "action response {} targets missing surface {}, dropped",
-                        action_id,
-                        surface_id
-                    );
-                }
-            }
-        }
+        let effects = self.core.action_response(msg).await?;
+        self.apply_effects(&effects);
         Ok(())
     }
 
     async fn call_function(&mut self, msg: CallFunction) -> RenderResult<FunctionResponse> {
-        let function_name = msg.call.call.clone();
-        let result = self.dispatcher.dispatch(
-            &function_name,
-            msg.call.args,
-            a2ui_renderer::CallableFrom::ClientOnly,
-        )?;
-        Ok(FunctionResponse {
-            function_call_id: msg.function_call_id,
-            call: function_name,
-            value: result,
-        })
+        self.core.call_function(msg).await
     }
 
     async fn render(&mut self) -> RenderResult<()> {
@@ -425,90 +264,18 @@ impl Renderer for IcedRenderer {
         &mut self,
         event: UserEvent,
     ) -> RenderResult<Option<a2ui_core::ClientEnvelope>> {
-        // 先把输入值写回组件声明的绑定路径（在读取 data_model 快照之前）。
-        // iced 有渲染缓存：写回后必须失效受影响组件，否则 UI 显示旧值
-        if let Some((surface_id, path)) =
-            a2ui_renderer::write_back_user_event(&self.forest, &mut self.data_bindings, &event)?
-        {
-            self.surface_lru.touch(&surface_id);
-            let affected = self.dependency_graph.on_data_change(&path);
-            for component_id in &affected {
-                self.invalidate_component_dynamic_cache(&surface_id, component_id);
-            }
-            self.dirty_surfaces.insert(surface_id);
-        }
-
-        // 事件名与上下文 key 沿用 app.rs 既有约定，保持服务端消费方兼容
-        let (name, component_id, context_entry): (&str, &ComponentId, Option<(&str, Value)>) =
-            match &event {
-                UserEvent::Click { component_id } => ("click", component_id, None),
-                UserEvent::TextInput {
-                    component_id,
-                    value,
-                } => (
-                    "text_input",
-                    component_id,
-                    Some(("value", Value::String(value.clone()))),
-                ),
-                UserEvent::CheckToggle {
-                    component_id,
-                    checked,
-                } => (
-                    "check_toggle",
-                    component_id,
-                    Some(("checked", Value::Bool(*checked))),
-                ),
-                UserEvent::SliderChange {
-                    component_id,
-                    value,
-                } => (
-                    "slider_change",
-                    component_id,
-                    Some((
-                        "value",
-                        Value::Number(
-                            serde_json::Number::from_f64(*value).unwrap_or_else(|| 0.into()),
-                        ),
-                    )),
-                ),
-                UserEvent::KeyPress { .. } => return Ok(None),
-            };
-
-        let mut ctx = a2ui_core::message::client_to_server::ActionContext::new();
-        if let Some((key, value)) = context_entry {
-            ctx.insert(key.into(), DynamicValue::Literal(value));
-        }
-
-        // 附带 sendDataModel=true 的 surface 数据快照（此时已含刚写回的值）
-        let mut action_surface_id = String::new();
-        for (surface_id, enabled) in &self.send_data_model {
-            if *enabled {
-                if let Some(data_binding) = self.data_bindings.get(surface_id) {
-                    ctx.insert(
-                        "data_model".into(),
-                        DynamicValue::Literal(data_binding.as_value().clone()),
-                    );
-                    action_surface_id = surface_id.clone();
-                    break;
-                }
-            }
-        }
-
-        let mut action = a2ui_core::message::client_to_server::ActionMessage::event(
-            name,
-            action_surface_id,
-            component_id.as_str(),
-        );
-        action.context = ctx;
-        // iced 尚未迁移 RendererCore，仍发合成事件（C5 迁移）；
-        // trait 签名要求完整信封，此处包装
-        Ok(Some(a2ui_core::ClientEnvelope::v1_0(
-            a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action),
-        )))
+        // iced 无键盘焦点转译（KeyPress 由核心统一忽略）；
+        // 输入类事件只写回不发消息、Click 解析声明式 action，
+        // 均由公共核心处理，此处只需消费缓存失效回执
+        let (envelope, effects) = self.core.handle_user_event(&event).await?;
+        self.apply_effects(&effects);
+        Ok(envelope)
     }
 }
 
 /// 从组件中提取所有数据路径（用于依赖图注册）
+// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
+#[allow(dead_code)]
 fn extract_paths(comp: &Component) -> Vec<String> {
     let props = comp.properties();
     let mut paths = Vec::new();
@@ -516,6 +283,8 @@ fn extract_paths(comp: &Component) -> Vec<String> {
     paths
 }
 
+// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
+#[allow(dead_code)]
 fn extract_paths_from_value(value: &Value, paths: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
@@ -540,7 +309,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_iced_handle_text_input_writes_back_and_returns_action() {
+    async fn test_iced_handle_text_input_writes_back() {
+        // 旧断言（合成 text_input 消息 + context dataModel 快照）→ 新断言：
+        // 规范：被动输入变更不触发网络请求，只写回数据模型；
+        // 写回后受影响组件的动态字符串缓存被失效 + surface 标脏
         let mut renderer = IcedRenderer::new();
         let field: Component = serde_json::from_value(json!({
             "component":"TextField","id":"root","value":{"path":"/form/username"}
@@ -557,8 +329,18 @@ mod tests {
             })
             .await
             .unwrap();
-        // 预热动态字符串缓存，验证写回后被正确失效
+        // createSurface 本身标脏（核心语义），先清空以聚焦本测试
+        renderer.core.clear_dirty();
+        // 预热渲染缓存，验证写回后被正确失效
         let _ = renderer.cached_tree("s1");
+        renderer.dynamic_string_cache.borrow_mut().insert(
+            DynamicStringCacheKey {
+                surface_id: "s1".to_string(),
+                component_id: "root".to_string(),
+                prop: "value".to_string(),
+            },
+            "old".to_string(),
+        );
 
         let envelope = renderer
             .handle_user_event(UserEvent::TextInput {
@@ -566,38 +348,27 @@ mod tests {
                 value: "alice".into(),
             })
             .await
-            .unwrap()
-            .expect("TextInput 事件应产生 ActionMessage 而非被丢弃");
-        // iced 尚未迁移 RendererCore，仍发合成事件（C5 迁移），此处解包信封
-        let a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action) =
-            envelope.message()
-        else {
-            panic!("envelope should carry an action message");
-        };
+            .unwrap();
 
-        // 事件名沿用 app.rs 现有约定
-        assert_eq!(action.name, "text_input");
+        // 规范：被动输入变更不触发网络请求
+        assert!(envelope.is_none(), "TextInput 不应产生消息");
         // 绑定路径已更新
         assert_eq!(
-            renderer
-                .data_bindings
-                .get("s1")
-                .unwrap()
-                .get("/form/username"),
+            renderer.core.binding("s1").unwrap().get("/form/username"),
             Some(&json!("alice"))
         );
-        // dataModel 快照含新值
-        let Some(a2ui_core::prelude::DynamicValue::Literal(dm)) =
-            action.context.get("data_model").cloned()
-        else {
-            panic!("data_model context should be Literal");
-        };
-        assert_eq!(dm.pointer("/form/username"), Some(&json!("alice")));
-        assert!(renderer.dirty_surfaces.contains("s1"));
+        // 该组件的动态字符串缓存条目已被清（effects → 组件级失效链路）
+        assert!(
+            renderer.dynamic_string_cache.borrow().is_empty(),
+            "写回后受影响组件的动态字符串缓存应被失效"
+        );
+        assert!(renderer.core.dirty_surfaces().contains("s1"));
     }
 
     #[tokio::test]
     async fn test_iced_handle_check_toggle_and_slider_write_back() {
+        // 旧断言（合成 check_toggle/slider_change 消息）→ 新断言：
+        // 无消息 + 写回 + 标脏
         let mut renderer = IcedRenderer::new();
         let root: Component = serde_json::from_value(json!({
             "component":"Column","id":"root","children":["cb","sl"]
@@ -622,6 +393,18 @@ mod tests {
             })
             .await
             .unwrap();
+        renderer.core.clear_dirty();
+        // 预热动态字符串缓存，验证组件级失效精确到受影响组件
+        for (component_id, prop) in [("cb", "value"), ("sl", "value")] {
+            renderer.dynamic_string_cache.borrow_mut().insert(
+                DynamicStringCacheKey {
+                    surface_id: "s1".to_string(),
+                    component_id: component_id.to_string(),
+                    prop: prop.to_string(),
+                },
+                "stale".to_string(),
+            );
+        }
 
         let toggle_envelope = renderer
             .handle_user_event(UserEvent::CheckToggle {
@@ -629,14 +412,8 @@ mod tests {
                 checked: true,
             })
             .await
-            .unwrap()
-            .expect("CheckToggle 应产生 ActionMessage");
-        let a2ui_core::message::client_to_server::V1_0ClientMessage::Action(toggle_action) =
-            toggle_envelope.message()
-        else {
-            panic!("envelope should carry an action message");
-        };
-        assert_eq!(toggle_action.name, "check_toggle");
+            .unwrap();
+        assert!(toggle_envelope.is_none(), "CheckToggle 不应产生消息");
 
         let slider_envelope = renderer
             .handle_user_event(UserEvent::SliderChange {
@@ -644,27 +421,89 @@ mod tests {
                 value: 42.5,
             })
             .await
-            .unwrap()
-            .expect("SliderChange 应产生 ActionMessage");
-        let a2ui_core::message::client_to_server::V1_0ClientMessage::Action(slider_action) =
-            slider_envelope.message()
-        else {
-            panic!("envelope should carry an action message");
-        };
-        assert_eq!(slider_action.name, "slider_change");
+            .unwrap();
+        assert!(slider_envelope.is_none(), "SliderChange 不应产生消息");
 
-        let binding = renderer.data_bindings.get("s1").unwrap();
+        let binding = renderer.core.binding("s1").unwrap();
         assert_eq!(binding.get("/agree"), Some(&json!(true)));
         assert_eq!(binding.get("/volume"), Some(&json!(42.5)));
-        assert!(renderer.dirty_surfaces.contains("s1"));
+        assert!(
+            renderer.dynamic_string_cache.borrow().is_empty(),
+            "写回后受影响组件的动态字符串缓存应被失效"
+        );
+        assert!(renderer.core.dirty_surfaces().contains("s1"));
+    }
+
+    #[tokio::test]
+    async fn test_iced_click_without_declared_action_emits_nothing() {
+        let mut renderer = IcedRenderer::new();
+        let comp = Component::text(
+            ComponentId::new("root").unwrap(),
+            DynamicValue::Literal("Hello".to_string()),
+        );
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: true,
+                components: Some(vec![comp]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+
+        let envelope = renderer
+            .handle_user_event(UserEvent::Click {
+                component_id: ComponentId::new("root").unwrap(),
+            })
+            .await
+            .unwrap();
+        assert!(envelope.is_none(), "无声明 action 的组件交互不发送消息");
+    }
+
+    #[tokio::test]
+    async fn test_iced_click_with_declared_action_emits_spec_envelope() {
+        let mut renderer = IcedRenderer::new();
+        let btn: Component = serde_json::from_value(json!({
+            "id":"btn","component":"Button","child":"lbl",
+            "action":{"event":{"name":"submit"}}
+        }))
+        .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: true,
+                components: Some(vec![btn]),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
+            })
+            .await
+            .unwrap();
+
+        let envelope = renderer
+            .handle_user_event(UserEvent::Click {
+                component_id: ComponentId::new("btn").unwrap(),
+            })
+            .await
+            .unwrap()
+            .expect("声明式 action 应产生消息");
+        let value = envelope.to_value().unwrap();
+        assert_eq!(value["action"]["name"], "submit");
+        assert_eq!(value["action"]["surfaceId"], "s1");
+        assert_eq!(value["action"]["sourceComponentId"], "btn");
+        // sendDataModel 经信封级 metadata 附带本 surface 数据
+        assert_eq!(value["metadata"]["surfaceId"], "s1");
+        assert_eq!(value["metadata"]["dataModel"]["user"]["name"], "Alice");
     }
 
     #[test]
     fn test_iced_renderer_new() {
         let renderer = IcedRenderer::new();
-        assert!(renderer.surfaces.is_empty());
-        assert!(renderer.data_bindings.is_empty());
-        assert!(renderer.surface_order.is_empty());
+        assert!(renderer.core.surfaces().is_empty());
+        assert!(renderer.core.surface_order().is_empty());
+        assert!(renderer.core.binding("s1").is_none());
     }
 
     #[test]
@@ -822,6 +661,8 @@ mod tests {
             })
             .await
             .unwrap();
+        // createSurface 本身标脏（核心语义），先清空以聚焦本测试
+        renderer.core.clear_dirty();
 
         renderer.dynamic_string_cache.borrow_mut().insert(
             DynamicStringCacheKey {
@@ -842,7 +683,7 @@ mod tests {
             .unwrap();
 
         assert!(renderer.dynamic_string_cache.borrow().is_empty());
-        assert!(renderer.dirty_surfaces.contains("s1"));
+        assert!(renderer.core.dirty_surfaces().contains("s1"));
     }
 
     #[tokio::test]
@@ -869,7 +710,8 @@ mod tests {
 
         let component_id = ComponentId::new("root").unwrap();
         assert!(renderer
-            .dependency_graph
+            .core
+            .dependency_graph()
             .get_dependencies(&component_id)
             .is_some_and(|paths| paths.contains("/old")));
 
@@ -887,13 +729,11 @@ mod tests {
             .await
             .unwrap();
 
-        let paths = renderer
-            .dependency_graph
-            .get_dependencies(&component_id)
-            .unwrap();
+        let graph = renderer.core.dependency_graph();
+        let paths = graph.get_dependencies(&component_id).unwrap();
         assert!(!paths.contains("/old"));
         assert!(paths.contains("/new"));
-        assert!(renderer.dependency_graph.on_data_change("/old").is_empty());
-        assert_eq!(renderer.dependency_graph.on_data_change("/new").len(), 1);
+        assert!(graph.dependents("/old").is_empty());
+        assert_eq!(graph.dependents("/new").len(), 1);
     }
 }

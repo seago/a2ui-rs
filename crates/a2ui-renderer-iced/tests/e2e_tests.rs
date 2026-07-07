@@ -12,8 +12,8 @@ fn test_iced_full_surface_lifecycle() {
     let (action_tx, _action_rx) = a2ui_renderer_iced::app::IcedApp::create_action_channel();
     let app = a2ui_renderer_iced::app::IcedApp::new(renderer, msg_rx, action_tx);
 
-    assert!(app.renderer.surfaces.is_empty());
-    assert!(app.renderer.surface_order.is_empty());
+    assert!(app.renderer.core.surfaces().is_empty());
+    assert!(app.renderer.core.surface_order().is_empty());
 }
 
 #[test]
@@ -37,9 +37,9 @@ fn test_iced_create_surface_adds_to_order() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let _handle = renderer.create_surface(msg).await.unwrap();
-        assert!(!renderer.surfaces.is_empty());
-        assert_eq!(renderer.surface_order.len(), 1);
-        assert_eq!(renderer.surface_order[0], "s1");
+        assert!(!renderer.core.surfaces().is_empty());
+        assert_eq!(renderer.core.surface_order().len(), 1);
+        assert_eq!(renderer.core.surface_order()[0], "s1");
     });
 }
 
@@ -64,21 +64,31 @@ fn test_iced_widget_mapper_all_types() {
 
 #[test]
 fn test_iced_widget_mapper_dynamic_form_controls() {
-    use a2ui_renderer::DataBinding;
     use a2ui_renderer_iced::widget_mapper;
 
+    // pub 字段已收敛为 core 访问器：经核心创建带数据模型的 surface
+    // （带占位根组件以满足核心 createSurface 流水线）
     let mut renderer = IcedRenderer::new();
-    renderer.data_bindings.insert(
-        "s1".to_string(),
-        DataBinding::new(DataModel::new(json!({
+    let surface_root = Component::text(
+        ComponentId::new("surface_root").unwrap(),
+        DynamicValue::Literal(String::new()),
+    );
+    pollster::block_on(renderer.core.create_surface(CreateSurface {
+        surface_id: "s1".into(),
+        catalog_id: "a2ui://catalogs/basic/v1".into(),
+        surface_properties: None,
+        send_data_model: false,
+        components: Some(vec![surface_root]),
+        data_model: Some(json!({
             "form": {
                 "username": "Alice",
                 "placeholder": "请输入用户名",
                 "remember": true,
                 "volume": 42.0
             }
-        }))),
-    );
+        })),
+    }))
+    .unwrap();
 
     let root: Component = serde_json::from_value(json!({
         "component": "Column",

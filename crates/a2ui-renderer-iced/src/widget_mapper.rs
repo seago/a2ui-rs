@@ -37,7 +37,7 @@ pub fn build_element_tree(
         "Video" => build_placeholder("Video", node, renderer, surface_id),
         "AudioPlayer" => build_placeholder("AudioPlayer", node, renderer, surface_id),
         _ => {
-            if renderer.custom_registry.is_registered(ctype) {
+            if renderer.core.custom_registry().is_registered(ctype) {
                 text(format!("[custom: {}]", ctype))
                     .shaping(Shaping::Advanced)
                     .into()
@@ -534,7 +534,7 @@ fn build_datetime_input(
 // ── 辅助函数 ──
 
 fn binding_for<'a>(renderer: &'a IcedRenderer, surface_id: &str) -> Option<&'a DataBinding> {
-    renderer.data_bindings.get(surface_id)
+    renderer.core.binding(surface_id)
 }
 
 fn resolve_dynamic_string(
@@ -699,13 +699,33 @@ fn resolve_button_label(
 mod tests {
     use super::*;
     use a2ui_core::component::component::Component;
+    use a2ui_core::message::server_to_client::CreateSurface;
     use a2ui_core::ComponentId;
-    use a2ui_core::DataModel;
-    use a2ui_renderer::DataBinding;
     use serde_json::json;
 
     fn tree_node(json: serde_json::Value) -> ComponentTreeNode {
         ComponentTreeNode::new(serde_json::from_value(json).unwrap())
+    }
+
+    /// 经核心创建带数据模型的 surface（pub 字段已收敛为 core 访问器，
+    /// 测试不再直接拼装 data_bindings）；带一个占位根组件以满足
+    /// 核心 createSurface 流水线（空 forest 无法展开模板）
+    fn renderer_with_binding(surface_id: &str, data_model: serde_json::Value) -> IcedRenderer {
+        let mut renderer = IcedRenderer::new();
+        let root = Component::text(
+            ComponentId::new("surface_root").unwrap(),
+            a2ui_core::prelude::DynamicValue::Literal(String::new()),
+        );
+        pollster::block_on(renderer.core.create_surface(CreateSurface {
+            surface_id: surface_id.into(),
+            catalog_id: "a2ui://catalogs/basic/v1".into(),
+            surface_properties: None,
+            send_data_model: false,
+            components: Some(vec![root]),
+            data_model: Some(data_model),
+        }))
+        .unwrap();
+        renderer
     }
 
     #[test]
@@ -750,13 +770,8 @@ mod tests {
 
     #[test]
     fn test_resolve_button_label_from_props() {
-        let mut renderer = IcedRenderer::new();
         let surface_id = "s1";
-        let dm = DataModel::new(json!({"label": "Click Me"}));
-        renderer
-            .data_bindings
-            .insert(surface_id.to_string(), DataBinding::new(dm));
-        renderer.surface_order.push(surface_id.to_string());
+        let renderer = renderer_with_binding(surface_id, json!({"label": "Click Me"}));
 
         let comp: Component = serde_json::from_value(json!({
             "component": "Button",
@@ -772,11 +787,10 @@ mod tests {
 
     #[test]
     fn test_dynamic_string_props_resolve_from_surface_binding() {
-        let mut renderer = IcedRenderer::new();
         let surface_id = "s1";
-        renderer.data_bindings.insert(
-            surface_id.to_string(),
-            DataBinding::new(DataModel::new(json!({
+        let renderer = renderer_with_binding(
+            surface_id,
+            json!({
                 "title": "Welcome",
                 "icon": "star",
                 "remember": "记住密码",
@@ -784,7 +798,7 @@ mod tests {
                     "value": "Alice",
                     "placeholder": "请输入用户名"
                 }
-            }))),
+            }),
         );
 
         let text_id = ComponentId::new("title").unwrap();
@@ -840,12 +854,8 @@ mod tests {
 
     #[test]
     fn test_dynamic_string_cache_profiles_hits_and_misses() {
-        let mut renderer = IcedRenderer::new();
         let surface_id = "s1";
-        renderer.data_bindings.insert(
-            surface_id.to_string(),
-            DataBinding::new(DataModel::new(json!({"title": "Welcome"}))),
-        );
+        let renderer = renderer_with_binding(surface_id, json!({"title": "Welcome"}));
         let component_id = ComponentId::new("title").unwrap();
         let props = json!({"text": {"path": "/title"}});
 
@@ -865,14 +875,13 @@ mod tests {
 
     #[test]
     fn test_dynamic_bool_and_number_resolve_from_surface_binding() {
-        let mut renderer = IcedRenderer::new();
         let surface_id = "s1";
-        renderer.data_bindings.insert(
-            surface_id.to_string(),
-            DataBinding::new(DataModel::new(json!({
+        let renderer = renderer_with_binding(
+            surface_id,
+            json!({
                 "remember": true,
                 "volume": 75.0
-            }))),
+            }),
         );
 
         let checkbox_props = json!({"value": {"path": "/remember"}});
@@ -893,12 +902,8 @@ mod tests {
 
     #[test]
     fn test_resolve_button_label_from_dynamic_child_text() {
-        let mut renderer = IcedRenderer::new();
         let surface_id = "s1";
-        renderer.data_bindings.insert(
-            surface_id.to_string(),
-            DataBinding::new(DataModel::new(json!({"child_label": "Child Label"}))),
-        );
+        let renderer = renderer_with_binding(surface_id, json!({"child_label": "Child Label"}));
 
         let child = ComponentTreeNode::new(
             serde_json::from_value(json!({
@@ -926,16 +931,15 @@ mod tests {
 
     #[test]
     fn test_text_field_uses_dynamic_initial_value_without_merging_component_state() {
-        let mut renderer = IcedRenderer::new();
         let surface_id = "login";
-        renderer.data_bindings.insert(
-            surface_id.to_string(),
-            DataBinding::new(DataModel::new(json!({
+        let renderer = renderer_with_binding(
+            surface_id,
+            json!({
                 "username": "Alice",
                 "password": "Secret",
                 "username_placeholder": "请输入用户名",
                 "password_placeholder": "请输入密码"
-            }))),
+            }),
         );
 
         let username: Component = serde_json::from_value(json!({

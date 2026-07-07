@@ -182,7 +182,8 @@ pub fn update(app: &mut IcedApp, message: Message) -> iced::Task<Message> {
 
 /// iced view 函数 — 从组件树构建 Element（所有 widget 数据已 clone，返回 'static）
 pub fn view(app: &IcedApp) -> iced::Element<'_, Message> {
-    if app.renderer.surface_order.is_empty() {
+    let surface_order = app.renderer.core.surface_order();
+    if surface_order.is_empty() {
         return padded_surface(
             iced::widget::text("A2UI Iced — 等待 Surface...")
                 .size(24)
@@ -191,7 +192,7 @@ pub fn view(app: &IcedApp) -> iced::Element<'_, Message> {
         );
     }
 
-    let surface_id = &app.renderer.surface_order[0];
+    let surface_id = &surface_order[0];
 
     // 构建组件树（临时变量，但 Element 中所有数据已 clone 为 'static）
     if let Ok(root) = app.renderer.cached_tree(surface_id) {
@@ -210,7 +211,7 @@ pub fn view(app: &IcedApp) -> iced::Element<'_, Message> {
 }
 
 fn invalidate_component_cache_for_user_action(app: &IcedApp, component_id: &ComponentId) {
-    let Some(surface_id) = app.renderer.forest.surface_of(component_id) else {
+    let Some(surface_id) = app.renderer.core.forest().surface_of(component_id) else {
         return;
     };
     app.renderer
@@ -271,7 +272,7 @@ mod tests {
         let (_msg_tx, msg_rx) = IcedApp::create_channel();
         let (action_tx, _action_rx) = IcedApp::create_action_channel();
         let app = IcedApp::new(renderer, msg_rx, action_tx);
-        assert!(app.renderer.surfaces.is_empty());
+        assert!(app.renderer.core.surfaces().is_empty());
     }
 
     #[test]
@@ -295,7 +296,7 @@ mod tests {
 
         let result = app.process_envelope(envelope);
         assert!(result.is_ok());
-        assert_eq!(app.renderer.surfaces.len(), 1);
+        assert_eq!(app.renderer.core.surfaces().len(), 1);
     }
 
     #[test]
