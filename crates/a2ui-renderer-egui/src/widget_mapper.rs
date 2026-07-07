@@ -86,6 +86,9 @@ pub enum RenderableGuiWidget {
         id: ComponentId,
         options: Vec<ChoiceOption>,
         selected: Vec<String>,
+        /// 规范 variant（multipleSelection / mutuallyExclusive，默认单选），
+        /// 决定点击后的选中集计算
+        variant: Option<String>,
     },
     DateTimeInput {
         id: ComponentId,
@@ -310,6 +313,7 @@ impl WidgetMapper {
                 id: component.id().clone(),
                 options: choice_options(component, data_model),
                 selected: choice_selected(component, data_model),
+                variant: component.prop_str(prop_keys::VARIANT).map(String::from),
             },
             "DateTimeInput" => {
                 let label = resolve_dynamic_prop(
@@ -781,17 +785,27 @@ impl WidgetMapper {
                 response_tracker.insert(id.as_str().to_string(), response);
             }
             RenderableGuiWidget::ChoicePicker {
-                options, selected, ..
+                id,
+                options,
+                selected,
+                variant,
             } => {
                 ui.horizontal(|ui| {
                     for opt in options {
-                        // 选中匹配按选项稳定值，展示用 label
+                        // 选中匹配按选项稳定值，展示用 label；点击经
+                        // toggle_choice 计算完整新选中集（单选替换/多选切换）
                         let is_sel = selected.contains(&opt.value);
-                        ui.label(format!(
-                            "[{}] {}",
-                            if is_sel { "x" } else { " " },
-                            opt.label
-                        ));
+                        let response = ui.selectable_label(is_sel, opt.label.clone());
+                        if response.clicked() {
+                            user_events.push(a2ui_renderer::UserEvent::ChoiceSelect {
+                                component_id: id.clone(),
+                                values: a2ui_renderer::toggle_choice(
+                                    selected,
+                                    &opt.value,
+                                    variant.as_deref(),
+                                ),
+                            });
+                        }
                     }
                 });
             }
@@ -1581,6 +1595,22 @@ mod tests {
             vec![("Email", "email"), ("SMS", "sms")]
         );
         assert_eq!(selected, vec!["email".to_string()]);
+    }
+
+    #[test]
+    fn test_map_choicepicker_carries_variant_for_toggle_semantics() {
+        // variant 决定点击后的选中集计算（单选替换 / 多选切换）
+        let mapper = WidgetMapper;
+        let comp: Component = Component::from_json(
+            r#"{"id":"cp3","component":"ChoicePicker","variant":"multipleSelection",
+                "options":["a","b"],"value":[]}"#,
+        )
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), None);
+        let RenderableGuiWidget::ChoicePicker { variant, .. } = widget else {
+            panic!("expected ChoicePicker widget");
+        };
+        assert_eq!(variant.as_deref(), Some("multipleSelection"));
     }
 
     #[test]

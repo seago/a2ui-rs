@@ -457,15 +457,32 @@ fn build_choice_picker(
         renderer,
         surface_id,
     );
-    let option_texts: Vec<iced::Element<'static, Message>> =
+    let variant = node
+        .component
+        .prop_str(prop_keys::VARIANT)
+        .map(String::from);
+    let component_id = node.component.id().clone();
+
+    let option_rows: Vec<iced::Element<'static, Message>> =
         choice_display_lines(&options, &selected)
             .into_iter()
-            .map(|line| text(line).shaping(Shaping::Advanced).into())
+            .zip(options.iter())
+            .map(|(line, opt)| {
+                // 点击经 toggle_choice 计算完整新选中集（单选替换/多选切换）
+                let next = a2ui_renderer::toggle_choice(&selected, &opt.value, variant.as_deref());
+                iced::widget::button(text(line).shaping(Shaping::Advanced))
+                    .style(iced::widget::button::text)
+                    .on_press(Message::UserAction(UserAction::ChoiceSelect {
+                        component_id: component_id.clone(),
+                        values: next,
+                    }))
+                    .into()
+            })
             .collect();
 
     iced::widget::column(vec![
         text(label).size(16).shaping(Shaping::Advanced).into(),
-        iced::widget::column(option_texts).spacing(4).into(),
+        iced::widget::column(option_rows).spacing(4).into(),
     ])
     .spacing(4)
     .into()

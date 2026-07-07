@@ -23,6 +23,12 @@ pub enum UserAction {
         component_id: ComponentId,
         value: f64,
     },
+    /// ChoicePicker 选择变更：values 为交互后的完整新选中集
+    /// （view 侧已经 toggle_choice 计算）
+    ChoiceSelect {
+        component_id: ComponentId,
+        values: Vec<String>,
+    },
 }
 
 /// 驱动 iced Application 的消息
@@ -164,6 +170,19 @@ pub fn update(app: &mut IcedApp, message: Message) -> iced::Task<Message> {
                     UserEvent::SliderChange {
                         component_id,
                         value,
+                    }
+                }
+                UserAction::ChoiceSelect {
+                    component_id,
+                    values,
+                } => {
+                    // 无平台本地选中缓存：选中态经核心写回数据模型后由
+                    // 绑定路径回读（规范要求 value 绑定）；失效渲染缓存
+                    // 确保视图重建
+                    invalidate_component_cache_for_user_action(app, &component_id);
+                    UserEvent::ChoiceSelect {
+                        component_id,
+                        values,
                     }
                 }
             };

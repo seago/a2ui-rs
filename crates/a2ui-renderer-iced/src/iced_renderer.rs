@@ -394,6 +394,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_iced_handle_choice_select_writes_back_array() {
+        // ChoiceSelect 平台回归锁：无消息 + 写回字符串数组 + 标脏
+        let mut renderer = IcedRenderer::new();
+        let cp: Component = Component::from_value(json!({
+            "component":"ChoicePicker","id":"cp",
+            "options":[{"label":"Email","value":"email"},{"label":"SMS","value":"sms"}],
+            "value":{"path":"/contact/preference"}
+        }))
+        .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![cp]),
+                data_model: Some(json!({"contact":{"preference":["email"]}})),
+            })
+            .await
+            .unwrap();
+        renderer.core.clear_dirty();
+
+        let envelope = renderer
+            .handle_user_event(UserEvent::ChoiceSelect {
+                component_id: ComponentId::new("cp").unwrap(),
+                values: vec!["email".to_string(), "sms".to_string()],
+            })
+            .await
+            .unwrap();
+        assert!(envelope.is_none(), "ChoiceSelect 不应产生消息");
+        assert_eq!(
+            renderer
+                .core
+                .binding("s1")
+                .unwrap()
+                .get("/contact/preference"),
+            Some(&json!(["email", "sms"]))
+        );
+        assert!(renderer.core.dirty_surfaces().contains("s1"));
+    }
+
+    #[tokio::test]
     async fn test_iced_click_without_declared_action_emits_nothing() {
         let mut renderer = IcedRenderer::new();
         let comp = Component::text(
