@@ -214,6 +214,32 @@ impl<'a> WidgetBuilder<'a> {
             }
         }
 
+        match comp.component_type() {
+            // TUI 未实现 Modal 弹层交互，占位文本已含 trigger/content 信息，
+            // 不平铺其子组件（否则会与占位文本重叠渲染）
+            "Modal" => return,
+            // Tabs 仅渲染激活（第 0 个）tab 的子组件，按 id 从 children 中选取
+            "Tabs" => {
+                let (_, tab_children) = parse_tabs(comp.properties());
+                if let Some(active_id) = tab_children.first() {
+                    if let Some(child_node) =
+                        children.iter().find(|c| c.component.id() == active_id)
+                    {
+                        // 去掉标题行后的剩余区域
+                        let content_area = Rect::new(
+                            area.x,
+                            area.y.saturating_add(1),
+                            area.width,
+                            area.height.saturating_sub(1),
+                        );
+                        self.flatten_node(child_node, content_area, widgets);
+                    }
+                }
+                return;
+            }
+            _ => {}
+        }
+
         if children.is_empty() {
             return;
         }
@@ -266,6 +292,19 @@ impl<'a> WidgetBuilder<'a> {
                 ids.push(id);
             }
         }
+
+        // Modal 的 content/trigger 引用（缺失时同样产生占位符）
+        for key in ["content", "trigger"] {
+            if let Some(s) = props.get(key).and_then(|v| v.as_str()) {
+                if let Ok(id) = ComponentId::new(s) {
+                    ids.push(id);
+                }
+            }
+        }
+
+        // Tabs 的 tabs[].child 引用
+        let (_, tab_children) = parse_tabs(props);
+        ids.extend(tab_children);
 
         ids
     }
@@ -676,6 +715,100 @@ mod tests {
             title_widget,
             Some(RenderableWidget::Paragraph { text, .. }) if text == "Hello"
         ));
+    }
+
+    #[test]
+    fn test_modal_children_not_flattened() {
+        // TUI 未实现 Modal 弹层：content/trigger 组件不应被平铺到主区域
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::new(json!({})));
+        let reg = CustomComponentRegistry::new();
+
+        let modal: Component = serde_json::from_value(
+            json!({"component":"Modal","id":"root","content":"body","trigger":"btn"}),
+        )
+        .unwrap();
+        let body = Component::text(
+            ComponentId::new("body").unwrap(),
+            DynamicValue::Literal("modal body".to_string()),
+        );
+        let btn: Component =
+            serde_json::from_value(json!({"component":"Button","id":"btn","label":"open"}))
+                .unwrap();
+        forest.upsert("s1", modal).unwrap();
+        forest.upsert("s1", body).unwrap();
+        forest.upsert("s1", btn).unwrap();
+
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+
+        assert!(
+            !widgets.iter().any(|w| w.id().as_str() == "body"),
+            "Modal content 不应被平铺渲染"
+        );
+        assert!(
+            !widgets.iter().any(|w| w.id().as_str() == "btn"),
+            "Modal trigger 不应被平铺渲染"
+        );
+    }
+
+    #[test]
+    fn test_tabs_flattens_only_active_tab_child() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::new(json!({})));
+        let reg = CustomComponentRegistry::new();
+
+        let tabs: Component = serde_json::from_value(json!({
+            "component":"Tabs","id":"root",
+            "tabs":[{"title":"T1","child":"a"},{"title":"T2","child":"b"}]
+        }))
+        .unwrap();
+        let a = Component::text(
+            ComponentId::new("a").unwrap(),
+            DynamicValue::Literal("tab a".to_string()),
+        );
+        let b = Component::text(
+            ComponentId::new("b").unwrap(),
+            DynamicValue::Literal("tab b".to_string()),
+        );
+        forest.upsert("s1", tabs).unwrap();
+        forest.upsert("s1", a).unwrap();
+        forest.upsert("s1", b).unwrap();
+
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+
+        assert!(
+            widgets.iter().any(|w| w.id().as_str() == "a"),
+            "激活（第 0 个）tab 的子组件应被渲染"
+        );
+        assert!(
+            !widgets.iter().any(|w| w.id().as_str() == "b"),
+            "非激活 tab 的子组件不应被渲染"
+        );
+    }
+
+    #[test]
+    fn test_modal_missing_content_yields_placeholder() {
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::new(json!({})));
+        let reg = CustomComponentRegistry::new();
+
+        let modal: Component =
+            serde_json::from_value(json!({"component":"Modal","id":"root","content":"ghost"}))
+                .unwrap();
+        forest.upsert("s1", modal).unwrap();
+
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+
+        assert!(
+            widgets.iter().any(|w| matches!(
+                w,
+                RenderableWidget::Placeholder { id, .. } if id.as_str() == "ghost"
+            )),
+            "缺失的 content 引用应产生占位符"
+        );
     }
 
     #[test]
