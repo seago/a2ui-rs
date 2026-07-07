@@ -9,7 +9,7 @@
 //! 构造，而非整体 serde 反序列化——后者在任一字段类型不符时会拖垮整个
 //! 视图，与现状不一致。
 
-use crate::component::component::Component;
+use crate::component::component::{Component, DynamicValue};
 use crate::component::ComponentId;
 use serde_json::{Map, Value};
 
@@ -123,6 +123,34 @@ pub struct TabDecl {
     pub title: String,
     /// 标签页内容组件 ID
     pub child: ComponentId,
+}
+
+/// ChoicePicker 的单个选项声明（规范 basic catalog：`{label, value}`）。
+///
+/// 经 [`Component::options_decl`] 获取。`label` 是规范的 DynamicString
+/// （可绑定），由渲染层求值；`value` 是选项的稳定值，写回选中集时使用。
+///
+/// # 示例
+///
+/// ```rust
+/// use a2ui_core::component::component::{Component, DynamicValue};
+/// use serde::Deserialize;
+/// use serde_json::json;
+///
+/// let c = Component::deserialize(json!({
+///     "component": "ChoicePicker", "id": "cp", "value": [],
+///     "options": [{"label": "Email", "value": "email"}]
+/// })).unwrap();
+/// let options = c.options_decl().unwrap();
+/// assert_eq!(options[0].label, DynamicValue::Literal("Email".to_string()));
+/// assert_eq!(options[0].value, "email");
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct OptionDecl {
+    /// 选项展示文本（规范为 DynamicString；缺失或类型不符时以 `value` 充当）
+    pub label: DynamicValue<String>,
+    /// 选项的稳定值
+    pub value: String,
 }
 
 /// spacing 声明：单数值或 `{x, y}` 对象。
@@ -308,6 +336,37 @@ impl Component {
         )
     }
 
+    /// 解析 ChoicePicker 组件的 `options` 选项声明列表。
+    ///
+    /// 逐项宽容：
+    /// - 对象形态 `{label, value}`（规范主路径）：`value` 缺失或非字符串时
+    ///   整项跳过；`label` 缺失或类型不符时以 `value` 充当展示文本。
+    /// - 裸字符串形态 `"A"`（历史兼容扩展）：等价于 `{label: "A", value: "A"}`。
+    /// - 其余畸形项整项跳过。
+    ///
+    /// `options` 缺失或非数组时返回 `None`（规范中 options 不是 Dynamic
+    /// 类型，整体 `{"path": ...}` 绑定形态不支持）。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::Component;
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "ChoicePicker", "id": "cp", "value": [],
+    ///     "options": [{"label": "Email", "value": "email"}, "phone"]
+    /// })).unwrap();
+    /// let options = c.options_decl().unwrap();
+    /// assert_eq!(options.len(), 2);
+    /// assert_eq!(options[1].value, "phone");
+    /// ```
+    pub fn options_decl(&self) -> Option<Vec<OptionDecl>> {
+        let arr = self.properties().get("options")?.as_array()?;
+        Some(arr.iter().filter_map(parse_option).collect())
+    }
+
     /// 解析组件的 style 声明（`props.style` 对象的结构提取）。
     ///
     /// `style` 缺失或非对象时返回 `None`；字段级类型不符只丢该字段。
@@ -345,6 +404,24 @@ impl Component {
     }
 }
 
+/// options 单项解析：裸字符串 → label=value 退化；对象 → value 必填、
+/// label 逐字段宽容（缺失/类型不符时回退 value）；其余形态整项跳过
+fn parse_option(item: &Value) -> Option<OptionDecl> {
+    if let Some(s) = item.as_str() {
+        return Some(OptionDecl {
+            label: DynamicValue::Literal(s.to_string()),
+            value: s.to_string(),
+        });
+    }
+    let obj = item.as_object()?;
+    let value = obj.get("value")?.as_str()?.to_string();
+    let label = obj
+        .get("label")
+        .and_then(|v| serde_json::from_value::<DynamicValue<String>>(v.clone()).ok())
+        .unwrap_or_else(|| DynamicValue::Literal(value.clone()));
+    Some(OptionDecl { label, value })
+}
+
 /// spacing 值解析：数值 → Uniform；对象 → Xy（缺省分量 0.0）；其余 None
 fn parse_spacing(value: &Value) -> Option<SpacingDecl> {
     if let Some(n) = value.as_f64() {
@@ -359,7 +436,7 @@ fn parse_spacing(value: &Value) -> Option<SpacingDecl> {
 
 #[cfg(test)]
 mod tests {
-    use crate::component::component::Component;
+    use crate::component::component::{Component, DynamicValue};
     use crate::component::decl::{ChildrenDecl, SpacingDecl};
     use crate::component::ComponentId;
     use serde_json::{json, Value};
@@ -515,6 +592,89 @@ mod tests {
 
         assert!(component(json!({})).tabs_decl().is_none());
         assert!(component(json!({"tabs": "x"})).tabs_decl().is_none());
+    }
+
+    // ---- options_decl ----
+
+    #[test]
+    fn options_decl_parses_spec_object_form() {
+        // 规范 basic catalog：options 项为 {label: DynamicString, value: string}
+        let c = component(json!({"options": [
+            {"label": "Email", "value": "email"},
+            {"label": {"path": "/labels/phone"}, "value": "phone"}
+        ]}));
+        let options = c.options_decl().expect("options decl");
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].label, DynamicValue::Literal("Email".to_string()));
+        assert_eq!(options[0].value, "email");
+        assert_eq!(
+            options[1].label,
+            DynamicValue::Path {
+                path: "/labels/phone".to_string()
+            }
+        );
+        assert_eq!(options[1].value, "phone");
+    }
+
+    #[test]
+    fn options_decl_supports_bare_string_compat_form() {
+        // 兼容既有裸字符串形态：等价于 {label: s, value: s}
+        let c = component(json!({"options": ["A", "B"]}));
+        let options = c.options_decl().expect("options decl");
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].label, DynamicValue::Literal("A".to_string()));
+        assert_eq!(options[0].value, "A");
+        assert_eq!(options[1].value, "B");
+    }
+
+    #[test]
+    fn options_decl_mixes_both_forms_in_one_array() {
+        let c = component(json!({"options": [
+            "plain",
+            {"label": "Rich", "value": "rich"}
+        ]}));
+        let options = c.options_decl().expect("options decl");
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].value, "plain");
+        assert_eq!(options[1].value, "rich");
+    }
+
+    #[test]
+    fn options_decl_falls_back_label_to_value() {
+        // label 缺失或类型不符时以 value 充当展示文本（逐字段宽容）
+        let c = component(json!({"options": [
+            {"value": "v1"},
+            {"label": 3, "value": "v2"}
+        ]}));
+        let options = c.options_decl().expect("options decl");
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].label, DynamicValue::Literal("v1".to_string()));
+        assert_eq!(options[1].label, DynamicValue::Literal("v2".to_string()));
+    }
+
+    #[test]
+    fn options_decl_skips_malformed_items() {
+        // value 缺失/非字符串、项非对象非字符串：整项跳过（对齐视图宽容惯例）
+        let c = component(json!({"options": [
+            {"label": "no value"},
+            {"label": "bad value", "value": 7},
+            42,
+            null,
+            {"label": "ok", "value": "keep"}
+        ]}));
+        let options = c.options_decl().expect("options decl");
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].value, "keep");
+    }
+
+    #[test]
+    fn options_decl_requires_array() {
+        assert!(component(json!({})).options_decl().is_none());
+        assert!(component(json!({"options": "A"})).options_decl().is_none());
+        // 规范中 options 不是 Dynamic 类型：整体 {"path"} 绑定形态不支持
+        assert!(component(json!({"options": {"path": "/opts"}}))
+            .options_decl()
+            .is_none());
     }
 
     // ---- style_decl ----

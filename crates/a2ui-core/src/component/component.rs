@@ -943,6 +943,33 @@ impl Component {
         self.prop_dynamic(key)
     }
 
+    /// 读取动态字符串数组 prop（规范 DynamicStringList，如 ChoicePicker
+    /// 的选中集 `value`）。
+    ///
+    /// 形态不符时返回 `None`，与其余 `prop_dynamic_*` 一致——数组内混入
+    /// 非字符串项按整体形态不符处理（逐项过滤的宽容语义留在
+    /// [`Component::prop_str_list`] 旧 API）。
+    ///
+    /// # 示例
+    ///
+    /// ```rust
+    /// use a2ui_core::component::component::{Component, DynamicValue};
+    /// use serde::Deserialize;
+    /// use serde_json::json;
+    ///
+    /// let c = Component::deserialize(json!({
+    ///     "component": "ChoicePicker", "id": "cp", "options": [],
+    ///     "value": {"path": "/contact/preference"}
+    /// })).unwrap();
+    /// assert_eq!(
+    ///     c.prop_dynamic_str_list("value"),
+    ///     Some(DynamicValue::Path { path: "/contact/preference".into() })
+    /// );
+    /// ```
+    pub fn prop_dynamic_str_list(&self, key: &str) -> Option<DynamicValue<Vec<String>>> {
+        self.prop_dynamic(key)
+    }
+
     /// 读取动态 prop 的通用形态（`T = Value`，字面量兜底任意 JSON）。
     ///
     /// 与 [`Component::prop_dynamic_str`] 不同，非字符串字面量（数字、
@@ -2017,6 +2044,42 @@ mod prop_accessor_tests {
             })
         );
         assert_eq!(c.prop_dynamic_f64("mismatch"), None);
+    }
+
+    #[test]
+    fn prop_dynamic_str_list_four_quadrants() {
+        let c = component(json!({
+            "lit": ["a", "b"],
+            "bound": {"path": "/selected"},
+            "called": {"call": "f", "args": {}},
+            "mismatch": "a",
+            "mixed": ["a", 3]
+        }));
+        assert_eq!(
+            c.prop_dynamic_str_list("lit"),
+            Some(DynamicValue::Literal(vec![
+                "a".to_string(),
+                "b".to_string()
+            ]))
+        );
+        assert_eq!(
+            c.prop_dynamic_str_list("bound"),
+            Some(DynamicValue::Path {
+                path: "/selected".to_string()
+            })
+        );
+        assert_eq!(
+            c.prop_dynamic_str_list("called"),
+            Some(DynamicValue::FunctionCall {
+                call: "f".to_string(),
+                args: json!({})
+            })
+        );
+        // 形态不符 → None，与其余 prop_dynamic_* 一致；混入非字符串项的
+        // 数组按整体形态不符处理（逐项过滤的宽容留在 prop_str_list 旧 API）
+        assert_eq!(c.prop_dynamic_str_list("mismatch"), None);
+        assert_eq!(c.prop_dynamic_str_list("mixed"), None);
+        assert_eq!(c.prop_dynamic_str_list("missing"), None);
     }
 
     #[test]
