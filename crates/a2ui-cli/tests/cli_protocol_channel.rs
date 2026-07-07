@@ -39,7 +39,7 @@ fn stdout_carries_only_jsonl_protocol_messages() {
     // 日志与人类可读提示只允许出现在 stderr
     for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
         assert!(
-            serde_json::from_str::<serde_json::Value>(line).is_ok(),
+            line.parse::<a2ui_core::Value>().is_ok(),
             "stdout protocol channel polluted with non-JSON content: {line:?}"
         );
     }
