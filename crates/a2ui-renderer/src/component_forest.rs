@@ -49,6 +49,13 @@ fn push_ref(out: &mut HashSet<ComponentId>, s: &str) {
     }
 }
 
+/// 模板克隆递归中保持不变的上下文（实例后缀 + 作用域解析器 + 函数分发器）
+struct TemplateCloneCtx<'a> {
+    suffix: &'a str,
+    scope_resolver: &'a PathResolver,
+    dispatcher: &'a FunctionDispatcher,
+}
+
 /// 组件树节点
 #[derive(Debug, Clone)]
 pub struct ComponentTreeNode {
@@ -363,15 +370,36 @@ impl ComponentForest {
         dispatcher: &FunctionDispatcher,
     ) -> RenderResult<ComponentId> {
         let mut visited = HashSet::new();
-        self.clone_and_resolve_subtree_inner(
-            surface_id,
-            comp_id,
+        let ctx = TemplateCloneCtx {
             suffix,
             scope_resolver,
             dispatcher,
-            0,
-            &mut visited,
-        )
+        };
+        self.clone_and_resolve_subtree_inner(surface_id, comp_id, &ctx, 0, &mut visited)
+    }
+
+    /// 克隆单条引用边（`child`/`content`/`trigger`/`tabs[].child`）指向的子树。
+    ///
+    /// 返回改写后的新 id 字符串；引用 id 非法时返回 `Ok(None)`（静默跳过，
+    /// 与 build_tree 的边语义一致），组件缺失时向上传播错误。
+    fn clone_edge_ref(
+        &mut self,
+        surface_id: &str,
+        ref_str: &str,
+        ctx: &TemplateCloneCtx<'_>,
+        depth: usize,
+        visited: &mut HashSet<ComponentId>,
+    ) -> RenderResult<Option<String>> {
+        let child_id = match ComponentId::new(ref_str) {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!("invalid child ID '{}' in template: {}", ref_str, e);
+                return Ok(None);
+            }
+        };
+        let new_id =
+            self.clone_and_resolve_subtree_inner(surface_id, &child_id, ctx, depth + 1, visited)?;
+        Ok(Some(new_id.as_str().to_string()))
     }
 
     /// clone_and_resolve_subtree 的内部递归实现
@@ -380,9 +408,7 @@ impl ComponentForest {
         &mut self,
         surface_id: &str,
         comp_id: &ComponentId,
-        suffix: &str,
-        scope_resolver: &PathResolver,
-        dispatcher: &FunctionDispatcher,
+        ctx: &TemplateCloneCtx<'_>,
         depth: usize,
         visited: &mut HashSet<ComponentId>,
     ) -> RenderResult<ComponentId> {
@@ -412,7 +438,7 @@ impl ComponentForest {
                 .ok_or_else(|| RendererError::ComponentNotFound(comp_id.clone()))?
         };
 
-        let new_id_str = format!("{}_{}", comp_id.as_str(), suffix);
+        let new_id_str = format!("{}_{}", comp_id.as_str(), ctx.suffix);
 
         // 序列化为 JSON，解析动态值，设置新 ID
         let mut comp_json = serde_json::to_value(&original)
@@ -434,54 +460,56 @@ impl ComponentForest {
                                 continue;
                             }
                         };
-                        let child_id = match ComponentId::new(id_str) {
-                            Ok(id) => id,
-                            Err(e) => {
-                                tracing::warn!("invalid child ID '{}' in template: {}", id_str, e);
-                                continue;
-                            }
-                        };
-                        let new_child_id = self.clone_and_resolve_subtree_inner(
-                            surface_id,
-                            &child_id,
-                            suffix,
-                            scope_resolver,
-                            dispatcher,
-                            depth + 1,
-                            visited,
-                        )?;
-                        new_children.push(Value::String(new_child_id.as_str().to_string()));
+                        if let Some(new_child_id) =
+                            self.clone_edge_ref(surface_id, id_str, ctx, depth, visited)?
+                        {
+                            new_children.push(Value::String(new_child_id));
+                        }
                     }
                     *children_val = Value::Array(new_children);
                 }
             }
 
-            // 处理单个 child 引用（Button、Card 等）
-            if let Some(child_val) = obj.get("child").and_then(|v| v.as_str()) {
-                if let Ok(child_id) = ComponentId::new(child_val) {
-                    let new_child_id = self.clone_and_resolve_subtree_inner(
-                        surface_id,
-                        &child_id,
-                        suffix,
-                        scope_resolver,
-                        dispatcher,
-                        depth + 1,
-                        visited,
-                    )?;
-                    obj.insert(
-                        "child".to_string(),
-                        Value::String(new_child_id.as_str().to_string()),
-                    );
+            // 处理单引用边：Button/Card 的 child、Modal 的 content/trigger
+            for key in ["child", "content", "trigger"] {
+                let ref_str = match obj.get(key).and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                if let Some(new_ref) =
+                    self.clone_edge_ref(surface_id, &ref_str, ctx, depth, visited)?
+                {
+                    obj.insert(key.to_string(), Value::String(new_ref));
+                }
+            }
+
+            // 处理 Tabs 的 tabs[].child（数组内嵌对象，需就地改写 tab["child"]）
+            if let Some(tabs) = obj.get_mut("tabs").and_then(|v| v.as_array_mut()) {
+                for tab in tabs.iter_mut() {
+                    let ref_str = match tab.get("child").and_then(|v| v.as_str()) {
+                        Some(s) => s.to_string(),
+                        None => continue,
+                    };
+                    if let Some(new_ref) =
+                        self.clone_edge_ref(surface_id, &ref_str, ctx, depth, visited)?
+                    {
+                        if let Some(tab_obj) = tab.as_object_mut() {
+                            tab_obj.insert("child".to_string(), Value::String(new_ref));
+                        }
+                    }
                 }
             }
 
             // 转换 DynamicValue：相对路径→绝对路径，@index→字面量
             // 保留其他动态绑定（路径、函数调用）供渲染时解析
+            // content/trigger 已改写为纯字符串 id，transform 对字符串是恒等，
+            // 无需加入跳过名单；tabs 内的 title 等动态值仍需转换，故不整体跳过
             for (key, val) in obj.iter_mut() {
                 if key == "component" || key == "id" || key == "children" || key == "child" {
                     continue;
                 }
-                *val = Self::transform_dynamic_for_template(val, scope_resolver, dispatcher);
+                *val =
+                    Self::transform_dynamic_for_template(val, ctx.scope_resolver, ctx.dispatcher);
             }
         }
 
@@ -631,9 +659,8 @@ impl ComponentForest {
     /// 按 id 字符串解析并递归构建子节点，追加进 node.children。
     /// 非法 id 或组件缺失时静默跳过（与既有 children/child 边语义一致）。
     ///
-    /// 已知限制：模板克隆（clone_and_resolve_subtree_inner）目前只跟随
-    /// children/child 两类边，模板内含 Modal/Tabs 时 content/trigger/
-    /// tabs[].child 引用不会被克隆改写，会指向原模板子组件。
+    /// 模板克隆（clone_and_resolve_subtree_inner）与此处跟随同一组边：
+    /// children/child/content/trigger/tabs[].child，两侧语义保持一致。
     fn append_child_by_id(
         &self,
         id_str: &str,
@@ -1048,6 +1075,135 @@ mod tests {
                 .properties()
                 .get("text"),
             Some(&json!(2))
+        );
+    }
+
+    #[test]
+    fn test_expand_templates_clones_modal_content_edge() {
+        // 模板是 Modal（content 指向 body）：展开后每个实例的 content
+        // 必须指向带实例后缀的克隆，而非原模板子组件（否则实例间共享状态）
+        let mut forest = ComponentForest::new();
+        let dm = DataModel::new(json!({"items": [{"name": "a"}, {"name": "b"}]}));
+        let binding = DataBinding::new(dm);
+        let resolver = PathResolver::new(DataModel::new(binding.as_value().clone()));
+
+        let body = Component::text(
+            ComponentId::new("body").unwrap(),
+            DynamicValue::Path {
+                path: "name".into(),
+            },
+        );
+        let tmpl: Component = serde_json::from_value(json!({
+            "component": "Modal", "id": "tmpl", "content": "body"
+        }))
+        .unwrap();
+        let parent: Component = serde_json::from_value(json!({
+            "component": "Column", "id": "list",
+            "children": {"template": "tmpl", "path": "/items"}
+        }))
+        .unwrap();
+
+        forest.upsert("s1", parent).unwrap();
+        forest.upsert("s1", tmpl).unwrap();
+        forest.upsert("s1", body).unwrap();
+
+        let new_ids = forest
+            .expand_templates("s1", &binding, &resolver, &FunctionDispatcher::new())
+            .unwrap();
+        assert_eq!(new_ids.len(), 2);
+
+        for i in 0..2 {
+            let inst_id = ComponentId::new(format!("tmpl_{i}")).unwrap();
+            let inst = forest.get("s1", &inst_id).unwrap();
+            assert_eq!(
+                inst.properties().get("content"),
+                Some(&json!(format!("body_{i}"))),
+                "实例 {i} 的 content 应指向带实例后缀的克隆"
+            );
+            let clone_id = ComponentId::new(format!("body_{i}")).unwrap();
+            let cloned = forest
+                .get("s1", &clone_id)
+                .expect("content 引用的克隆必须存在于 forest");
+            assert_eq!(
+                cloned.properties().get("text"),
+                Some(&json!({"path": format!("/items/{i}/name")})),
+                "克隆的相对路径应转换为实例作用域的绝对路径"
+            );
+        }
+    }
+
+    #[test]
+    fn test_expand_templates_clones_trigger_and_tabs_edges() {
+        // trigger（单引用边）与 tabs[].child（数组内嵌对象边）同样需要克隆改写
+        let mut forest = ComponentForest::new();
+        let dm = DataModel::new(json!({"items": [{"name": "a"}]}));
+        let binding = DataBinding::new(dm);
+        let resolver = PathResolver::new(DataModel::new(binding.as_value().clone()));
+
+        let btn: Component = serde_json::from_value(json!({
+            "component": "Button", "id": "btn", "label": "open"
+        }))
+        .unwrap();
+        let tab_a = Component::text(
+            ComponentId::new("tab_a").unwrap(),
+            DynamicValue::Path {
+                path: "name".into(),
+            },
+        );
+        let tabs: Component = serde_json::from_value(json!({
+            "component": "Tabs", "id": "tabbar",
+            "tabs": [{"title": "T1", "child": "tab_a"}]
+        }))
+        .unwrap();
+        let tmpl: Component = serde_json::from_value(json!({
+            "component": "Modal", "id": "tmpl",
+            "trigger": "btn", "content": "tabbar"
+        }))
+        .unwrap();
+        let parent: Component = serde_json::from_value(json!({
+            "component": "Column", "id": "list",
+            "children": {"template": "tmpl", "path": "/items"}
+        }))
+        .unwrap();
+
+        forest.upsert("s1", parent).unwrap();
+        forest.upsert("s1", tmpl).unwrap();
+        forest.upsert("s1", btn).unwrap();
+        forest.upsert("s1", tabs).unwrap();
+        forest.upsert("s1", tab_a).unwrap();
+
+        forest
+            .expand_templates("s1", &binding, &resolver, &FunctionDispatcher::new())
+            .unwrap();
+
+        let inst = forest
+            .get("s1", &ComponentId::new("tmpl_0").unwrap())
+            .unwrap();
+        assert_eq!(
+            inst.properties().get("trigger"),
+            Some(&json!("btn_0")),
+            "trigger 引用应改写为克隆 id"
+        );
+        assert!(
+            forest
+                .get("s1", &ComponentId::new("btn_0").unwrap())
+                .is_some(),
+            "trigger 克隆必须存在"
+        );
+
+        let tabbar = forest
+            .get("s1", &ComponentId::new("tabbar_0").unwrap())
+            .expect("content 克隆必须存在");
+        assert_eq!(
+            tabbar.properties().get("tabs"),
+            Some(&json!([{"title": "T1", "child": "tab_a_0"}])),
+            "tabs[].child 引用应改写为克隆 id"
+        );
+        assert!(
+            forest
+                .get("s1", &ComponentId::new("tab_a_0").unwrap())
+                .is_some(),
+            "tabs[].child 克隆必须存在"
         );
     }
 
