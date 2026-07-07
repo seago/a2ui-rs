@@ -245,6 +245,7 @@ impl GuiRenderer {
                             &mut response_tracker,
                             &mut user_events,
                             &image_textures,
+                            0,
                         );
                     });
                 });

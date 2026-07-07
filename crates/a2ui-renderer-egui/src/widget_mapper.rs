@@ -379,6 +379,11 @@ impl WidgetMapper {
 
     /// 将 RenderableGuiWidget 渲染到 egui::Ui
     /// user_events: 收集渲染过程中产生的用户交互事件
+    ///
+    /// depth: 递归深度（入口传 0）。本函数按 id 从 widget_map 间接递归，
+    /// Modal content/trigger 等边可绕过 build_tree 的环检测，须自带
+    /// 深度防护（纵深防御）：超过 MAX_TREE_DEPTH 时渲染占位并终止。
+    #[allow(clippy::too_many_arguments)]
     pub fn render_gui_widget(
         &self,
         widget: &RenderableGuiWidget,
@@ -387,7 +392,12 @@ impl WidgetMapper {
         response_tracker: &mut HashMap<String, egui::Response>,
         user_events: &mut Vec<a2ui_renderer::UserEvent>,
         image_textures: &HashMap<String, (egui::TextureId, [usize; 2])>,
+        depth: usize,
     ) {
+        if depth >= a2ui_renderer::error::MAX_TREE_DEPTH {
+            ui.label("[depth limit reached]");
+            return;
+        }
         match widget {
             RenderableGuiWidget::Text { id, text, style } => {
                 let rich_text = apply_text_style(egui::RichText::new(text.clone()), style);
@@ -453,6 +463,7 @@ impl WidgetMapper {
                                         response_tracker,
                                         user_events,
                                         image_textures,
+                                        depth + 1,
                                     );
                                 }
                             }
@@ -472,6 +483,7 @@ impl WidgetMapper {
                                 response_tracker,
                                 user_events,
                                 image_textures,
+                                depth + 1,
                             );
                         }
                     }
@@ -495,6 +507,7 @@ impl WidgetMapper {
                                 response_tracker,
                                 user_events,
                                 image_textures,
+                                depth + 1,
                             );
                         }
                     }
@@ -574,6 +587,7 @@ impl WidgetMapper {
                             response_tracker,
                             user_events,
                             image_textures,
+                            depth + 1,
                         );
                     } else {
                         ui.label(format!("[missing: {}]", child_id));
@@ -639,6 +653,7 @@ impl WidgetMapper {
                                         response_tracker,
                                         user_events,
                                         image_textures,
+                                        depth + 1,
                                     );
                                 } else {
                                     ui.label(format!("[missing: {}]", child_id));
@@ -685,6 +700,7 @@ impl WidgetMapper {
                             response_tracker,
                             user_events,
                             image_textures,
+                            depth + 1,
                         );
                     }
                 }
@@ -708,6 +724,7 @@ impl WidgetMapper {
                         response_tracker,
                         user_events,
                         image_textures,
+                        depth + 1,
                     );
                     // 检查 trigger 是否被点击
                     if let Some(resp) = response_tracker.get(trigger_id.as_str()) {
@@ -731,6 +748,7 @@ impl WidgetMapper {
                                     response_tracker,
                                     user_events,
                                     image_textures,
+                                    depth + 1,
                                 );
                             }
                         });
@@ -967,6 +985,107 @@ fn cover_uv(image_size: egui::Vec2, target_size: egui::Vec2) -> egui::Rect {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// 构造 chain 层 Card 链（card0 → card1 → ... → leaf），渲染后返回
+    /// response_tracker 是否含链尾叶子 "leaf"（Card 不进 tracker，Text 叶子会）
+    fn render_card_chain_reaches_leaf(chain: usize) -> bool {
+        let mapper = WidgetMapper;
+        let mut widget_map: HashMap<String, RenderableGuiWidget> = HashMap::new();
+        for i in 0..chain {
+            let child = if i + 1 == chain {
+                "leaf".to_string()
+            } else {
+                format!("card{}", i + 1)
+            };
+            widget_map.insert(
+                format!("card{i}"),
+                RenderableGuiWidget::Card {
+                    id: ComponentId::new(format!("card{i}")).unwrap(),
+                    child_id: ComponentId::new(child).unwrap(),
+                    style: ComponentStyle::default(),
+                },
+            );
+        }
+        widget_map.insert(
+            "leaf".to_string(),
+            RenderableGuiWidget::Text {
+                id: ComponentId::new("leaf").unwrap(),
+                text: "leaf".into(),
+                style: ComponentStyle::default(),
+            },
+        );
+
+        let ctx = egui::Context::default();
+        let mut response_tracker = HashMap::new();
+        let mut user_events = Vec::new();
+        let image_textures = HashMap::new();
+        let root = widget_map.get("card0").unwrap().clone();
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mapper.render_gui_widget(
+                    &root,
+                    ui,
+                    &widget_map,
+                    &mut response_tracker,
+                    &mut user_events,
+                    &image_textures,
+                    0,
+                );
+            });
+        });
+        response_tracker.contains_key("leaf")
+    }
+
+    #[test]
+    fn test_render_gui_widget_depth_limit_renders_placeholder_not_overflow() {
+        // render_gui_widget 按 id 间接递归、可绕过 build_tree 的深度检查，
+        // 必须自带深度防护：上限内正常渲染，超限终止而非栈溢出。
+        assert!(
+            render_card_chain_reaches_leaf(30),
+            "深度上限内的叶子应正常渲染"
+        );
+        assert!(
+            !render_card_chain_reaches_leaf(60),
+            "超过深度上限（50）的叶子不应被渲染"
+        );
+    }
+
+    #[test]
+    fn test_render_gui_widget_self_reference_terminates() {
+        // 自引用 Card（widget_map 数据成环）：必须有限终止而非栈溢出
+        let mapper = WidgetMapper;
+        let mut widget_map: HashMap<String, RenderableGuiWidget> = HashMap::new();
+        widget_map.insert(
+            "loop_card".to_string(),
+            RenderableGuiWidget::Card {
+                id: ComponentId::new("loop_card").unwrap(),
+                child_id: ComponentId::new("loop_card").unwrap(),
+                style: ComponentStyle::default(),
+            },
+        );
+
+        let ctx = egui::Context::default();
+        let mut response_tracker = HashMap::new();
+        let mut user_events = Vec::new();
+        let image_textures = HashMap::new();
+        let root = widget_map.get("loop_card").unwrap().clone();
+
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mapper.render_gui_widget(
+                    &root,
+                    ui,
+                    &widget_map,
+                    &mut response_tracker,
+                    &mut user_events,
+                    &image_textures,
+                    0,
+                );
+            });
+        });
+        // 走到这里即证明递归有限终止
+    }
 
     fn empty_registry() -> CustomComponentRegistry {
         CustomComponentRegistry::new()
