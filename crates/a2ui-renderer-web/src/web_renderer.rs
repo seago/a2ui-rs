@@ -10,9 +10,9 @@ use a2ui_core::message::{
 use a2ui_core::prelude::*;
 use a2ui_core::Value;
 use a2ui_renderer::{
-    choice_options, choice_selected, resolve_bool, resolve_f64, resolve_str, ComponentStyle,
-    CoreEffects, CustomComponentRegistry, DataBinding, RenderResult, Renderer, RendererCore,
-    SurfaceHandle, UserEvent,
+    checkbox_checked, choice_options, choice_selected, resolve_bool, resolve_f64, resolve_str,
+    ComponentStyle, CoreEffects, CustomComponentRegistry, DataBinding, RenderResult, Renderer,
+    RendererCore, SurfaceHandle, UserEvent,
 };
 use std::collections::HashMap;
 
@@ -229,9 +229,7 @@ impl WebRenderer {
                 }
             }
             "CheckBox" => {
-                let checked = resolve_bool_value(component, prop_keys::VALUE, binding)
-                    .or_else(|| resolve_bool_value(component, prop_keys::CHECKED, binding))
-                    .unwrap_or(false);
+                let checked = checkbox_checked(component, Some(binding));
                 let label =
                     extract_string_value(component, prop_keys::LABEL, binding).unwrap_or_default();
                 RenderableHtmlWidget::CheckBox {
@@ -504,6 +502,8 @@ fn extract_string_value(component: &Component, key: &str, binding: &DataBinding)
         .map(|dv| resolve_str(&dv, Some(binding)))
 }
 
+// CheckBox 已迁移到公共 `checkbox_checked`，暂无生产消费者（按禁删约定保留）
+#[allow(dead_code)]
 fn resolve_bool_value(component: &Component, key: &str, binding: &DataBinding) -> Option<bool> {
     component
         .prop_dynamic_bool(key)

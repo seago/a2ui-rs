@@ -2,8 +2,8 @@ use a2ui_core::component::{prop_keys, ChildrenDecl};
 use a2ui_core::prelude::*;
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
-    choice_options, choice_selected, resolve_str, ChoiceOption, ComponentForest, ComponentStyle,
-    CustomComponentRegistry, DataBinding,
+    checkbox_checked, choice_options, choice_selected, resolve_str, ChoiceOption, ComponentForest,
+    ComponentStyle, CustomComponentRegistry, DataBinding,
 };
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -422,7 +422,7 @@ impl<'a> WidgetBuilder<'a> {
             }
             "CheckBox" => {
                 let label = resolve_string_prop(component, prop_keys::LABEL, self.binding, "");
-                let checked = component.prop_bool(prop_keys::CHECKED).unwrap_or(false);
+                let checked = checkbox_checked(component, Some(self.binding));
                 RenderableWidget::CheckBox {
                     id: component.id().clone(),
                     area,
@@ -1005,6 +1005,36 @@ mod tests {
             matches!(cb_widget.unwrap(), RenderableWidget::CheckBox { .. }),
             "CheckBox component should produce RenderableWidget::CheckBox"
         );
+    }
+
+    #[test]
+    fn test_checkbox_resolves_spec_value_key_with_binding() {
+        // 规范键 value（DynamicBoolean，required）+ 动态绑定：
+        // 此前 TUI 只读 checked 裸值，规范消息恒渲染未勾选
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::new(json!({"agree": true})));
+
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("cb").unwrap()],
+        );
+        let cb: Component = Component::from_json(
+            r#"{"id":"cb","component":"CheckBox","label":"I agree","value":{"path":"/agree"}}"#,
+        )
+        .unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", cb).unwrap();
+
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+
+        let Some(RenderableWidget::CheckBox { checked, .. }) =
+            widgets.iter().find(|w| w.id().as_str() == "cb")
+        else {
+            panic!("CheckBox widget should exist");
+        };
+        assert!(*checked, "value 绑定应解析为勾选状态");
     }
 
     #[test]

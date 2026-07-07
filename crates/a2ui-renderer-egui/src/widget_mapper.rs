@@ -1,9 +1,9 @@
 use a2ui_core::component::{prop_keys, ChildrenDecl};
 use a2ui_core::prelude::*;
 use a2ui_renderer::{
-    choice_options, choice_selected, resolve_bool, resolve_f64, resolve_str_with_missing_path,
-    value_to_display_string, ChoiceOption, ComponentStyle, CustomComponentRegistry, StyleColor,
-    StyleSpacing,
+    checkbox_checked, choice_options, choice_selected, resolve_bool, resolve_f64,
+    resolve_str_with_missing_path, value_to_display_string, ChoiceOption, ComponentStyle,
+    CustomComponentRegistry, StyleColor, StyleSpacing,
 };
 use std::collections::HashMap;
 
@@ -219,9 +219,7 @@ impl WidgetMapper {
                 }
             }
             "CheckBox" => {
-                let checked = resolve_dynamic_bool(component, prop_keys::VALUE, data_model)
-                    .or_else(|| resolve_dynamic_bool(component, prop_keys::CHECKED, data_model))
-                    .unwrap_or(false);
+                let checked = checkbox_checked(component, data_model);
                 let label = resolve_dynamic_prop(component, prop_keys::LABEL, data_model, "");
                 RenderableGuiWidget::CheckBox {
                     id: component.id().clone(),
@@ -849,6 +847,8 @@ fn resolve_dynamic_prop(
     }
 }
 
+// CheckBox 已迁移到公共 `checkbox_checked`，暂无生产消费者（按禁删约定保留）
+#[allow(dead_code)]
 fn resolve_dynamic_bool(
     component: &Component,
     key: &str,

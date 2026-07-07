@@ -4,8 +4,8 @@ use a2ui_core::component::prop_keys;
 use a2ui_core::prelude::Component;
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
-    choice_options, choice_selected, resolve_bool, resolve_f64, resolve_str_with_missing_path,
-    ChoiceOption, ComponentStyle, DataBinding, StyleColor,
+    checkbox_checked, choice_options, choice_selected, resolve_bool, resolve_f64,
+    resolve_str_with_missing_path, ChoiceOption, ComponentStyle, DataBinding, StyleColor,
 };
 use iced::widget::text;
 use iced::widget::text::Shaping;
@@ -268,15 +268,9 @@ fn build_checkbox(
         .borrow()
         .get(&id_str)
         .copied()
-        .unwrap_or_else(|| {
-            resolve_dynamic_bool(
-                &node.component,
-                prop_keys::VALUE,
-                false,
-                renderer,
-                surface_id,
-            )
-        });
+        // 本地受控缓存优先（平台专属，§3.6 豁免）；未命中时的声明状态
+        // 解析走公共 helper（value 优先、checked 回退）
+        .unwrap_or_else(|| checkbox_checked(&node.component, binding_for(renderer, surface_id)));
 
     iced::widget::checkbox(label, checked)
         .text_shaping(Shaping::Advanced)
@@ -550,6 +544,8 @@ fn resolve_dynamic_string(
     resolved
 }
 
+// CheckBox 已迁移到公共 `checkbox_checked`，暂无生产消费者（按禁删约定保留）
+#[allow(dead_code)]
 fn resolve_dynamic_bool(
     component: &Component,
     key: &str,
