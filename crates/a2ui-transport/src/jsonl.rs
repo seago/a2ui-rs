@@ -5,10 +5,39 @@ use a2ui_core::{
     message::{V1_0ClientMessage, V1_0ServerMessage},
     ClientEnvelope, ServerEnvelope,
 };
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 /// JSONL 单行最大字节数（防止内存耗尽 DoS 攻击）
 const MAX_LINE_LENGTH: usize = 1_048_576; // 1 MiB
+
+/// 限长读取一行（含结尾换行符），EOF 返回 `Ok(None)`。
+///
+/// 长度上限在读取过程中生效（通过 `take` 截断），而非读完整行后再检查——
+/// 否则恶意对端发送不含换行的超长"行"会在检查前耗尽内存。
+/// 超限属于协议违规，返回错误后流停留在行中间，调用方应关闭连接。
+async fn read_line_bounded<R>(reader: &mut BufReader<R>) -> TransportResult<Option<String>>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut buf = Vec::new();
+    let n = (&mut *reader)
+        .take((MAX_LINE_LENGTH + 1) as u64)
+        .read_until(b'\n', &mut buf)
+        .await
+        .map_err(|e| TransportError::ReceiveError(format!("read error: {}", e)))?;
+    if n == 0 {
+        return Ok(None);
+    }
+    if buf.len() > MAX_LINE_LENGTH {
+        return Err(TransportError::ReceiveError(format!(
+            "line too long: exceeds {} bytes",
+            MAX_LINE_LENGTH
+        )));
+    }
+    let line = String::from_utf8(buf)
+        .map_err(|e| TransportError::ReceiveError(format!("invalid utf-8: {}", e)))?;
+    Ok(Some(line))
+}
 
 #[async_trait::async_trait]
 impl<R, W> Transport for JsonlTransport<R, W>
@@ -52,22 +81,9 @@ where
 
     async fn receive(&mut self) -> TransportResult<ServerEnvelope> {
         loop {
-            let mut line = String::new();
-            let n =
-                self.reader.read_line(&mut line).await.map_err(|e| {
-                    crate::TransportError::ReceiveError(format!("read error: {}", e))
-                })?;
-            if n == 0 {
+            let Some(line) = read_line_bounded(&mut self.reader).await? else {
                 return Err(crate::TransportError::Eof);
-            }
-            // 检查行长度限制（防止 OOM DoS）
-            if line.len() > MAX_LINE_LENGTH {
-                return Err(crate::TransportError::ReceiveError(format!(
-                    "line too long: {} bytes (max: {})",
-                    line.len(),
-                    MAX_LINE_LENGTH
-                )));
-            }
+            };
             // 跳过空行（仅有换行符的行）
             let trimmed = line.trim();
             if trimmed.is_empty() {
@@ -114,23 +130,9 @@ where
     ///
     /// 返回去除尾随换行符的字符串。EOF 时返回 `Ok(None)`。
     pub async fn receive_line(&mut self) -> TransportResult<Option<String>> {
-        let mut line = String::new();
-        let n = self
-            .reader
-            .read_line(&mut line)
-            .await
-            .map_err(|e| TransportError::ReceiveError(format!("read error: {}", e)))?;
-        if n == 0 {
+        let Some(mut line) = read_line_bounded(&mut self.reader).await? else {
             return Ok(None);
-        }
-        // 检查行长度限制
-        if line.len() > MAX_LINE_LENGTH {
-            return Err(TransportError::ReceiveError(format!(
-                "line too long: {} bytes (max: {})",
-                line.len(),
-                MAX_LINE_LENGTH
-            )));
-        }
+        };
         // 去除尾随换行符
         if line.ends_with('\n') {
             line.pop();
@@ -241,6 +243,72 @@ mod tests {
             };
             let result = transport.handshake(client_caps).await;
             assert!(result.is_err());
+        });
+    }
+
+    /// 无限输出 'a'（永不出现换行）的 reader，被读超过 limit 字节即报 IO 错误。
+    /// 用于验证行长检查发生在读取过程中而非读完整行之后：
+    /// 若实现先无界 read_line 再检查长度，会撞上守卫错误而非返回 line too long。
+    struct GuardedEndlessReader {
+        served: usize,
+        limit: usize,
+    }
+
+    impl tokio::io::AsyncRead for GuardedEndlessReader {
+        fn poll_read(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            if self.served >= self.limit {
+                return std::task::Poll::Ready(Err(std::io::Error::other(
+                    "guard: read past limit",
+                )));
+            }
+            let n = buf.remaining().min(self.limit - self.served).min(64 * 1024);
+            buf.put_slice(&vec![b'a'; n]);
+            self.served += n;
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    #[test]
+    fn test_receive_stops_reading_at_line_length_limit() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let input = GuardedEndlessReader {
+                served: 0,
+                limit: 8 * 1024 * 1024, // 守卫：读超 8 MiB 即视为防护失效
+            };
+            let mut output = Vec::new();
+            let mut transport = JsonlTransport::new(input, &mut output);
+            let result = Transport::receive(&mut transport).await;
+            match result {
+                Err(TransportError::ReceiveError(msg)) => assert!(
+                    msg.contains("line too long"),
+                    "expected line-too-long error before reading past guard, got: {msg}"
+                ),
+                other => panic!("expected ReceiveError(line too long), got: {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    fn test_receive_line_over_limit_returns_error() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            // 略超 1 MiB 的单行（有限输入），两条读取路径都应报 line too long
+            let mut data = vec![b'a'; MAX_LINE_LENGTH + 10];
+            data.push(b'\n');
+            let mut output = Vec::new();
+            let mut transport = JsonlTransport::new(data.as_slice(), &mut output);
+            let result = transport.receive_line().await;
+            match result {
+                Err(TransportError::ReceiveError(msg)) => {
+                    assert!(msg.contains("line too long"), "got: {msg}")
+                }
+                other => panic!("expected ReceiveError(line too long), got: {other:?}"),
+            }
         });
     }
 
