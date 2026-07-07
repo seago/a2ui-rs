@@ -494,15 +494,13 @@ impl Renderer for IcedRenderer {
             }
         }
 
-        Ok(Some(a2ui_core::message::client_to_server::ActionMessage {
-            name: name.into(),
-            surface_id: action_surface_id,
-            source_component_id: Some(component_id.as_str().to_string()),
-            context: ctx,
-            want_response: false,
-            response_path: None,
-            action_id: None,
-        }))
+        let mut action = a2ui_core::message::client_to_server::ActionMessage::event(
+            name,
+            action_surface_id,
+            component_id.as_str(),
+        );
+        action.context = ctx;
+        Ok(Some(action))
     }
 }
 

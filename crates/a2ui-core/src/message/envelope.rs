@@ -119,7 +119,7 @@ mod tests {
         // 本 binding 定义为信封级字段（与 web-react 参考客户端一致）
         let json = r#"{
             "version": "v1.0",
-            "action": {"name": "submit", "surfaceId": "s1", "sourceComponentId": "btn"},
+            "action": {"name": "submit", "surfaceId": "s1", "sourceComponentId": "btn", "timestamp": "2026-07-07T00:00:00Z"},
             "metadata": {"surfaceId": "s1", "dataModel": {"form": {"name": "alice"}}}
         }"#;
         let envelope = ClientEnvelope::from_json(json).unwrap();
@@ -137,7 +137,7 @@ mod tests {
     fn client_envelope_serializes_metadata_at_envelope_level() {
         let envelope = ClientEnvelope::V1_0 {
             message: V1_0ClientMessage::Action(
-                crate::message::client_to_server::ActionMessage::event("submit", "s1"),
+                crate::message::client_to_server::ActionMessage::event("submit", "s1", "btn"),
             ),
             metadata: Some(ClientMetadata {
                 surface_id: "s1".into(),

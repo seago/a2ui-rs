@@ -519,10 +519,11 @@ impl Renderer for GuiRenderer {
 
         match event {
             UserEvent::Click { component_id } => {
-                let mut action = ActionMessage::event("click", "").with_context(
-                    "source",
-                    DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
-                );
+                let mut action = ActionMessage::event("click", "", component_id.as_str())
+                    .with_context(
+                        "source",
+                        DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
+                    );
                 if let Some(ref surface_id) = send_data_surface {
                     if let Some(binding) = self.data_bindings.get(surface_id) {
                         action = action.with_context(
@@ -536,10 +537,11 @@ impl Renderer for GuiRenderer {
             UserEvent::KeyPress { key } => {
                 if key == "Enter" || key == " " {
                     if let Some(ref comp_id) = self.focused_component {
-                        let mut action = ActionMessage::event("activate", "").with_context(
-                            "source",
-                            DynamicValue::Literal(Value::String(comp_id.as_str().to_string())),
-                        );
+                        let mut action = ActionMessage::event("activate", "", comp_id.as_str())
+                            .with_context(
+                                "source",
+                                DynamicValue::Literal(Value::String(comp_id.as_str().to_string())),
+                            );
                         if let Some(ref surface_id) = send_data_surface {
                             if let Some(binding) = self.data_bindings.get(surface_id) {
                                 action = action.with_context(
@@ -557,7 +559,7 @@ impl Renderer for GuiRenderer {
                 component_id,
                 value,
             } => {
-                let mut action = ActionMessage::event("input", "")
+                let mut action = ActionMessage::event("input", "", component_id.as_str())
                     .with_context(
                         "component",
                         DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
@@ -577,7 +579,7 @@ impl Renderer for GuiRenderer {
                 component_id,
                 checked,
             } => {
-                let mut action = ActionMessage::event("toggle", "")
+                let mut action = ActionMessage::event("toggle", "", component_id.as_str())
                     .with_context(
                         "component",
                         DynamicValue::Literal(Value::String(component_id.as_str().to_string())),
@@ -600,7 +602,7 @@ impl Renderer for GuiRenderer {
                 component_id,
                 value,
             } => {
-                let mut action = ActionMessage::event("slider_change", "")
+                let mut action = ActionMessage::event("slider_change", "", component_id.as_str())
                     .with_context(
                         "component",
                         DynamicValue::Literal(Value::String(component_id.as_str().to_string())),

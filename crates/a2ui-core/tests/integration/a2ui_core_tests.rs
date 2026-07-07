@@ -141,7 +141,7 @@ fn test_component_tree_construction() {
 
 #[test]
 fn test_client_action_message() {
-    let action = ActionMessage::event("submit", "s1")
+    let action = ActionMessage::event("submit", "s1", "btn")
         .with_response("/result", "act-1")
         .with_context("value", DynamicValue::Literal("test".into()));
 

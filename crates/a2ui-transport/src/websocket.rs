@@ -215,7 +215,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let mut transport = WebSocketTransport::new("ws://localhost:8080/a2ui").unwrap();
         let envelope = ClientEnvelope::v1_0(V1_0ClientMessage::Action(ActionMessage::event(
-            "click", "s1",
+            "click", "s1", "btn",
         )));
         let result = rt.block_on(async { transport.send(envelope).await });
         assert!(result.is_err());

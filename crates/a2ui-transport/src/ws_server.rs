@@ -258,7 +258,7 @@ mod tests {
 
         // 客户端 send 一个 Action
         let action = ClientEnvelope::v1_0(V1_0ClientMessage::Action(ActionMessage::event(
-            "submit", "s1",
+            "submit", "s1", "btn",
         )));
         client.send(action).await.expect("client send failed");
 
