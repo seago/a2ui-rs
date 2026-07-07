@@ -65,7 +65,10 @@ async fn handle_connection(
         };
 
         match envelope {
-            ClientEnvelope::V1_0(V1_0ClientMessage::Action(action)) => {
+            ClientEnvelope::V1_0 {
+                message: V1_0ClientMessage::Action(action),
+                ..
+            } => {
                 tracing::info!(
                     "received action name='{}' surface='{}' source={:?} context={:?} wantResponse={}",
                     action.name,
@@ -94,13 +97,22 @@ async fn handle_connection(
                     }
                 }
             }
-            ClientEnvelope::V1_0(V1_0ClientMessage::FunctionResponse(fr)) => {
+            ClientEnvelope::V1_0 {
+                message: V1_0ClientMessage::FunctionResponse(fr),
+                ..
+            } => {
                 tracing::info!("received functionResponse: call='{}'", fr.call);
             }
-            ClientEnvelope::V1_0(V1_0ClientMessage::Error(err)) => {
+            ClientEnvelope::V1_0 {
+                message: V1_0ClientMessage::Error(err),
+                ..
+            } => {
                 tracing::warn!("received client error: {} - {}", err.code, err.message);
             }
-            ClientEnvelope::V1_0(V1_0ClientMessage::Capabilities(caps)) => {
+            ClientEnvelope::V1_0 {
+                message: V1_0ClientMessage::Capabilities(caps),
+                ..
+            } => {
                 tracing::info!("received capabilities: {:?}", caps.features);
             }
         }

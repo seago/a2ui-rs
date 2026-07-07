@@ -95,7 +95,7 @@ impl IcedApp {
                 }
                 V1_0ServerMessage::CallFunction(msg) => {
                     let response = pollster::block_on(self.renderer.call_function(msg))?;
-                    let envelope = ClientEnvelope::V1_0(
+                    let envelope = ClientEnvelope::v1_0(
                         a2ui_core::message::V1_0ClientMessage::FunctionResponse(response),
                     );
                     let _ = self.action_tx.send(envelope);
@@ -171,7 +171,7 @@ pub fn update(app: &mut IcedApp, message: Message) -> iced::Task<Message> {
             match pollster::block_on(app.renderer.handle_user_event(event)) {
                 Ok(Some(msg)) => {
                     let envelope =
-                        ClientEnvelope::V1_0(a2ui_core::message::V1_0ClientMessage::Action(msg));
+                        ClientEnvelope::v1_0(a2ui_core::message::V1_0ClientMessage::Action(msg));
                     let _ = app.action_tx.send(envelope);
                 }
                 Ok(None) => {}

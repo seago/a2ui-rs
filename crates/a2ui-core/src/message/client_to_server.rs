@@ -210,7 +210,7 @@ mod tests {
     fn test_client_envelope_action() {
         let json = r#"{"version":"v1.0","action":{"name":"click","surfaceId":"s1"}}"#;
         let env: ClientEnvelope = serde_json::from_str(json).unwrap();
-        if let ClientEnvelope::V1_0(msg) = env {
+        if let ClientEnvelope::V1_0 { message: msg, .. } = env {
             match msg {
                 V1_0ClientMessage::Action(a) => assert_eq!(a.name, "click"),
                 _ => panic!("wrong variant"),
@@ -222,7 +222,7 @@ mod tests {
     fn test_client_envelope_function_response() {
         let json = r#"{"version":"v1.0","functionResponse":{"functionCallId":"fc1","call":"req","value":true}}"#;
         let env: ClientEnvelope = serde_json::from_str(json).unwrap();
-        if let ClientEnvelope::V1_0(msg) = env {
+        if let ClientEnvelope::V1_0 { message: msg, .. } = env {
             match msg {
                 V1_0ClientMessage::FunctionResponse(fr) => assert_eq!(fr.function_call_id, "fc1"),
                 _ => panic!("wrong variant"),
@@ -234,7 +234,7 @@ mod tests {
     fn test_client_envelope_error() {
         let json = r#"{"version":"v1.0","error":{"code":"E","message":"err"}}"#;
         let env: ClientEnvelope = serde_json::from_str(json).unwrap();
-        if let ClientEnvelope::V1_0(msg) = env {
+        if let ClientEnvelope::V1_0 { message: msg, .. } = env {
             match msg {
                 V1_0ClientMessage::Error(e) => assert_eq!(e.code, "E"),
                 _ => panic!("wrong variant"),
@@ -287,10 +287,14 @@ mod tests {
             features: vec!["tui".to_string()],
         };
         let msg = V1_0ClientMessage::Capabilities(caps);
-        let envelope = ClientEnvelope::V1_0(msg);
+        let envelope = ClientEnvelope::v1_0(msg);
         let json = serde_json::to_string(&envelope).unwrap();
         let parsed: ClientEnvelope = serde_json::from_str(&json).unwrap();
-        if let ClientEnvelope::V1_0(V1_0ClientMessage::Capabilities(c)) = parsed {
+        if let ClientEnvelope::V1_0 {
+            message: V1_0ClientMessage::Capabilities(c),
+            ..
+        } = parsed
+        {
             assert_eq!(c.version, "1.0");
             assert_eq!(c.features, vec!["tui"]);
         } else {
@@ -312,7 +316,7 @@ mod tests {
             version: "1.0".to_string(),
             features: vec!["tui".to_string(), "jsonl".to_string()],
         };
-        let envelope = ClientEnvelope::V1_0(V1_0ClientMessage::Capabilities(caps));
+        let envelope = ClientEnvelope::v1_0(V1_0ClientMessage::Capabilities(caps));
         let json = serde_json::to_string(&envelope).unwrap();
         assert!(json.contains("capabilities"));
         assert!(json.contains("tui"));

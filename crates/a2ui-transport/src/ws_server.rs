@@ -257,7 +257,7 @@ mod tests {
         }
 
         // 客户端 send 一个 Action
-        let action = ClientEnvelope::V1_0(V1_0ClientMessage::Action(ActionMessage::event(
+        let action = ClientEnvelope::v1_0(V1_0ClientMessage::Action(ActionMessage::event(
             "submit", "s1",
         )));
         client.send(action).await.expect("client send failed");
@@ -265,7 +265,10 @@ mod tests {
         // 验证：客户端 send 的 ClientEnvelope，服务端能收到
         let server_got = server_task.await.expect("server task join failed");
         match server_got {
-            ClientEnvelope::V1_0(V1_0ClientMessage::Action(a)) => {
+            ClientEnvelope::V1_0 {
+                message: V1_0ClientMessage::Action(a),
+                ..
+            } => {
                 assert_eq!(a.name, "submit");
                 assert_eq!(a.surface_id, "s1");
             }

@@ -97,7 +97,7 @@ impl A2uiApp {
                 }
                 V1_0ServerMessage::CallFunction(msg) => {
                     let response = pollster::block_on(self.renderer.call_function(msg))?;
-                    let envelope = a2ui_core::ClientEnvelope::V1_0(
+                    let envelope = a2ui_core::ClientEnvelope::v1_0(
                         a2ui_core::message::V1_0ClientMessage::FunctionResponse(response),
                     );
                     let _ = self.action_tx.send(envelope);
@@ -143,7 +143,7 @@ impl eframe::App for A2uiApp {
             Ok(actions) => {
                 emitted_actions = actions.len();
                 for action in actions {
-                    let envelope = a2ui_core::ClientEnvelope::V1_0(
+                    let envelope = a2ui_core::ClientEnvelope::v1_0(
                         a2ui_core::message::V1_0ClientMessage::Action(action),
                     );
                     let _ = self.action_tx.send(envelope);

@@ -52,7 +52,7 @@ where
     async fn handshake(&mut self, capabilities: Capabilities) -> TransportResult<Capabilities> {
         // 发送客户端能力描述
         let client_msg = V1_0ClientMessage::Capabilities(capabilities);
-        self.send(ClientEnvelope::V1_0(client_msg)).await?;
+        self.send(ClientEnvelope::v1_0(client_msg)).await?;
 
         // 接收服务端能力描述
         let envelope = self.receive().await?;

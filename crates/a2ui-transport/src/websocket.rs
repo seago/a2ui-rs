@@ -86,7 +86,7 @@ impl Transport for WebSocketTransport {
     async fn handshake(&mut self, capabilities: Capabilities) -> TransportResult<Capabilities> {
         // 发送客户端能力描述
         let client_msg = V1_0ClientMessage::Capabilities(capabilities);
-        self.send(ClientEnvelope::V1_0(client_msg)).await?;
+        self.send(ClientEnvelope::v1_0(client_msg)).await?;
 
         // 接收服务端能力描述
         let envelope = self.receive().await?;
@@ -214,7 +214,7 @@ mod tests {
     fn test_websocket_send_without_connect_fails() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let mut transport = WebSocketTransport::new("ws://localhost:8080/a2ui").unwrap();
-        let envelope = ClientEnvelope::V1_0(V1_0ClientMessage::Action(ActionMessage::event(
+        let envelope = ClientEnvelope::v1_0(V1_0ClientMessage::Action(ActionMessage::event(
             "click", "s1",
         )));
         let result = rt.block_on(async { transport.send(envelope).await });

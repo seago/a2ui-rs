@@ -232,7 +232,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Some(envelope) = action_rx.blocking_recv() {
             // 提取 action 消息
             let action = match envelope {
-                ClientEnvelope::V1_0(V1_0ClientMessage::Action(a)) => a,
+                ClientEnvelope::V1_0 {
+                    message: V1_0ClientMessage::Action(a),
+                    ..
+                } => a,
                 _ => continue,
             };
 
