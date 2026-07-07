@@ -9,7 +9,7 @@ use a2ui_renderer_web::WebRenderer;
 #[test]
 fn test_web_renderer_new() {
     let renderer = WebRenderer::new();
-    assert!(renderer.surfaces.is_empty());
+    assert!(renderer.core.surfaces().is_empty());
 }
 
 #[test]
@@ -166,5 +166,5 @@ async fn test_web_renderer_full_end_to_end() {
         })
         .await
         .unwrap();
-    assert!(renderer.surfaces.values().all(|s| s != "app"));
+    assert!(renderer.core.surfaces().values().all(|s| s != "app"));
 }
