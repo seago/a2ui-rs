@@ -297,6 +297,9 @@ class Store implements SurfaceStore {
       if (!s) return;
       s.lifecycle = "deleted";
       s.graph.reset();
+      // 释放组件与渲染数据；entry 保留在 map 中供 getSurface 查询 lifecycle
+      s.components.clear();
+      s.order = [];
       this.notify();
       return;
     }
@@ -352,7 +355,10 @@ class Store implements SurfaceStore {
   }
 
   getSurfaceIds(): SurfaceId[] {
-    return [...this.surfaces.keys()];
+    // 生命周期在读取路径生效：已删除的 surface 不再被渲染层枚举
+    return [...this.surfaces.values()]
+      .filter((s) => s.lifecycle !== "deleted")
+      .map((s) => s.surfaceId);
   }
 
   getSurface(surfaceId: SurfaceId): SurfaceSnapshot | undefined {
@@ -369,7 +375,8 @@ class Store implements SurfaceStore {
 
   getRootRef(surfaceId: SurfaceId): NodeRef | undefined {
     const s = this.surfaces.get(surfaceId);
-    return s ? this.rootRef(s) : undefined;
+    if (!s || s.lifecycle === "deleted") return undefined;
+    return this.rootRef(s);
   }
 
   private rootRef(s: SurfaceEntry): NodeRef | undefined {
@@ -398,7 +405,7 @@ class Store implements SurfaceStore {
 
   resolveNode(surfaceId: SurfaceId, ref: NodeRef): ResolvedNode | undefined {
     const s = this.surfaces.get(surfaceId);
-    if (!s) return undefined;
+    if (!s || s.lifecycle === "deleted") return undefined;
     const component = s.components.get(ref.componentId);
     if (!component) {
       // 引用缺失：渐进式渲染占位符。
@@ -551,7 +558,9 @@ class Store implements SurfaceStore {
     sourceComponentId?: ComponentId,
     scope: Scope = ROOT_SCOPE,
   ): ClientEnvelope {
-    const s = this.surfaces.get(surfaceId);
+    const entry = this.surfaces.get(surfaceId);
+    // 已删除 surface 上的交互不再携带其状态（与 setDataValue 的守卫一致）
+    const s = entry && entry.lifecycle !== "deleted" ? entry : undefined;
     // 函数调用型 action 无回传语义：返回一个空 action 信封（V 侧应本地执行）。
     if (!isEventAction(action)) {
       return { version: "v1.0" };

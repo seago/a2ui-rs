@@ -77,6 +77,45 @@ describe("createSurfaceStore — lifecycle & snapshot", () => {
     expect(store.getSurface("s1")?.lifecycle).toBe("deleted");
   });
 
+  it("deleteSurface removes surface from getSurfaceIds", () => {
+    const store = createSurfaceStore();
+    store.ingest(demoEnvelope);
+    expect(store.getSurfaceIds()).toContain("s1");
+    store.ingest({ version: "v1.0", deleteSurface: { surfaceId: "s1" } });
+    // 生命周期必须在读取路径生效：已删除的 surface 不应再被渲染层枚举
+    expect(store.getSurfaceIds()).not.toContain("s1");
+  });
+
+  it("deleteSurface makes getRootRef and resolveNode return undefined", () => {
+    const store = createSurfaceStore();
+    store.ingest(demoEnvelope);
+    const root = store.getRootRef("s1");
+    expect(root).toBeDefined();
+    store.ingest({ version: "v1.0", deleteSurface: { surfaceId: "s1" } });
+    expect(store.getRootRef("s1")).toBeUndefined();
+    expect(store.resolveNode("s1", root!)).toBeUndefined();
+  });
+
+  it("deleteSurface blocks buildActionEnvelope data model attachment", () => {
+    const store = createSurfaceStore();
+    store.ingest(demoEnvelope);
+    store.ingest({ version: "v1.0", deleteSurface: { surfaceId: "s1" } });
+    const envelope = store.buildActionEnvelope("s1", {
+      name: "submit",
+      wantResponse: false,
+    });
+    // 已删除 surface 上的 action 不应携带其数据模型
+    expect(envelope.metadata).toBeUndefined();
+  });
+
+  it("getSurface still reports deleted lifecycle after delete", () => {
+    const store = createSurfaceStore();
+    store.ingest(demoEnvelope);
+    store.ingest({ version: "v1.0", deleteSurface: { surfaceId: "s1" } });
+    // 状态查询能力保留（与 engine.ts 的设计一致），仅渲染读取路径被屏蔽
+    expect(store.getSurface("s1")?.lifecycle).toBe("deleted");
+  });
+
   it("is robust to malformed / unknown envelopes (no throw)", () => {
     const store = createSurfaceStore();
     expect(() => store.ingest({} as ServerEnvelope)).not.toThrow();
