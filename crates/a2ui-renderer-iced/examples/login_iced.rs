@@ -74,7 +74,8 @@ fn main() -> iced::Result {
 
     let username_field: Component = serde_json::from_value(json!({
         "id": "username_field", "component": "TextField",
-        "value": "", "placeholder": "请输入用户名", "variant": "shortText"
+        "value": { "path": "/credentials/username" },
+        "placeholder": "请输入用户名", "variant": "shortText"
     }))
     .unwrap();
 
@@ -86,7 +87,8 @@ fn main() -> iced::Result {
 
     let password_field: Component = serde_json::from_value(json!({
         "id": "password_field", "component": "TextField",
-        "value": "", "placeholder": "请输入密码", "variant": "obscured"
+        "value": { "path": "/credentials/password" },
+        "placeholder": "请输入密码", "variant": "obscured"
     }))
     .unwrap();
 
@@ -152,7 +154,8 @@ fn main() -> iced::Result {
             surface_id: "login".into(),
             catalog_id: "a2ui://catalogs/basic/v1".into(),
             surface_properties: Some(json!({"agentDisplayName": "A2UI Login"})),
-            send_data_model: false,
+            // 开启 sendDataModel：action 信封的 metadata 会附带最新数据模型快照
+            send_data_model: true,
             components: Some(all_components),
             data_model: Some(json!({
                 "login_status": "",
@@ -166,14 +169,25 @@ fn main() -> iced::Result {
     let msg_tx_clone2 = msg_tx.clone();
     std::thread::spawn(move || {
         while let Some(envelope) = action_rx.blocking_recv() {
-            let action = match envelope {
+            // 提取 action 消息与信封级 metadata（sendDataModel:true 时附带）
+            let (action, metadata) = match envelope {
                 ClientEnvelope::V1_0 {
                     message: V1_0ClientMessage::Action(a),
-                    ..
-                } => a,
+                    metadata,
+                } => (a, metadata),
                 _ => continue,
             };
             tracing::info!("收到 action: {:?}", action);
+            if let Some(meta) = &metadata {
+                tracing::info!(
+                    "信封 metadata（surface={} 的最新数据模型，含用户输入）: {}",
+                    meta.surface_id,
+                    meta.data_model
+                        .as_ref()
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "<无>".into())
+                );
+            }
 
             if action.name == "login_submit" {
                 msg_tx_clone2
