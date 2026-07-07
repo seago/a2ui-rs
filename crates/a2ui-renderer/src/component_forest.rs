@@ -591,33 +591,64 @@ impl ComponentForest {
         let mut node = ComponentTreeNode::new(component.clone());
         let props = component.properties();
 
-        // 尝试从 children 属性中获取子组件 ID（数组格式：["id1", "id2"]）
+        // 树边追加顺序约定（与 collect_child_refs 的引用统计对齐）：
+        // children → child → content → trigger → tabs[].child。
+        // 消费端应按 id 匹配而非依赖位置；顺序仅保证确定性。
+
+        // children 属性（数组格式：["id1", "id2"]）
         if let Some(ids) = props.get("children").and_then(|v| v.as_array()) {
             for id_val in ids {
                 if let Some(id_str) = id_val.as_str() {
-                    if let Ok(child_id) = ComponentId::new(id_str) {
-                        if let Some(child_comp) = all.get(&child_id) {
-                            let child_node =
-                                self.build_node_with_depth(child_comp, all, depth + 1, visited)?;
-                            node.children.push(child_node);
-                        }
-                    }
+                    self.append_child_by_id(id_str, all, depth, visited, &mut node)?;
                 }
             }
         }
 
-        // 处理 Button/Card 的 child 属性
+        // Button/Card 的 child 属性
         if let Some(child_str) = props.get("child").and_then(|v| v.as_str()) {
-            if let Ok(child_id) = ComponentId::new(child_str) {
-                if let Some(child_comp) = all.get(&child_id) {
-                    let child_node =
-                        self.build_node_with_depth(child_comp, all, depth + 1, visited)?;
-                    node.children.push(child_node);
+            self.append_child_by_id(child_str, all, depth, visited, &mut node)?;
+        }
+
+        // Modal 的 content/trigger 属性
+        for key in ["content", "trigger"] {
+            if let Some(child_str) = props.get(key).and_then(|v| v.as_str()) {
+                self.append_child_by_id(child_str, all, depth, visited, &mut node)?;
+            }
+        }
+
+        // Tabs 的 tabs[].child 属性（按数组序）
+        if let Some(tabs) = props.get("tabs").and_then(|v| v.as_array()) {
+            for tab in tabs {
+                if let Some(child_str) = tab.get("child").and_then(|v| v.as_str()) {
+                    self.append_child_by_id(child_str, all, depth, visited, &mut node)?;
                 }
             }
         }
 
         Ok(node)
+    }
+
+    /// 按 id 字符串解析并递归构建子节点，追加进 node.children。
+    /// 非法 id 或组件缺失时静默跳过（与既有 children/child 边语义一致）。
+    ///
+    /// 已知限制：模板克隆（clone_and_resolve_subtree_inner）目前只跟随
+    /// children/child 两类边，模板内含 Modal/Tabs 时 content/trigger/
+    /// tabs[].child 引用不会被克隆改写，会指向原模板子组件。
+    fn append_child_by_id(
+        &self,
+        id_str: &str,
+        all: &HashMap<ComponentId, Component>,
+        depth: usize,
+        visited: &mut HashSet<ComponentId>,
+        node: &mut ComponentTreeNode,
+    ) -> RenderResult<()> {
+        if let Ok(child_id) = ComponentId::new(id_str) {
+            if let Some(child_comp) = all.get(&child_id) {
+                let child_node = self.build_node_with_depth(child_comp, all, depth + 1, visited)?;
+                node.children.push(child_node);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -746,6 +777,108 @@ mod tests {
         let tree = forest.build_tree("s1").unwrap();
         assert_eq!(tree.component.id().as_str(), "root");
         assert_eq!(tree.children.len(), 1);
+    }
+
+    #[test]
+    fn build_tree_includes_modal_content_and_trigger() {
+        let mut forest = ComponentForest::new();
+        let modal: Component = serde_json::from_value(
+            serde_json::json!({"component":"Modal","id":"root","content":"body","trigger":"btn"}),
+        )
+        .unwrap();
+        let body = Component::text(
+            ComponentId::new("body").unwrap(),
+            DynamicValue::Literal("modal body".to_string()),
+        );
+        let btn: Component = serde_json::from_value(
+            serde_json::json!({"component":"Button","id":"btn","label":"open"}),
+        )
+        .unwrap();
+        forest.upsert("s1", modal).unwrap();
+        forest.upsert("s1", body).unwrap();
+        forest.upsert("s1", btn).unwrap();
+
+        let tree = forest.build_tree("s1").unwrap();
+        // 顺序约定锁定为 [content, trigger]
+        assert_eq!(tree.children.len(), 2, "content 与 trigger 都应进入组件树");
+        assert_eq!(tree.children[0].component.id().as_str(), "body");
+        assert_eq!(tree.children[1].component.id().as_str(), "btn");
+    }
+
+    #[test]
+    fn build_tree_includes_tabs_children() {
+        let mut forest = ComponentForest::new();
+        let tabs: Component = serde_json::from_value(serde_json::json!({
+            "component":"Tabs","id":"root",
+            "tabs":[{"title":"T1","child":"a"},{"title":"T2","child":"b"}]
+        }))
+        .unwrap();
+        let a = Component::text(
+            ComponentId::new("a").unwrap(),
+            DynamicValue::Literal("tab a".to_string()),
+        );
+        let b = Component::text(
+            ComponentId::new("b").unwrap(),
+            DynamicValue::Literal("tab b".to_string()),
+        );
+        forest.upsert("s1", tabs).unwrap();
+        forest.upsert("s1", a).unwrap();
+        forest.upsert("s1", b).unwrap();
+
+        let tree = forest.build_tree("s1").unwrap();
+        assert_eq!(tree.children.len(), 2, "tabs[].child 应按数组序进入组件树");
+        assert_eq!(tree.children[0].component.id().as_str(), "a");
+        assert_eq!(tree.children[1].component.id().as_str(), "b");
+    }
+
+    #[test]
+    fn build_tree_detects_cycle_via_content() {
+        let mut forest = ComponentForest::new();
+        let root: Component = serde_json::from_value(
+            serde_json::json!({"component":"Column","id":"root","children":["m"]}),
+        )
+        .unwrap();
+        // content 指回祖先 root，构成环——必须报错而非静默丢边/栈溢出
+        let modal: Component = serde_json::from_value(
+            serde_json::json!({"component":"Modal","id":"m","content":"root"}),
+        )
+        .unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", modal).unwrap();
+
+        let err = forest.build_tree("s1").expect_err("content 成环必须报错");
+        assert!(
+            err.to_string().contains("circular"),
+            "expected circular error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn build_tree_modal_content_respects_depth_limit() {
+        let mut forest = ComponentForest::new();
+        // root → m1 → m2 → ... → m50，经 content 边串 51 个节点，超过 MAX_TREE_DEPTH=50
+        let root: Component = serde_json::from_value(
+            serde_json::json!({"component":"Modal","id":"root","content":"m1"}),
+        )
+        .unwrap();
+        forest.upsert("s1", root).unwrap();
+        for i in 1..=50 {
+            let comp: Component = serde_json::from_value(serde_json::json!({
+                "component":"Modal",
+                "id": format!("m{i}"),
+                "content": format!("m{}", i + 1)
+            }))
+            .unwrap();
+            forest.upsert("s1", comp).unwrap();
+        }
+
+        let err = forest
+            .build_tree("s1")
+            .expect_err("content 边链超深必须报 tree_too_deep");
+        assert!(
+            err.to_string().contains("too deep") || err.to_string().contains("depth"),
+            "expected depth error, got: {err}"
+        );
     }
 
     #[test]
