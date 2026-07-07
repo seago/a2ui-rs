@@ -101,6 +101,41 @@ pub fn resolve_f64(dv: &DynamicValue<f64>, binding: Option<&DataBinding>) -> Opt
     }
 }
 
+/// 类型化动态字符串数组求值（规范 DynamicStringList，如 ChoicePicker
+/// 的选中集 `value`）。
+///
+/// 语义同 [`resolve_bool`]：`Literal` 直取；`Path` 经绑定解析且目标必须
+/// 是数组（数组内非字符串项逐项过滤，对齐 `prop_str_list` 对数据的宽容
+/// 惯例）；`FunctionCall` 在 widget 层不求值 → `None`。
+///
+/// # 示例
+///
+/// ```rust
+/// use a2ui_core::component::DynamicValue;
+/// use a2ui_renderer::dynamic_value::resolve_str_list;
+///
+/// let dv = DynamicValue::Literal(vec!["email".to_string()]);
+/// assert_eq!(resolve_str_list(&dv, None), Some(vec!["email".to_string()]));
+/// ```
+pub fn resolve_str_list(
+    dv: &DynamicValue<Vec<String>>,
+    binding: Option<&DataBinding>,
+) -> Option<Vec<String>> {
+    match dv {
+        DynamicValue::Literal(values) => Some(values.clone()),
+        DynamicValue::Path { path } => binding
+            .and_then(|binding| binding.get(path))
+            .and_then(|value| value.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(String::from)
+                    .collect()
+            }),
+        DynamicValue::FunctionCall { .. } => None,
+    }
+}
+
 /// Resolve a string-like component property from literal JSON or A2UI dynamic value objects.
 #[deprecated(
     since = "0.1.0",
@@ -428,6 +463,82 @@ mod tests {
         );
         assert_eq!(
             resolve_f64(
+                &DynamicValue::FunctionCall {
+                    call: "f".into(),
+                    args: json!(null)
+                },
+                Some(&binding)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_str_list_matches_dynamic_triplet_semantics() {
+        let binding = DataBinding::new(DataModel::new(json!({
+            "sel": ["email", "sms"],
+            "mixed": ["a", 3],
+            "notArray": "x"
+        })));
+
+        // Literal 直取
+        assert_eq!(
+            resolve_str_list(&DynamicValue::Literal(vec!["a".to_string()]), None),
+            Some(vec!["a".to_string()])
+        );
+        // Path 命中字符串数组
+        assert_eq!(
+            resolve_str_list(
+                &DynamicValue::Path {
+                    path: "/sel".into()
+                },
+                Some(&binding)
+            ),
+            Some(vec!["email".to_string(), "sms".to_string()])
+        );
+        // Path 命中数组但混入非字符串项：逐项过滤（数据模型侧对齐
+        // prop_str_list 的宽容惯例，与声明侧的整体形态不符不同）
+        assert_eq!(
+            resolve_str_list(
+                &DynamicValue::Path {
+                    path: "/mixed".into()
+                },
+                Some(&binding)
+            ),
+            Some(vec!["a".to_string()])
+        );
+        // Path 指向非数组 → None
+        assert_eq!(
+            resolve_str_list(
+                &DynamicValue::Path {
+                    path: "/notArray".into()
+                },
+                Some(&binding)
+            ),
+            None
+        );
+        // path 未命中 / 无绑定 → None
+        assert_eq!(
+            resolve_str_list(
+                &DynamicValue::Path {
+                    path: "/missing".into()
+                },
+                Some(&binding)
+            ),
+            None
+        );
+        assert_eq!(
+            resolve_str_list(
+                &DynamicValue::Path {
+                    path: "/sel".into()
+                },
+                None
+            ),
+            None
+        );
+        // 函数调用形态在 widget 层不求值（现状无 dispatcher）→ None
+        assert_eq!(
+            resolve_str_list(
                 &DynamicValue::FunctionCall {
                     call: "f".into(),
                     args: json!(null)

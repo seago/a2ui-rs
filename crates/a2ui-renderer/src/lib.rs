@@ -4,6 +4,7 @@
 //! 具体渲染 API 由各平台 crate 实现。
 
 pub mod catalog_registry;
+pub mod choice;
 pub mod component_forest;
 pub mod custom_component;
 pub mod data_binding;
@@ -20,6 +21,7 @@ pub mod style;
 pub mod surface_lru;
 
 pub use catalog_registry::CatalogRegistry;
+pub use choice::toggle_choice;
 pub use component_forest::ComponentForest;
 pub use custom_component::{CustomComponentDef, CustomComponentRegistry};
 pub use data_binding::DataBinding;
@@ -28,7 +30,7 @@ pub use dependency_graph::DependencyGraph;
 pub use dynamic_value::{
     resolve_bool, resolve_dynamic_string_prop, resolve_dynamic_string_prop_with_missing_path,
     resolve_dynamic_string_value, resolve_dynamic_string_value_with_missing_path, resolve_f64,
-    resolve_str, resolve_str_with_missing_path, value_to_display_string,
+    resolve_str, resolve_str_list, resolve_str_with_missing_path, value_to_display_string,
 };
 pub use error::{RenderResult, RendererError};
 pub use function_dispatcher::{CallableFrom, FunctionDispatcher};
