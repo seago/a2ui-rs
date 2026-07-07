@@ -236,9 +236,16 @@ impl TuiRenderer {
 
         match widget {
             RenderableWidget::Paragraph {
-                area, text, style, ..
+                area,
+                text,
+                style,
+                dim,
+                ..
             } => {
                 let mut style = component_style_to_tui(&style);
+                if dim {
+                    style = style.add_modifier(ratatui::style::Modifier::DIM);
+                }
                 if is_focused {
                     style = style.add_modifier(ratatui::style::Modifier::REVERSED);
                 }
@@ -257,10 +264,17 @@ impl TuiRenderer {
                 area,
                 value,
                 placeholder,
+                obscured,
                 ..
             } => {
+                // obscured 是安全语义：值按字符数打码；placeholder 是
+                // 提示文本，保持明文
+                let masked;
                 let display = if value.is_empty() {
                     placeholder.as_str()
+                } else if obscured {
+                    masked = "*".repeat(value.chars().count());
+                    masked.as_str()
                 } else {
                     value.as_str()
                 };
@@ -301,12 +315,7 @@ impl TuiRenderer {
                 variant,
                 ..
             } => {
-                let display = if variant == "primary" {
-                    format!("[ {} ]", label)
-                } else {
-                    format!("< {} >", label)
-                };
-                let p = Paragraph::new(display);
+                let p = Paragraph::new(button_display(&label, &variant));
                 frame.render_widget(p, area);
             }
             RenderableWidget::Card { area, .. } => {
@@ -497,6 +506,16 @@ impl Renderer for TuiRenderer {
         };
         let (envelope, _effects) = self.core.handle_user_event(&event).await?;
         Ok(envelope)
+    }
+}
+
+/// Button 的文本形态：规范 variant 三态（default 尖括号框 / primary
+/// 方括号框 / borderless 纯文本）；枚举外取值按 default 处理
+fn button_display(label: &str, variant: &str) -> String {
+    match variant {
+        "primary" => format!("[ {} ]", label),
+        "borderless" => label.to_string(),
+        _ => format!("< {} >", label),
     }
 }
 
@@ -2127,6 +2146,55 @@ mod tests {
             text.contains("▸( ) SMS"),
             "游标应标记在 SMS 选项前，got: {text}"
         );
+    }
+
+    async fn frame_text(renderer: &mut TuiRenderer) -> String {
+        use ratatui::backend::TestBackend;
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        renderer.render_frame(&mut terminal).await.unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_textfield_obscured_masks_value_in_frame() {
+        // 规范 variant=obscured：密码不得明文回显（TUI 降级为 * 打码）
+        let mut renderer = TuiRenderer::new();
+        let tf: Component = Component::from_json(
+            r#"{"id":"pwd","component":"TextField","label":"pwd","value":"secret","variant":"obscured"}"#,
+        )
+        .unwrap();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![tf]),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+        let text = frame_text(&mut renderer).await;
+        assert!(!text.contains("secret"), "密码明文不得出现，got: {text}");
+        assert!(text.contains("[******]"), "应按字符数打码，got: {text}");
+    }
+
+    #[tokio::test]
+    async fn test_button_borderless_renders_without_frame_chars() {
+        // 规范 variant 三态：default 尖括号框、primary 方括号框、
+        // borderless 纯文本（TUI 能力内降级）
+        assert_eq!(button_display("Go", "default"), "< Go >");
+        assert_eq!(button_display("Go", "primary"), "[ Go ]");
+        assert_eq!(button_display("Go", "borderless"), "Go");
+        // 枚举外取值按 default 处理
+        assert_eq!(button_display("Go", "fancy"), "< Go >");
     }
 
     #[tokio::test]

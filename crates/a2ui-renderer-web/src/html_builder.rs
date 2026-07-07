@@ -76,6 +76,9 @@ pub enum RenderableHtmlWidget {
         id: ComponentId,
         value: String,
         placeholder: String,
+        /// 规范 variant（longText/number/shortText/obscured，默认 shortText）；
+        /// obscured 映射 password 输入（安全语义，必须支持）
+        variant: String,
     },
     /// 选择器组件
     ChoicePicker {
@@ -237,10 +240,21 @@ impl HtmlBuilder {
                 )
             }
             RenderableHtmlWidget::TextField {
-                value, placeholder, ..
+                value,
+                placeholder,
+                variant,
+                ..
             } => {
+                // obscured 是安全语义（密码不得明文回显）；其余 variant
+                // 暂按普通文本框降级
+                let input_type = if variant == "obscured" {
+                    "password"
+                } else {
+                    "text"
+                };
                 format!(
-                    "<input type=\"text\" class=\"a2ui-textfield\" value=\"{}\" placeholder=\"{}\" />",
+                    "<input type=\"{}\" class=\"a2ui-textfield\" value=\"{}\" placeholder=\"{}\" />",
+                    input_type,
                     html_attr(value),
                     html_attr(placeholder)
                 )
@@ -943,10 +957,23 @@ mod tests {
             id: ComponentId::new("tf1").unwrap(),
             value: "Hello".to_string(),
             placeholder: "Enter text".to_string(),
+            variant: "shortText".to_string(),
         });
         assert!(html.contains("type=\"text\""));
         assert!(html.contains("value=\"Hello\""));
         assert!(html.contains("placeholder=\"Enter text\""));
+    }
+
+    #[test]
+    fn test_render_textfield_obscured_uses_password_input() {
+        // 规范 variant=obscured：密码不得明文回显
+        let html = HtmlBuilder.render(&RenderableHtmlWidget::TextField {
+            id: ComponentId::new("pwd").unwrap(),
+            value: "secret".to_string(),
+            placeholder: String::new(),
+            variant: "obscured".to_string(),
+        });
+        assert!(html.contains("type=\"password\""), "got: {html}");
     }
 
     #[test]

@@ -337,6 +337,10 @@ impl WebRenderer {
                     id: component.id().clone(),
                     value,
                     placeholder,
+                    variant: component
+                        .prop_str(prop_keys::VARIANT)
+                        .unwrap_or("shortText")
+                        .to_string(),
                 }
             }
             "ChoicePicker" => RenderableHtmlWidget::ChoicePicker {

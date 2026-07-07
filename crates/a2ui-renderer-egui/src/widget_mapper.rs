@@ -14,6 +14,8 @@ pub enum RenderableGuiWidget {
         id: ComponentId,
         text: String,
         style: ComponentStyle,
+        /// 规范 variant=caption 的弱化小号显示
+        caption: bool,
     },
     Button {
         id: ComponentId,
@@ -162,6 +164,7 @@ impl WidgetMapper {
                     id: component.id().clone(),
                     text,
                     style: ComponentStyle::from_component(component),
+                    caption: component.prop_str(prop_keys::VARIANT) == Some("caption"),
                 }
             }
             "Button" => {
@@ -380,8 +383,17 @@ impl WidgetMapper {
             return;
         }
         match widget {
-            RenderableGuiWidget::Text { id, text, style } => {
-                let rich_text = apply_text_style(egui::RichText::new(text.clone()), style);
+            RenderableGuiWidget::Text {
+                id,
+                text,
+                style,
+                caption,
+            } => {
+                let mut rich_text = apply_text_style(egui::RichText::new(text.clone()), style);
+                if *caption {
+                    // 规范 variant=caption：小号弱化
+                    rich_text = rich_text.small().weak();
+                }
                 let label = egui::Label::new(rich_text).wrap(true);
                 let response = ui.add(label);
                 response_tracker.insert(id.as_str().to_string(), response);
@@ -397,6 +409,10 @@ impl WidgetMapper {
                 let mut button = egui::Button::new(rich_label);
                 if variant == "primary" {
                     button = button.fill(egui::Color32::from_rgb(25, 118, 210));
+                }
+                if variant == "borderless" {
+                    // 规范 borderless：无边框/背景，内容如可点击链接
+                    button = button.frame(false);
                 }
                 let response = ui.add(button);
                 if response.clicked() {
@@ -993,6 +1009,7 @@ mod tests {
                 id: ComponentId::new("leaf").unwrap(),
                 text: "leaf".into(),
                 style: ComponentStyle::default(),
+                caption: false,
             },
         );
 
@@ -1294,6 +1311,29 @@ mod tests {
         assert!(
             matches!(widget, RenderableGuiWidget::Text { ref text, .. } if text == "Hello World")
         );
+    }
+
+    #[test]
+    fn test_map_text_caption_variant_sets_caption_flag() {
+        // 规范 Text variant: caption|body（默认 body）；egui 渲染为小号弱化
+        let mapper = WidgetMapper;
+        let cap: Component = Component::from_json(
+            r#"{"id":"t2","component":"Text","text":"note","variant":"caption"}"#,
+        )
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&cap, &empty_registry(), None);
+        assert!(matches!(
+            widget,
+            RenderableGuiWidget::Text { caption: true, .. }
+        ));
+
+        let body: Component =
+            Component::from_json(r#"{"id":"t3","component":"Text","text":"body"}"#).unwrap();
+        let widget = mapper.map_to_gui_widget(&body, &empty_registry(), None);
+        assert!(matches!(
+            widget,
+            RenderableGuiWidget::Text { caption: false, .. }
+        ));
     }
 
     #[test]

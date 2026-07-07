@@ -67,11 +67,18 @@ fn build_text(
         renderer,
         surface_id,
     );
-    apply_text_style(
-        text(content).shaping(Shaping::Advanced),
-        &ComponentStyle::from_component(&node.component),
-    )
-    .into()
+    let style = ComponentStyle::from_component(&node.component);
+    let mut label = text(content).shaping(Shaping::Advanced);
+    // 规范 variant=caption：小号弱化（显式 style 声明优先）
+    if node.component.prop_str(prop_keys::VARIANT) == Some("caption") {
+        if style.font_size.is_none() {
+            label = label.size(12);
+        }
+        if style.color.is_none() {
+            label = label.color(iced::Color::from_rgb(0.5, 0.5, 0.5));
+        }
+    }
+    apply_text_style(label, &style).into()
 }
 
 fn build_divider() -> iced::Element<'static, Message> {
@@ -209,9 +216,15 @@ fn build_button(
     let id = node.component.id().clone();
     let label = resolve_button_label(node, renderer, surface_id);
 
-    iced::widget::button(text(label).shaping(Shaping::Advanced))
-        .on_press(Message::UserAction(UserAction::Click { component_id: id }))
-        .into()
+    let mut button = iced::widget::button(text(label).shaping(Shaping::Advanced))
+        .on_press(Message::UserAction(UserAction::Click { component_id: id }));
+    // 规范 variant 三态：primary 主色调用、borderless 无边框；default 保持
+    match node.component.prop_str(prop_keys::VARIANT) {
+        Some("primary") => button = button.style(iced::widget::button::primary),
+        Some("borderless") => button = button.style(iced::widget::button::text),
+        _ => {}
+    }
+    button.into()
 }
 
 fn build_text_field(
@@ -1202,7 +1215,19 @@ mod tests {
         let surface_id = "s1";
         let types = [
             ("Text", json!({"component":"Text","id":"t","text":"hi"})),
+            (
+                "Text(caption)",
+                json!({"component":"Text","id":"tc","text":"note","variant":"caption"}),
+            ),
             ("Button", json!({"component":"Button","id":"b","child":"t"})),
+            (
+                "Button(primary)",
+                json!({"component":"Button","id":"bp","child":"t","variant":"primary"}),
+            ),
+            (
+                "Button(borderless)",
+                json!({"component":"Button","id":"bb","child":"t","variant":"borderless"}),
+            ),
             (
                 "Column",
                 json!({"component":"Column","id":"col","children":[]}),

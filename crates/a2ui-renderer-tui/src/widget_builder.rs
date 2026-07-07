@@ -16,6 +16,8 @@ pub enum RenderableWidget {
         area: Rect,
         text: String,
         style: ComponentStyle,
+        /// Text variant=caption 的弱化显示（TUI 无字号，降级为 DIM）
+        dim: bool,
     },
     Block {
         id: ComponentId,
@@ -32,6 +34,8 @@ pub enum RenderableWidget {
         area: Rect,
         value: String,
         placeholder: String,
+        /// 规范 variant=obscured（密码打码，安全语义）
+        obscured: bool,
     },
     CheckBox {
         id: ComponentId,
@@ -418,6 +422,7 @@ impl<'a> WidgetBuilder<'a> {
                     area,
                     value,
                     placeholder,
+                    obscured: component.prop_str(prop_keys::VARIANT) == Some("obscured"),
                 }
             }
             "CheckBox" => {
@@ -466,6 +471,8 @@ impl<'a> WidgetBuilder<'a> {
                             area,
                             text,
                             style: ComponentStyle::from_component(component),
+                            dim: ctype == "Text"
+                                && component.prop_str(prop_keys::VARIANT) == Some("caption"),
                         }
                     }
                 }
@@ -1126,6 +1133,27 @@ mod tests {
         let w = widgets.iter().find(|w| w.id().as_str() == "ic");
         assert!(w.is_some(), "Icon widget should exist");
         assert!(matches!(w.unwrap(), RenderableWidget::Icon { .. }));
+    }
+
+    #[test]
+    fn test_text_caption_variant_maps_to_dim_paragraph() {
+        // 规范 Text variant: caption|body（默认 body）；TUI 降级为 DIM 弱化
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::empty());
+        let cap: Component = Component::from_json(
+            r#"{"id":"root","component":"Text","text":"note","variant":"caption"}"#,
+        )
+        .unwrap();
+        forest.upsert("s1", cap).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        match widgets.iter().find(|w| w.id().as_str() == "root") {
+            Some(RenderableWidget::Paragraph { dim, .. }) => {
+                assert!(*dim, "caption 应弱化显示")
+            }
+            other => panic!("expected Paragraph, got {:?}", other),
+        }
     }
 
     #[test]
