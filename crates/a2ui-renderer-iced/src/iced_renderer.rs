@@ -273,7 +273,7 @@ mod tests {
         // 规范：被动输入变更不触发网络请求，只写回数据模型；
         // 写回后受影响组件的动态字符串缓存被失效 + surface 标脏
         let mut renderer = IcedRenderer::new();
-        let field: Component = serde_json::from_value(json!({
+        let field: Component = Component::from_value(json!({
             "component":"TextField","id":"root","value":{"path":"/form/username"}
         }))
         .unwrap();
@@ -329,15 +329,15 @@ mod tests {
         // 旧断言（合成 check_toggle/slider_change 消息）→ 新断言：
         // 无消息 + 写回 + 标脏
         let mut renderer = IcedRenderer::new();
-        let root: Component = serde_json::from_value(json!({
+        let root: Component = Component::from_value(json!({
             "component":"Column","id":"root","children":["cb","sl"]
         }))
         .unwrap();
-        let cb: Component = serde_json::from_value(json!({
+        let cb: Component = Component::from_value(json!({
             "component":"CheckBox","id":"cb","value":{"path":"/agree"}
         }))
         .unwrap();
-        let sl: Component = serde_json::from_value(json!({
+        let sl: Component = Component::from_value(json!({
             "component":"Slider","id":"sl","value":{"path":"/volume"},"min":0,"max":100
         }))
         .unwrap();
@@ -424,7 +424,7 @@ mod tests {
     #[tokio::test]
     async fn test_iced_click_with_declared_action_emits_spec_envelope() {
         let mut renderer = IcedRenderer::new();
-        let btn: Component = serde_json::from_value(json!({
+        let btn: Component = Component::from_value(json!({
             "id":"btn","component":"Button","child":"lbl",
             "action":{"event":{"name":"submit"}}
         }))
@@ -478,13 +478,7 @@ mod tests {
     #[test]
     fn test_register_catalog() {
         let mut renderer = IcedRenderer::new();
-        let catalog: a2ui_core::Catalog = serde_json::from_value(json!({
-            "catalogId": "basic",
-            "instructions": "test",
-            "components": {},
-            "functions": {}
-        }))
-        .unwrap();
+        let catalog = a2ui_core::Catalog::new("basic").with_instructions("test");
         assert!(renderer.register_catalog(catalog).is_ok());
     }
 
@@ -511,7 +505,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
             })
             .await;
         assert!(result.is_ok());
@@ -533,7 +527,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"data": "old"})),
+                data_model: Some(json!({"data": "old"})),
             })
             .await
             .unwrap();
@@ -591,7 +585,7 @@ mod tests {
         let third = renderer.cached_tree("s1").unwrap();
         assert_eq!(
             third.component.properties().get("text"),
-            Some(&serde_json::json!("new"))
+            Some(&json!("new"))
         );
 
         let profile = renderer.profile_snapshot();
@@ -616,7 +610,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![root]),
-                data_model: Some(serde_json::json!({"title": "old"})),
+                data_model: Some(json!({"title": "old"})),
             })
             .await
             .unwrap();
@@ -636,7 +630,7 @@ mod tests {
             .update_data_model(UpdateDataModel {
                 surface_id: "s1".into(),
                 path: Some("/title".into()),
-                value: Some(serde_json::json!("new")),
+                value: Some(json!("new")),
             })
             .await
             .unwrap();
@@ -662,7 +656,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![root]),
-                data_model: Some(serde_json::json!({"old": "before", "new": "after"})),
+                data_model: Some(json!({"old": "before", "new": "after"})),
             })
             .await
             .unwrap();

@@ -264,7 +264,7 @@ pub fn subscription(app: &IcedApp) -> iced::Subscription<Message> {
 mod tests {
     use super::*;
     use a2ui_core::message::server_to_client::CreateSurface;
-    use serde_json::json;
+    use a2ui_core::prelude::json;
 
     #[test]
     fn test_iced_app_new() {

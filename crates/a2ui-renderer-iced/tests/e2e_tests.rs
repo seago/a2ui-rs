@@ -1,8 +1,8 @@
 use a2ui_core::message::server_to_client::CreateSurface;
+use a2ui_core::prelude::json;
 use a2ui_core::prelude::*;
 use a2ui_renderer::Renderer;
 use a2ui_renderer_iced::IcedRenderer;
-use serde_json::json;
 
 #[test]
 fn test_iced_full_surface_lifecycle() {
@@ -56,7 +56,7 @@ fn test_iced_widget_mapper_all_types() {
     ];
 
     for (_name, json_val) in &types {
-        let comp: Component = serde_json::from_value(json_val.clone()).unwrap();
+        let comp: Component = Component::from_value(json_val.clone()).unwrap();
         let node = a2ui_renderer::component_forest::ComponentTreeNode::new(comp);
         let _el = widget_mapper::build_element_tree(&node, &renderer, "s1");
     }
@@ -90,13 +90,13 @@ fn test_iced_widget_mapper_dynamic_form_controls() {
     }))
     .unwrap();
 
-    let root: Component = serde_json::from_value(json!({
+    let root: Component = Component::from_value(json!({
         "component": "Column",
         "id": "root",
         "children": ["username", "remember", "volume"]
     }))
     .unwrap();
-    let username: Component = serde_json::from_value(json!({
+    let username: Component = Component::from_value(json!({
         "component": "TextField",
         "id": "username",
         "value": {"path": "/form/username"},
@@ -104,14 +104,14 @@ fn test_iced_widget_mapper_dynamic_form_controls() {
         "variant": "shortText"
     }))
     .unwrap();
-    let remember: Component = serde_json::from_value(json!({
+    let remember: Component = Component::from_value(json!({
         "component": "CheckBox",
         "id": "remember",
         "value": {"path": "/form/remember"},
         "label": "记住密码"
     }))
     .unwrap();
-    let volume: Component = serde_json::from_value(json!({
+    let volume: Component = Component::from_value(json!({
         "component": "Slider",
         "id": "volume",
         "value": {"path": "/form/volume"},

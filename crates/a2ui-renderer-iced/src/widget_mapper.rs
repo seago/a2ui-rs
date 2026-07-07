@@ -1,8 +1,11 @@
 use crate::app::{Message, UserAction};
 use crate::iced_renderer::{DynamicStringCacheKey, IcedRenderer};
+use a2ui_core::component::prop_keys;
+use a2ui_core::prelude::Component;
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
-    resolve_dynamic_string_prop_with_missing_path, ComponentStyle, DataBinding, StyleColor,
+    resolve_bool, resolve_f64, resolve_str_with_missing_path, ComponentStyle, DataBinding,
+    StyleColor,
 };
 use iced::widget::text;
 use iced::widget::text::Shaping;
@@ -57,18 +60,16 @@ fn build_text(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let props = node.component.properties();
     let content = resolve_dynamic_string(
-        props,
-        node.component.id(),
-        "text",
+        &node.component,
+        prop_keys::TEXT,
         "[Text]",
         renderer,
         surface_id,
     );
     apply_text_style(
         text(content).shaping(Shaping::Advanced),
-        &ComponentStyle::from_component_props(props),
+        &ComponentStyle::from_component(&node.component),
     )
     .into()
 }
@@ -82,16 +83,8 @@ fn build_icon(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let props = node.component.properties();
-    let name = resolve_dynamic_string(
-        props,
-        node.component.id(),
-        "name",
-        "?",
-        renderer,
-        surface_id,
-    );
-    let style = ComponentStyle::from_component_props(props);
+    let name = resolve_dynamic_string(&node.component, prop_keys::NAME, "?", renderer, surface_id);
+    let style = ComponentStyle::from_component(&node.component);
     let label = text(name)
         .size(style.font_size.unwrap_or(24.0))
         .shaping(Shaping::Advanced);
@@ -104,15 +97,8 @@ fn build_placeholder(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let props = node.component.properties();
-    let label = resolve_dynamic_string(
-        props,
-        node.component.id(),
-        "url",
-        ctype,
-        renderer,
-        surface_id,
-    );
+    let label =
+        resolve_dynamic_string(&node.component, prop_keys::URL, ctype, renderer, surface_id);
     text(format!("[{}: {}]", ctype, label))
         .shaping(Shaping::Advanced)
         .color(iced::Color::from_rgb(0.6, 0.6, 0.6))
@@ -131,7 +117,7 @@ fn build_column(
         .iter()
         .map(|child| build_element_tree(child, renderer, surface_id))
         .collect();
-    let style = ComponentStyle::from_component_props(node.component.properties());
+    let style = ComponentStyle::from_component(&node.component);
     iced::widget::column(children)
         .spacing(style.spacing.map(|spacing| spacing.y).unwrap_or(8.0))
         .width(iced::Length::Fill)
@@ -148,7 +134,7 @@ fn build_row(
         .iter()
         .map(|child| build_element_tree(child, renderer, surface_id))
         .collect();
-    let style = ComponentStyle::from_component_props(node.component.properties());
+    let style = ComponentStyle::from_component(&node.component);
     iced::widget::row(children)
         .spacing(style.spacing.map(|spacing| spacing.x).unwrap_or(8.0))
         .width(iced::Length::Fill)
@@ -162,7 +148,7 @@ fn build_card(
 ) -> iced::Element<'static, Message> {
     if let Some(child) = node.children.first() {
         let child_el = build_element_tree(child, renderer, surface_id);
-        let style = ComponentStyle::from_component_props(node.component.properties());
+        let style = ComponentStyle::from_component(&node.component);
         let mut container = iced::widget::container(child_el)
             .padding(style.padding.unwrap_or(16.0))
             .width(iced::Length::Fill);
@@ -196,7 +182,7 @@ fn build_list(
         .iter()
         .map(|child| build_element_tree(child, renderer, surface_id))
         .collect();
-    let style = ComponentStyle::from_component_props(node.component.properties());
+    let style = ComponentStyle::from_component(&node.component);
     let content = iced::widget::column(children)
         .spacing(style.spacing.map(|spacing| spacing.y).unwrap_or(4.0))
         .width(iced::Length::Fill)
@@ -233,27 +219,19 @@ fn build_text_field(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let props = node.component.properties();
     let id = node.component.id().clone();
     let id_str = id.as_str().to_string();
     let placeholder = resolve_dynamic_string(
-        props,
-        node.component.id(),
-        "placeholder",
+        &node.component,
+        prop_keys::PLACEHOLDER,
         "",
         renderer,
         surface_id,
     );
-    let initial_value = resolve_dynamic_string(
-        props,
-        node.component.id(),
-        "value",
-        "",
-        renderer,
-        surface_id,
-    );
+    let initial_value =
+        resolve_dynamic_string(&node.component, prop_keys::VALUE, "", renderer, surface_id);
     let is_secure = matches!(
-        props.get("variant").and_then(|v| v.as_str()),
+        node.component.prop_str(prop_keys::VARIANT),
         Some("obscured")
     );
 
@@ -282,23 +260,23 @@ fn build_checkbox(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let props = node.component.properties();
     let id = node.component.id().clone();
     let id_str = id.as_str().to_string();
-    let label = resolve_dynamic_string(
-        props,
-        node.component.id(),
-        "label",
-        "",
-        renderer,
-        surface_id,
-    );
+    let label = resolve_dynamic_string(&node.component, prop_keys::LABEL, "", renderer, surface_id);
     let checked = renderer
         .checkbox_values
         .borrow()
         .get(&id_str)
         .copied()
-        .unwrap_or_else(|| resolve_dynamic_bool(props, "value", false, renderer, surface_id));
+        .unwrap_or_else(|| {
+            resolve_dynamic_bool(
+                &node.component,
+                prop_keys::VALUE,
+                false,
+                renderer,
+                surface_id,
+            )
+        });
 
     iced::widget::checkbox(label, checked)
         .text_shaping(Shaping::Advanced)
@@ -316,18 +294,18 @@ fn build_slider(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let props = node.component.properties();
     let id = node.component.id().clone();
     let id_str = id.as_str().to_string();
-    let initial_value = resolve_dynamic_number(props, "value", 0.0, renderer, surface_id);
+    let initial_value =
+        resolve_dynamic_number(&node.component, prop_keys::VALUE, 0.0, renderer, surface_id);
     let value = renderer
         .slider_values
         .borrow()
         .get(&id_str)
         .copied()
         .unwrap_or(initial_value);
-    let min = props.get("min").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let max = props.get("max").and_then(|v| v.as_f64()).unwrap_or(100.0);
+    let min = node.component.prop_f64(prop_keys::MIN).unwrap_or(0.0);
+    let max = node.component.prop_f64(prop_keys::MAX).unwrap_or(100.0);
 
     iced::widget::slider(min..=max, value, move |val| {
         Message::UserAction(UserAction::SliderChange {
@@ -345,16 +323,16 @@ fn build_image(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let props = node.component.properties();
-    let url = resolve_dynamic_string(props, node.component.id(), "url", "", renderer, surface_id);
-    let style = ComponentStyle::from_component_props(props);
+    let url = resolve_dynamic_string(&node.component, prop_keys::URL, "", renderer, surface_id);
+    let style = ComponentStyle::from_component(&node.component);
     if url.is_empty() {
         return apply_text_style(text("[Image: no URL]").shaping(Shaping::Advanced), &style).into();
     }
 
     if let Some(handle) = renderer.load_image_handle(&url) {
-        let width = extract_length_prop(props, "width", iced::Length::Shrink);
-        let height = extract_length_prop(props, "height", iced::Length::Shrink);
+        let props = node.component.properties();
+        let width = extract_length_prop(props, prop_keys::WIDTH, iced::Length::Shrink);
+        let height = extract_length_prop(props, prop_keys::HEIGHT, iced::Length::Shrink);
         let image = iced::widget::image(handle)
             .width(width)
             .height(height)
@@ -396,7 +374,7 @@ fn select_child_by_prop<'a>(
     node: &'a ComponentTreeNode,
     prop_key: &str,
 ) -> Option<&'a ComponentTreeNode> {
-    let target = node.component.properties().get(prop_key)?.as_str()?;
+    let target = node.component.prop_str(prop_key)?.to_string();
     node.children
         .iter()
         .find(|c| c.component.id().as_str() == target)
@@ -404,11 +382,9 @@ fn select_child_by_prop<'a>(
 
 /// 按 tabs\[index\].child 的组件 id 在 node.children 中查找对应子节点。
 fn select_tab_child(node: &ComponentTreeNode, index: usize) -> Option<&ComponentTreeNode> {
-    let tabs = node.component.properties().get("tabs")?.as_array()?;
-    let target = tabs.get(index)?.get("child")?.as_str()?;
-    node.children
-        .iter()
-        .find(|c| c.component.id().as_str() == target)
+    let tabs = node.component.tabs_decl()?;
+    let target = tabs.into_iter().nth(index)?.child;
+    node.children.iter().find(|c| c.component.id() == &target)
 }
 
 fn build_tabs(
@@ -419,14 +395,8 @@ fn build_tabs(
     // 用简单的按钮行 + 激活（第 0 个）tab 内容近似实现
     let tab_labels: Vec<String> = node
         .component
-        .properties()
-        .get("tabs")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|tab| tab.get("title").and_then(|t| t.as_str()).map(String::from))
-                .collect()
-        })
+        .tabs_decl()
+        .map(|tabs| tabs.into_iter().map(|tab| tab.title).collect())
         .unwrap_or_default();
 
     let tab_buttons: Vec<iced::Element<'static, Message>> = tab_labels
@@ -482,21 +452,15 @@ fn build_choice_picker(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let props = node.component.properties();
-    let options: Vec<String> = props
-        .get("options")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|o| o.as_str().map(String::from))
-                .collect()
-        })
+    let options: Vec<String> = node
+        .component
+        .prop_str_list(prop_keys::OPTIONS)
+        .map(|list| list.into_iter().map(String::from).collect())
         .unwrap_or_default();
 
     let label = resolve_dynamic_string(
-        props,
-        node.component.id(),
-        "label",
+        &node.component,
+        prop_keys::LABEL,
         "选择:",
         renderer,
         surface_id,
@@ -519,11 +483,9 @@ fn build_datetime_input(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let props = node.component.properties();
     let label = resolve_dynamic_string(
-        props,
-        node.component.id(),
-        "label",
+        &node.component,
+        prop_keys::LABEL,
         "[DateTimeInput]",
         renderer,
         surface_id,
@@ -538,8 +500,7 @@ fn binding_for<'a>(renderer: &'a IcedRenderer, surface_id: &str) -> Option<&'a D
 }
 
 fn resolve_dynamic_string(
-    props: &serde_json::Value,
-    component_id: &a2ui_core::prelude::ComponentId,
+    component: &Component,
     key: &str,
     default: &str,
     renderer: &IcedRenderer,
@@ -547,7 +508,7 @@ fn resolve_dynamic_string(
 ) -> String {
     let cache_key = DynamicStringCacheKey {
         surface_id: surface_id.to_string(),
-        component_id: component_id.as_str().to_string(),
+        component_id: component.id().as_str().to_string(),
         prop: key.to_string(),
     };
 
@@ -561,13 +522,12 @@ fn resolve_dynamic_string(
         return cached;
     }
 
-    let resolved = resolve_dynamic_string_prop_with_missing_path(
-        props,
-        key,
-        binding_for(renderer, surface_id),
-        default,
-        |path| format!("{{{}…}}", path),
-    );
+    let resolved = match component.prop_dynamic_value(key) {
+        Some(dv) => resolve_str_with_missing_path(&dv, binding_for(renderer, surface_id), |path| {
+            format!("{{{}…}}", path)
+        }),
+        None => default.to_string(),
+    };
     renderer
         .dynamic_string_cache
         .borrow_mut()
@@ -577,69 +537,39 @@ fn resolve_dynamic_string(
 }
 
 fn resolve_dynamic_bool(
-    props: &serde_json::Value,
+    component: &Component,
     key: &str,
     default: bool,
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> bool {
-    let Some(value) = props.get(key) else {
-        return default;
-    };
-    if let Some(value) = value.as_bool() {
-        return value;
-    }
-    let Some(path) = value
-        .as_object()
-        .and_then(|obj| obj.get("path"))
-        .and_then(|v| v.as_str())
-    else {
-        return default;
-    };
-    binding_for(renderer, surface_id)
-        .and_then(|binding| binding.get(path))
-        .and_then(|resolved| resolved.as_bool())
+    component
+        .prop_dynamic_bool(key)
+        .and_then(|dv| resolve_bool(&dv, binding_for(renderer, surface_id)))
         .unwrap_or(default)
 }
 
 fn resolve_dynamic_number(
-    props: &serde_json::Value,
+    component: &Component,
     key: &str,
     default: f64,
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> f64 {
-    let Some(value) = props.get(key) else {
-        return default;
-    };
-    if let Some(value) = value.as_f64() {
-        return value;
-    }
-    let Some(path) = value
-        .as_object()
-        .and_then(|obj| obj.get("path"))
-        .and_then(|v| v.as_str())
-    else {
-        return default;
-    };
-    binding_for(renderer, surface_id)
-        .and_then(|binding| binding.get(path))
-        .and_then(|resolved| resolved.as_f64())
+    component
+        .prop_dynamic_f64(key)
+        .and_then(|dv| resolve_f64(&dv, binding_for(renderer, surface_id)))
         .unwrap_or(default)
 }
 
-fn extract_length_prop(
-    props: &serde_json::Value,
-    key: &str,
-    default: iced::Length,
-) -> iced::Length {
+fn extract_length_prop(props: &a2ui_core::Value, key: &str, default: iced::Length) -> iced::Length {
     match props.get(key) {
-        Some(serde_json::Value::Number(n)) => n
+        Some(a2ui_core::Value::Number(n)) => n
             .as_f64()
             .map(|value| iced::Length::Fixed(value as f32))
             .unwrap_or(default),
-        Some(serde_json::Value::String(s)) if s == "fill" => iced::Length::Fill,
-        Some(serde_json::Value::String(s)) if s == "shrink" => iced::Length::Shrink,
+        Some(a2ui_core::Value::String(s)) if s == "fill" => iced::Length::Fill,
+        Some(a2ui_core::Value::String(s)) if s == "shrink" => iced::Length::Shrink,
         _ => default,
     }
 }
@@ -666,10 +596,9 @@ fn resolve_button_label(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> String {
-    let props = node.component.properties();
-    if props.get("text").is_some() {
+    if node.component.properties().get(prop_keys::TEXT).is_some() {
         let label =
-            resolve_dynamic_string(props, node.component.id(), "text", "", renderer, surface_id);
+            resolve_dynamic_string(&node.component, prop_keys::TEXT, "", renderer, surface_id);
         if !label.is_empty() {
             return label;
         }
@@ -678,14 +607,8 @@ fn resolve_button_label(
     // 回退到 child Text 组件
     for child in &node.children {
         if child.component.component_type() == "Text" {
-            let child_text = resolve_dynamic_string(
-                child.component.properties(),
-                child.component.id(),
-                "text",
-                "",
-                renderer,
-                surface_id,
-            );
+            let child_text =
+                resolve_dynamic_string(&child.component, prop_keys::TEXT, "", renderer, surface_id);
             if !child_text.is_empty() {
                 return child_text;
             }
@@ -700,17 +623,17 @@ mod tests {
     use super::*;
     use a2ui_core::component::component::Component;
     use a2ui_core::message::server_to_client::CreateSurface;
+    use a2ui_core::prelude::json;
     use a2ui_core::ComponentId;
-    use serde_json::json;
 
-    fn tree_node(json: serde_json::Value) -> ComponentTreeNode {
-        ComponentTreeNode::new(serde_json::from_value(json).unwrap())
+    fn tree_node(json: a2ui_core::Value) -> ComponentTreeNode {
+        ComponentTreeNode::new(Component::from_value(json).unwrap())
     }
 
     /// 经核心创建带数据模型的 surface（pub 字段已收敛为 core 访问器，
     /// 测试不再直接拼装 data_bindings）；带一个占位根组件以满足
     /// 核心 createSurface 流水线（空 forest 无法展开模板）
-    fn renderer_with_binding(surface_id: &str, data_model: serde_json::Value) -> IcedRenderer {
+    fn renderer_with_binding(surface_id: &str, data_model: a2ui_core::Value) -> IcedRenderer {
         let mut renderer = IcedRenderer::new();
         let root = Component::text(
             ComponentId::new("surface_root").unwrap(),
@@ -773,7 +696,7 @@ mod tests {
         let surface_id = "s1";
         let renderer = renderer_with_binding(surface_id, json!({"label": "Click Me"}));
 
-        let comp: Component = serde_json::from_value(json!({
+        let comp: Component = Component::from_value(json!({
             "component": "Button",
             "id": "btn",
             "text": {"path": "/label"}
@@ -801,53 +724,54 @@ mod tests {
             }),
         );
 
-        let text_id = ComponentId::new("title").unwrap();
-        let icon_id = ComponentId::new("icon").unwrap();
-        let checkbox_id = ComponentId::new("remember").unwrap();
-        let field_id = ComponentId::new("field").unwrap();
-        let missing_id = ComponentId::new("missing").unwrap();
-
-        let title = json!({"text": {"path": "/title"}});
+        let title = Component::from_value(json!({
+            "component": "Text", "id": "title", "text": {"path": "/title"}
+        }))
+        .unwrap();
         assert_eq!(
-            resolve_dynamic_string(&title, &text_id, "text", "[Text]", &renderer, surface_id),
+            resolve_dynamic_string(&title, "text", "[Text]", &renderer, surface_id),
             "Welcome"
         );
 
-        let icon = json!({"name": {"path": "/icon"}});
+        let icon = Component::from_value(json!({
+            "component": "Icon", "id": "icon", "name": {"path": "/icon"}
+        }))
+        .unwrap();
         assert_eq!(
-            resolve_dynamic_string(&icon, &icon_id, "name", "?", &renderer, surface_id),
+            resolve_dynamic_string(&icon, "name", "?", &renderer, surface_id),
             "star"
         );
 
-        let checkbox = json!({"label": {"path": "/remember"}});
+        let checkbox = Component::from_value(json!({
+            "component": "CheckBox", "id": "remember", "label": {"path": "/remember"}
+        }))
+        .unwrap();
         assert_eq!(
-            resolve_dynamic_string(&checkbox, &checkbox_id, "label", "", &renderer, surface_id),
+            resolve_dynamic_string(&checkbox, "label", "", &renderer, surface_id),
             "记住密码"
         );
 
-        let text_field = json!({
+        let text_field = Component::from_value(json!({
+            "component": "TextField", "id": "field",
             "value": {"path": "/form/value"},
             "placeholder": {"path": "/form/placeholder"}
-        });
+        }))
+        .unwrap();
         assert_eq!(
-            resolve_dynamic_string(&text_field, &field_id, "value", "", &renderer, surface_id),
+            resolve_dynamic_string(&text_field, "value", "", &renderer, surface_id),
             "Alice"
         );
         assert_eq!(
-            resolve_dynamic_string(
-                &text_field,
-                &field_id,
-                "placeholder",
-                "",
-                &renderer,
-                surface_id
-            ),
+            resolve_dynamic_string(&text_field, "placeholder", "", &renderer, surface_id),
             "请输入用户名"
         );
 
-        let missing = json!({"text": {"path": "/missing"}});
+        let missing = Component::from_value(json!({
+            "component": "Text", "id": "missing", "text": {"path": "/missing"}
+        }))
+        .unwrap();
         assert_eq!(
-            resolve_dynamic_string(&missing, &missing_id, "text", "", &renderer, surface_id),
+            resolve_dynamic_string(&missing, "text", "", &renderer, surface_id),
             "{/missing…}"
         );
     }
@@ -856,15 +780,17 @@ mod tests {
     fn test_dynamic_string_cache_profiles_hits_and_misses() {
         let surface_id = "s1";
         let renderer = renderer_with_binding(surface_id, json!({"title": "Welcome"}));
-        let component_id = ComponentId::new("title").unwrap();
-        let props = json!({"text": {"path": "/title"}});
+        let component = Component::from_value(json!({
+            "component": "Text", "id": "title", "text": {"path": "/title"}
+        }))
+        .unwrap();
 
         assert_eq!(
-            resolve_dynamic_string(&props, &component_id, "text", "", &renderer, surface_id),
+            resolve_dynamic_string(&component, "text", "", &renderer, surface_id),
             "Welcome"
         );
         assert_eq!(
-            resolve_dynamic_string(&props, &component_id, "text", "", &renderer, surface_id),
+            resolve_dynamic_string(&component, "text", "", &renderer, surface_id),
             "Welcome"
         );
 
@@ -884,18 +810,20 @@ mod tests {
             }),
         );
 
-        let checkbox_props = json!({"value": {"path": "/remember"}});
+        let checkbox = Component::from_value(json!({
+            "component": "CheckBox", "id": "cb", "value": {"path": "/remember"}
+        }))
+        .unwrap();
         assert!(resolve_dynamic_bool(
-            &checkbox_props,
-            "value",
-            false,
-            &renderer,
-            surface_id
+            &checkbox, "value", false, &renderer, surface_id
         ));
 
-        let slider_props = json!({"value": {"path": "/volume"}});
+        let slider = Component::from_value(json!({
+            "component": "Slider", "id": "sl", "value": {"path": "/volume"}
+        }))
+        .unwrap();
         assert_eq!(
-            resolve_dynamic_number(&slider_props, "value", 0.0, &renderer, surface_id),
+            resolve_dynamic_number(&slider, "value", 0.0, &renderer, surface_id),
             75.0
         );
     }
@@ -906,7 +834,7 @@ mod tests {
         let renderer = renderer_with_binding(surface_id, json!({"child_label": "Child Label"}));
 
         let child = ComponentTreeNode::new(
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "component": "Text",
                 "id": "label",
                 "text": {"path": "/child_label"}
@@ -914,7 +842,7 @@ mod tests {
             .unwrap(),
         );
         let button = ComponentTreeNode::new(
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "component": "Button",
                 "id": "btn",
                 "child": "label"
@@ -942,7 +870,7 @@ mod tests {
             }),
         );
 
-        let username: Component = serde_json::from_value(json!({
+        let username: Component = Component::from_value(json!({
             "component": "TextField",
             "id": "username_field",
             "value": {"path": "/username"},
@@ -950,7 +878,7 @@ mod tests {
             "variant": "shortText"
         }))
         .unwrap();
-        let password: Component = serde_json::from_value(json!({
+        let password: Component = Component::from_value(json!({
             "component": "TextField",
             "id": "password_field",
             "value": {"path": "/password"},
@@ -975,7 +903,7 @@ mod tests {
             .borrow_mut()
             .insert("password_field".to_string(), "New Secret".to_string());
 
-        let username: Component = serde_json::from_value(json!({
+        let username: Component = Component::from_value(json!({
             "component": "TextField",
             "id": "username_field",
             "value": {"path": "/username"},
@@ -983,7 +911,7 @@ mod tests {
             "variant": "shortText"
         }))
         .unwrap();
-        let password: Component = serde_json::from_value(json!({
+        let password: Component = Component::from_value(json!({
             "component": "TextField",
             "id": "password_field",
             "value": {"path": "/password"},
@@ -1029,7 +957,7 @@ mod tests {
         });
 
         let text_node = ComponentTreeNode::new(
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "component": "Text",
                 "id": "styled_text",
                 "text": "Styled",
@@ -1038,7 +966,7 @@ mod tests {
             .unwrap(),
         );
         let icon_node = ComponentTreeNode::new(
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "component": "Icon",
                 "id": "styled_icon",
                 "name": "star",
@@ -1047,7 +975,7 @@ mod tests {
             .unwrap(),
         );
         let row_node = ComponentTreeNode::new(
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "component": "Row",
                 "id": "styled_row",
                 "children": ["styled_text", "styled_icon"],
@@ -1057,7 +985,7 @@ mod tests {
         )
         .with_children(vec![text_node, icon_node]);
         let image_node = ComponentTreeNode::new(
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "component": "Image",
                 "id": "styled_image",
                 "url": image_url,
@@ -1068,7 +996,7 @@ mod tests {
             .unwrap(),
         );
         let card_node = ComponentTreeNode::new(
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "component": "Card",
                 "id": "styled_card",
                 "child": "styled_row",
@@ -1078,7 +1006,7 @@ mod tests {
         )
         .with_children(vec![row_node]);
         let column_node = ComponentTreeNode::new(
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "component": "Column",
                 "id": "styled_column",
                 "children": ["styled_card", "styled_image"],
@@ -1088,7 +1016,7 @@ mod tests {
         )
         .with_children(vec![card_node, image_node]);
         let list_node = ComponentTreeNode::new(
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "component": "List",
                 "id": "styled_list",
                 "children": ["styled_column"],
@@ -1128,7 +1056,7 @@ mod tests {
             .borrow_mut()
             .insert("password_field".to_string(), "secret".to_string());
 
-        let username: Component = serde_json::from_value(json!({
+        let username: Component = Component::from_value(json!({
             "component": "TextField",
             "id": "username_field",
             "value": "",
@@ -1136,7 +1064,7 @@ mod tests {
             "variant": "shortText"
         }))
         .unwrap();
-        let password: Component = serde_json::from_value(json!({
+        let password: Component = Component::from_value(json!({
             "component": "TextField",
             "id": "password_field",
             "value": "",
@@ -1170,7 +1098,7 @@ mod tests {
             .borrow_mut()
             .insert("remember_cb".to_string(), true);
 
-        let checkbox: Component = serde_json::from_value(json!({
+        let checkbox: Component = Component::from_value(json!({
             "component": "CheckBox",
             "id": "remember_cb",
             "value": false,
@@ -1194,7 +1122,7 @@ mod tests {
             .borrow_mut()
             .insert("volume_slider".to_string(), 75.0);
 
-        let slider: Component = serde_json::from_value(json!({
+        let slider: Component = Component::from_value(json!({
             "component": "Slider",
             "id": "volume_slider",
             "value": 10.0,
@@ -1260,7 +1188,7 @@ mod tests {
         ];
 
         for (_name, json_val) in &types {
-            let comp: Component = serde_json::from_value(json_val.clone()).unwrap();
+            let comp: Component = Component::from_value(json_val.clone()).unwrap();
             let node = ComponentTreeNode::new(comp);
             // 不应 panic
             let _el = build_element_tree(&node, &renderer, surface_id);

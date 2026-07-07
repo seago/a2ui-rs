@@ -3,11 +3,11 @@
 //! 创建一个带 Text 组件的 Surface 并在桌面窗口中渲染
 
 use a2ui_core::message::server_to_client::CreateSurface;
+use a2ui_core::prelude::json;
 use a2ui_core::prelude::*;
 use a2ui_core::ServerEnvelope;
 use a2ui_renderer_iced::app::{self, IcedApp};
 use a2ui_renderer_iced::{load_cjk_font, IcedRenderer};
-use serde_json::json;
 
 fn main() -> iced::Result {
     tracing_subscriber::fmt::init();
@@ -24,13 +24,7 @@ fn main() -> iced::Result {
     let mut renderer = IcedRenderer::new();
     renderer.register_function("echo", a2ui_renderer::CallableFrom::ClientOrRemote);
 
-    let catalog: a2ui_core::Catalog = serde_json::from_value(json!({
-        "catalogId": "basic",
-        "instructions": "Basic catalog",
-        "components": {},
-        "functions": {}
-    }))
-    .unwrap();
+    let catalog = a2ui_core::Catalog::new("basic").with_instructions("Basic catalog");
     renderer.register_catalog(catalog).ok();
 
     let (msg_tx, msg_rx) = IcedApp::create_channel();

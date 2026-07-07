@@ -5,11 +5,11 @@
 //! 运行：`cargo run --example restaurant_iced -p a2ui-renderer-iced`
 
 use a2ui_core::message::server_to_client::CreateSurface;
+use a2ui_core::prelude::json;
 use a2ui_core::prelude::*;
 use a2ui_core::ServerEnvelope;
 use a2ui_renderer_iced::app::{self, IcedApp};
 use a2ui_renderer_iced::{load_cjk_font, IcedRenderer};
-use serde_json::json;
 
 const HEADER_HEIGHT: u16 = 112;
 
@@ -27,13 +27,7 @@ fn main() -> iced::Result {
 
     let mut renderer = IcedRenderer::new();
 
-    let catalog: a2ui_core::Catalog = serde_json::from_value(json!({
-        "catalogId": "basic",
-        "instructions": "Basic catalog",
-        "components": {},
-        "functions": {}
-    }))
-    .unwrap();
+    let catalog = a2ui_core::Catalog::new("basic").with_instructions("Basic catalog");
     renderer.register_catalog(catalog).ok();
 
     let (msg_tx, msg_rx) = IcedApp::create_channel();
@@ -131,7 +125,7 @@ fn main() -> iced::Result {
             },
         );
 
-        let card_image: Component = serde_json::from_value(json!({
+        let card_image: Component = Component::from_value(json!({
             "component": "Image",
             "id": "card_image",
             "url": {"path": "imageUrl"},
@@ -140,7 +134,7 @@ fn main() -> iced::Result {
         }))
         .unwrap();
 
-        let card_body: Component = serde_json::from_value(json!({
+        let card_body: Component = Component::from_value(json!({
             "component": "Column",
             "id": "card_body",
             "children": [
@@ -154,14 +148,14 @@ fn main() -> iced::Result {
         }))
         .unwrap();
 
-        let card_template: Component = serde_json::from_value(json!({
+        let card_template: Component = Component::from_value(json!({
             "component": "Card",
             "id": "card_template",
             "child": "card_body"
         }))
         .unwrap();
 
-        let list: Component = serde_json::from_value(json!({
+        let list: Component = Component::from_value(json!({
             "component": "List",
             "id": "restaurant_list",
             "children": {
@@ -171,27 +165,27 @@ fn main() -> iced::Result {
         }))
         .unwrap();
 
-        let root: Component = serde_json::from_value(json!({
+        let root: Component = Component::from_value(json!({
             "component": "Column",
             "id": "root",
             "children": ["restaurant_list"]
         }))
         .unwrap();
 
-        let header: Component = serde_json::from_value(json!({
+        let header: Component = Component::from_value(json!({
             "component": "Card",
             "id": "header_card",
             "child": "header_body"
         }))
         .unwrap();
 
-        let header_divider: Component = serde_json::from_value(json!({
+        let header_divider: Component = Component::from_value(json!({
             "component": "Divider",
             "id": "header_divider"
         }))
         .unwrap();
 
-        let header_body: Component = serde_json::from_value(json!({
+        let header_body: Component = Component::from_value(json!({
             "component": "Column",
             "id": "header_body",
             "children": [
