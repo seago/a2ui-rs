@@ -9,11 +9,14 @@ pub struct ResponseError {
     pub message: String,
 }
 
+/// untagged 枚举按声明顺序尝试匹配：`Error` 必须在前——
+/// `ResponseError` 带 `deny_unknown_fields`，只精确匹配 `{code, message}`；
+/// 若 `Success(Value)` 在前则会贪婪匹配任意 JSON，`Error` 永远不可达。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ActionResponsePayload {
-    Success(Value),
     Error(ResponseError),
+    Success(Value),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,6 +279,45 @@ mod tests {
         match envelope {
             ServerEnvelope::V1_0(V1_0ServerMessage::ActionResponse(msg)) => {
                 assert_eq!(msg.action_id, "a1");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_deserialize_action_response_error_variant() {
+        let json = r#"{"version":"v1.0","actionResponse":{"actionId":"a1","code":"INVALID_INPUT","message":"bad data"}}"#;
+        let envelope: ServerEnvelope = serde_json::from_str(json).unwrap();
+        match envelope {
+            ServerEnvelope::V1_0(V1_0ServerMessage::ActionResponse(msg)) => {
+                assert_eq!(msg.action_id, "a1");
+                match msg.response {
+                    ActionResponsePayload::Error(err) => {
+                        assert_eq!(err.code, "INVALID_INPUT");
+                        assert_eq!(err.message, "bad data");
+                    }
+                    ActionResponsePayload::Success(v) => {
+                        panic!("error response must deserialize to Error variant, got Success({v})")
+                    }
+                }
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_deserialize_action_response_success_variant() {
+        let json = r#"{"version":"v1.0","actionResponse":{"actionId":"a1","value":"ok"}}"#;
+        let envelope: ServerEnvelope = serde_json::from_str(json).unwrap();
+        match envelope {
+            ServerEnvelope::V1_0(V1_0ServerMessage::ActionResponse(msg)) => {
+                assert_eq!(msg.action_id, "a1");
+                match msg.response {
+                    ActionResponsePayload::Success(v) => assert_eq!(v["value"], "ok"),
+                    ActionResponsePayload::Error(_) => {
+                        panic!("success response must deserialize to Success variant")
+                    }
+                }
             }
             _ => panic!("wrong variant"),
         }
