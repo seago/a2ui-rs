@@ -65,7 +65,8 @@ where
     }
 
     async fn send(&mut self, envelope: ClientEnvelope) -> TransportResult<()> {
-        let json = serde_json::to_string(&envelope)
+        let json = envelope
+            .to_json()
             .map_err(|e| crate::TransportError::SendError(format!("serialization error: {}", e)))?;
         tracing::trace!("JSONL send: {} bytes", json.len());
         self.writer
@@ -89,7 +90,7 @@ where
             if trimmed.is_empty() {
                 continue;
             }
-            let envelope: ServerEnvelope = serde_json::from_str(trimmed).map_err(|e| {
+            let envelope = ServerEnvelope::from_json(trimmed).map_err(|e| {
                 crate::TransportError::ReceiveError(format!("deserialization error: {}", e))
             })?;
             return Ok(envelope);

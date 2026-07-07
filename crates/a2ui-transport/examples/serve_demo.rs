@@ -22,9 +22,10 @@ use a2ui_core::component::component::Component;
 use a2ui_core::component::{ComponentId, DynamicValue};
 use a2ui_core::message::server_to_client::{ActionResponse, ActionResponsePayload, CreateSurface};
 use a2ui_core::message::{V1_0ClientMessage, V1_0ServerMessage};
+use a2ui_core::prelude::json;
 use a2ui_core::{ClientEnvelope, ServerEnvelope};
 use a2ui_transport::{WebSocketServer, WebSocketServerConnection};
-use serde_json::json;
+use serde::Deserialize;
 
 const LISTEN_ADDR: &str = "127.0.0.1:8765";
 const SURFACE_ID: &str = "demo-surface";
@@ -174,7 +175,7 @@ fn build_create_surface() -> Result<CreateSurface, Box<dyn std::error::Error>> {
     // wantResponse 使客户端自动生成 actionId 并登记 pending；
     // responsePath 是客户端本地语义（不上线路），actionResponse 到达后
     // 由客户端写回本地数据模型 /result。
-    let submit_btn: Component = serde_json::from_value(json!({
+    let submit_btn: Component = Component::deserialize(json!({
         "component": "Button",
         "id": "submit_btn",
         "child": "submit_label",

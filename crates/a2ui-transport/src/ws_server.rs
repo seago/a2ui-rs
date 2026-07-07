@@ -142,7 +142,8 @@ impl WebSocketServerConnection {
     /// # }
     /// ```
     pub async fn push(&mut self, envelope: ServerEnvelope) -> TransportResult<()> {
-        let json = serde_json::to_string(&envelope)
+        let json = envelope
+            .to_json()
             .map_err(|e| WebSocketError::SendError(format!("serialization: {}", e)))?;
         self.ws
             .send(Message::Text(json))
@@ -184,7 +185,7 @@ impl WebSocketServerConnection {
                 }
             };
 
-            let envelope: ClientEnvelope = serde_json::from_str(&text)
+            let envelope = ClientEnvelope::from_json(&text)
                 .map_err(|e| WebSocketError::ReceiveError(format!("deserialization: {}", e)))?;
             return Ok(envelope);
         }

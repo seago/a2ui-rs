@@ -103,7 +103,8 @@ impl Transport for WebSocketTransport {
             .ws
             .as_mut()
             .ok_or_else(|| WebSocketError::SendError("not connected".into()))?;
-        let json = serde_json::to_string(&envelope)
+        let json = envelope
+            .to_json()
             .map_err(|e| WebSocketError::SendError(format!("serialization: {}", e)))?;
         ws.send(tokio_tungstenite::tungstenite::protocol::Message::Text(
             json,
@@ -168,7 +169,7 @@ impl Transport for WebSocketTransport {
                 }
             };
 
-            let envelope: ServerEnvelope = serde_json::from_str(&text)
+            let envelope = ServerEnvelope::from_json(&text)
                 .map_err(|e| WebSocketError::ReceiveError(format!("deserialization: {}", e)))?;
             return Ok(envelope);
         }
