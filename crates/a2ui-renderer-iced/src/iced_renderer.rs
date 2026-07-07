@@ -9,7 +9,6 @@ use a2ui_core::prelude::*;
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{CoreEffects, RenderResult, Renderer, RendererCore, SurfaceHandle, UserEvent};
 use iced::widget::image;
-use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Read;
@@ -57,15 +56,6 @@ pub struct IcedRenderer {
     /// iced view/build 热点计数
     profile: RefCell<IcedRenderProfile>,
 }
-
-/// 最大并发 Surface 数量（DoS 防护）
-// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_SURFACES），C6 统一清理
-#[allow(dead_code)]
-const MAX_SURFACES: usize = 100;
-/// 单 Surface 最大组件数量（DoS 防护）
-// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_COMPONENTS_PER_SURFACE），C6 统一清理
-#[allow(dead_code)]
-const MAX_COMPONENTS_PER_SURFACE: usize = 1000;
 
 impl IcedRenderer {
     pub fn new() -> Self {
@@ -270,37 +260,6 @@ impl Renderer for IcedRenderer {
         let (envelope, effects) = self.core.handle_user_event(&event).await?;
         self.apply_effects(&effects);
         Ok(envelope)
-    }
-}
-
-/// 从组件中提取所有数据路径（用于依赖图注册）
-// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
-#[allow(dead_code)]
-fn extract_paths(comp: &Component) -> Vec<String> {
-    let props = comp.properties();
-    let mut paths = Vec::new();
-    extract_paths_from_value(props, &mut paths);
-    paths
-}
-
-// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
-#[allow(dead_code)]
-fn extract_paths_from_value(value: &Value, paths: &mut Vec<String>) {
-    match value {
-        Value::Object(map) => {
-            if let Some(p) = map.get("path").and_then(|v| v.as_str()) {
-                paths.push(p.to_string());
-            }
-            for v in map.values() {
-                extract_paths_from_value(v, paths);
-            }
-        }
-        Value::Array(arr) => {
-            for v in arr {
-                extract_paths_from_value(v, paths);
-            }
-        }
-        _ => {}
     }
 }
 

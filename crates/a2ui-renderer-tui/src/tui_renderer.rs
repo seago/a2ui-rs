@@ -18,7 +18,6 @@ use ratatui::{
     widgets::{Block, Paragraph},
     Frame,
 };
-use serde_json::Value;
 
 /// TUI 渲染器实现
 ///
@@ -33,15 +32,6 @@ pub struct TuiRenderer {
     /// 最近一帧构建的 widget 数量（render() 填充，测试用）
     pub last_frame_widget_count: usize,
 }
-
-/// 最大并发 Surface 数量（DoS 防护）
-// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_SURFACES），C6 统一清理
-#[allow(dead_code)]
-const MAX_SURFACES: usize = 100;
-/// 单 Surface 最大组件数量（DoS 防护）
-// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_COMPONENTS_PER_SURFACE），C6 统一清理
-#[allow(dead_code)]
-const MAX_COMPONENTS_PER_SURFACE: usize = 1000;
 
 impl TuiRenderer {
     /// 创建新的 TUI 渲染器
@@ -343,43 +333,6 @@ impl TuiRenderer {
         let mapper = WidgetMapper;
         let paragraph = mapper.map_to_paragraph(component);
         frame.render_widget(paragraph, area);
-    }
-}
-
-/// 从组件的 properties 中递归提取所有 JSON Pointer 路径
-// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
-#[allow(dead_code)]
-fn extract_paths(component: &Component) -> Vec<String> {
-    let mut paths = Vec::new();
-    extract_paths_from_value(component.properties(), &mut paths);
-    paths
-}
-
-/// 递归遍历 serde_json::Value，收集所有 DynamicValue::Path 中的路径字符串
-// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
-#[allow(dead_code)]
-fn extract_paths_from_value(value: &Value, paths: &mut Vec<String>) {
-    match value {
-        Value::Object(map) => {
-            for (_, v) in map {
-                // 检测 {"path": "..."} 结构
-                if let Value::Object(inner) = v {
-                    if inner.len() == 1 {
-                        if let Some(Value::String(p)) = inner.get("path") {
-                            paths.push(p.clone());
-                            continue;
-                        }
-                    }
-                }
-                extract_paths_from_value(v, paths);
-            }
-        }
-        Value::Array(arr) => {
-            for item in arr {
-                extract_paths_from_value(item, paths);
-            }
-        }
-        _ => {}
     }
 }
 

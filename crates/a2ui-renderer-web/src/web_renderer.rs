@@ -41,15 +41,6 @@ pub struct WebRenderer {
     html_builder: HtmlBuilder,
 }
 
-/// 最大并发 Surface 数量（DoS 防护）
-// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_SURFACES），C6 统一清理
-#[allow(dead_code)]
-const MAX_SURFACES: usize = 100;
-/// 单 Surface 最大组件数量（DoS 防护）
-// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_COMPONENTS_PER_SURFACE），C6 统一清理
-#[allow(dead_code)]
-const MAX_COMPONENTS_PER_SURFACE: usize = 1000;
-
 impl WebRenderer {
     /// 创建新的 Web 渲染器
     pub fn new() -> Self {
@@ -563,42 +554,6 @@ fn supports_web_style(component_type: &str) -> bool {
         component_type,
         "Text" | "Icon" | "Row" | "Column" | "List" | "Card" | "Image"
     )
-}
-
-/// 从组件的 properties 中递归提取所有 JSON Pointer 路径
-// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
-#[allow(dead_code)]
-fn extract_paths(component: &Component) -> Vec<String> {
-    let mut paths = Vec::new();
-    extract_paths_from_value(component.properties(), &mut paths);
-    paths
-}
-
-/// 递归遍历 serde_json::Value，收集所有 DynamicValue::Path 中的路径字符串
-// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
-#[allow(dead_code)]
-fn extract_paths_from_value(value: &Value, paths: &mut Vec<String>) {
-    match value {
-        Value::Object(map) => {
-            for (_, v) in map {
-                if let Value::Object(inner) = v {
-                    if inner.len() == 1 {
-                        if let Some(Value::String(p)) = inner.get("path") {
-                            paths.push(p.clone());
-                            continue;
-                        }
-                    }
-                }
-                extract_paths_from_value(v, paths);
-            }
-        }
-        Value::Array(arr) => {
-            for item in arr {
-                extract_paths_from_value(item, paths);
-            }
-        }
-        _ => {}
-    }
 }
 
 /// HTML 属性值转义

@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_renderer_trait_compiles() {
-        // 确保 trait 可以被实现（仅编译检查）
-        fn assert_impl<R: Renderer + Send + 'static>() {}
+        // 确保 trait 可以被实现（仅编译检查，函数本身不需调用）
+        fn _assert_impl<R: Renderer + Send + 'static>() {}
     }
 }

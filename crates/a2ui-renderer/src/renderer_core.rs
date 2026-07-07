@@ -1176,7 +1176,7 @@ mod tests {
                 want_response: true,
                 call: a2ui_core::message::server_to_client::CallFunctionPayload {
                     call: "formatNumber".into(),
-                    args: json!({"value": 2.71828, "decimals": 2}),
+                    args: json!({"value": 2.75, "decimals": 2}),
                 },
             })
             .await

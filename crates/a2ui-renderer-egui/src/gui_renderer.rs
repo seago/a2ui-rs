@@ -12,7 +12,6 @@ use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
     CustomComponentRegistry, RenderResult, Renderer, RendererCore, SurfaceHandle, UserEvent,
 };
-use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -45,15 +44,6 @@ pub struct GuiRenderer {
     /// 无关，需保持存活以免纹理被释放）
     image_cache: HashMap<String, CachedTexture>,
 }
-
-/// 最大并发 Surface 数量（DoS 防护）
-// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_SURFACES），C6 统一清理
-#[allow(dead_code)]
-const MAX_SURFACES: usize = 100;
-/// 单 Surface 最大组件数量（DoS 防护）
-// 已由 RendererCore 接管（a2ui_renderer::renderer_core::MAX_COMPONENTS_PER_SURFACE），C6 统一清理
-#[allow(dead_code)]
-const MAX_COMPONENTS_PER_SURFACE: usize = 1000;
 
 impl GuiRenderer {
     /// 创建新的 GUI 渲染器
@@ -355,52 +345,6 @@ impl Renderer for GuiRenderer {
         };
         let (envelope, _effects) = self.core.handle_user_event(&event).await?;
         Ok(envelope)
-    }
-}
-
-/// 把裸 ActionMessage 包装为 v1.0 客户端信封
-// 已由 RendererCore 接管（信封构造随 handle_user_event 迁入核心），C6 统一清理
-#[allow(dead_code)]
-fn action_envelope(action: ActionMessage) -> a2ui_core::ClientEnvelope {
-    a2ui_core::ClientEnvelope::v1_0(
-        a2ui_core::message::client_to_server::V1_0ClientMessage::Action(action),
-    )
-}
-
-/// 从组件的 properties 中递归提取所有 JSON Pointer 路径
-// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
-#[allow(dead_code)]
-fn extract_paths(component: &Component) -> Vec<String> {
-    let mut paths = Vec::new();
-    extract_paths_from_value(component.properties(), &mut paths);
-    paths
-}
-
-/// 递归遍历 serde_json::Value，收集所有 DynamicValue::Path 中的路径字符串
-// 已由 RendererCore 接管（依赖注册随消息流水线迁入核心），C6 统一清理
-#[allow(dead_code)]
-fn extract_paths_from_value(value: &Value, paths: &mut Vec<String>) {
-    match value {
-        Value::Object(map) => {
-            for (_, v) in map {
-                // 检测 {"path": "..."} 结构
-                if let Value::Object(inner) = v {
-                    if inner.len() == 1 {
-                        if let Some(Value::String(p)) = inner.get("path") {
-                            paths.push(p.clone());
-                            continue;
-                        }
-                    }
-                }
-                extract_paths_from_value(v, paths);
-            }
-        }
-        Value::Array(arr) => {
-            for item in arr {
-                extract_paths_from_value(item, paths);
-            }
-        }
-        _ => {}
     }
 }
 
