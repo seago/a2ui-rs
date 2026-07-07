@@ -1,4 +1,5 @@
 use crate::html_builder::{HtmlBuilder, RenderableHtmlWidget};
+use a2ui_core::component::prop_keys;
 use a2ui_core::message::{
     client_to_server::FunctionResponse,
     server_to_client::{
@@ -7,11 +8,11 @@ use a2ui_core::message::{
     },
 };
 use a2ui_core::prelude::*;
+use a2ui_core::Value;
 use a2ui_renderer::{
-    resolve_dynamic_string_prop, ComponentStyle, CoreEffects, CustomComponentRegistry, DataBinding,
-    RenderResult, Renderer, RendererCore, SurfaceHandle, UserEvent,
+    resolve_bool, resolve_f64, resolve_str, ComponentStyle, CoreEffects, CustomComponentRegistry,
+    DataBinding, RenderResult, Renderer, RendererCore, SurfaceHandle, UserEvent,
 };
-use serde_json::Value;
 use std::collections::HashMap;
 
 /// Web 渲染器实现
@@ -163,7 +164,6 @@ impl WebRenderer {
     ) -> Option<RenderableHtmlWidget> {
         let component = &node.component;
         let ctype = component.component_type();
-        let props = component.properties();
 
         // 递归构建子 widget，保留源组件 id 以便 Modal/Tabs 按 id 匹配
         // （组件树 children 的顺序是构建细节，不可按位置消费）
@@ -176,10 +176,9 @@ impl WebRenderer {
 
         let widget = match ctype {
             "Text" => {
-                let text = extract_text(props, binding);
-                let variant = props
-                    .get("variant")
-                    .and_then(|v| v.as_str())
+                let text = extract_text(component, binding);
+                let variant = component
+                    .prop_str(prop_keys::VARIANT)
                     .unwrap_or("body")
                     .to_string();
                 RenderableHtmlWidget::Text {
@@ -189,10 +188,9 @@ impl WebRenderer {
                 }
             }
             "Button" => {
-                let label = extract_text(props, binding);
-                let variant = props
-                    .get("variant")
-                    .and_then(|v| v.as_str())
+                let label = extract_text(component, binding);
+                let variant = component
+                    .prop_str(prop_keys::VARIANT)
                     .unwrap_or("default")
                     .to_string();
                 RenderableHtmlWidget::Button {
@@ -210,7 +208,8 @@ impl WebRenderer {
                 children: child_pairs.into_iter().map(|(_, w)| w).collect(),
             },
             "Image" => {
-                let url = extract_string_value(props, "url", binding).unwrap_or_default();
+                let url =
+                    extract_string_value(component, prop_keys::URL, binding).unwrap_or_default();
                 RenderableHtmlWidget::Image {
                     id: component.id().clone(),
                     url,
@@ -229,10 +228,11 @@ impl WebRenderer {
                 }
             }
             "CheckBox" => {
-                let checked = resolve_bool_value(props, "value", binding)
-                    .or_else(|| resolve_bool_value(props, "checked", binding))
+                let checked = resolve_bool_value(component, prop_keys::VALUE, binding)
+                    .or_else(|| resolve_bool_value(component, prop_keys::CHECKED, binding))
                     .unwrap_or(false);
-                let label = extract_string_value(props, "label", binding).unwrap_or_default();
+                let label =
+                    extract_string_value(component, prop_keys::LABEL, binding).unwrap_or_default();
                 RenderableHtmlWidget::CheckBox {
                     id: component.id().clone(),
                     checked,
@@ -243,7 +243,8 @@ impl WebRenderer {
                 id: component.id().clone(),
             },
             "Icon" => {
-                let name = extract_string_value(props, "name", binding).unwrap_or("?".to_string());
+                let name = extract_string_value(component, prop_keys::NAME, binding)
+                    .unwrap_or("?".to_string());
                 RenderableHtmlWidget::Icon {
                     id: component.id().clone(),
                     name,
@@ -256,24 +257,17 @@ impl WebRenderer {
             "Tabs" => {
                 // 按 tabs[].child 的 id 从 child_pairs 中匹配各 tab 内容
                 let mut remaining = child_pairs;
-                let tabs_data: Vec<(String, Vec<RenderableHtmlWidget>)> = props
-                    .get("tabs")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|tab| {
-                                let title = tab.get("title")?.as_str()?.to_string();
-                                let children = tab
-                                    .get("child")
-                                    .and_then(|v| v.as_str())
-                                    .and_then(|child_id| {
-                                        remaining
-                                            .iter()
-                                            .position(|(id, _)| id == child_id)
-                                            .map(|pos| vec![remaining.remove(pos).1])
-                                    })
+                let tabs_data: Vec<(String, Vec<RenderableHtmlWidget>)> = component
+                    .tabs_decl()
+                    .map(|tabs| {
+                        tabs.into_iter()
+                            .map(|tab| {
+                                let children = remaining
+                                    .iter()
+                                    .position(|(id, _)| id == tab.child.as_str())
+                                    .map(|pos| vec![remaining.remove(pos).1])
                                     .unwrap_or_default();
-                                Some((title, children))
+                                (tab.title, children)
                             })
                             .collect()
                     })
@@ -297,13 +291,13 @@ impl WebRenderer {
                 }
             }
             "Modal" => {
-                let title = extract_string_value(props, "title", binding)
-                    .or_else(|| extract_string_value(props, "label", binding))
+                let title = extract_string_value(component, prop_keys::TITLE, binding)
+                    .or_else(|| extract_string_value(component, prop_keys::LABEL, binding))
                     .unwrap_or_default();
                 // 按 props.content 的 id 匹配（children 可能同时含 trigger）；
                 // 无 content 元数据时降级取第一个非 trigger 的子 widget
-                let trigger_id = props.get("trigger").and_then(|v| v.as_str());
-                let content_widget = match props.get("content").and_then(|v| v.as_str()) {
+                let trigger_id = component.prop_str(prop_keys::TRIGGER);
+                let content_widget = match component.prop_str(prop_keys::CONTENT) {
                     Some(content_id) => child_pairs
                         .into_iter()
                         .find(|(id, _)| id == content_id)
@@ -324,9 +318,10 @@ impl WebRenderer {
                 }
             }
             "Slider" => {
-                let value = resolve_number_value(props, "value", binding).unwrap_or(0.0);
-                let min = resolve_number_value(props, "min", binding).unwrap_or(0.0);
-                let max = resolve_number_value(props, "max", binding).unwrap_or(100.0);
+                let value =
+                    resolve_number_value(component, prop_keys::VALUE, binding).unwrap_or(0.0);
+                let min = resolve_number_value(component, prop_keys::MIN, binding).unwrap_or(0.0);
+                let max = resolve_number_value(component, prop_keys::MAX, binding).unwrap_or(100.0);
                 RenderableHtmlWidget::Slider {
                     id: component.id().clone(),
                     value,
@@ -335,9 +330,10 @@ impl WebRenderer {
                 }
             }
             "TextField" => {
-                let value = extract_string_value(props, "value", binding).unwrap_or_default();
-                let placeholder =
-                    extract_string_value(props, "placeholder", binding).unwrap_or_default();
+                let value =
+                    extract_string_value(component, prop_keys::VALUE, binding).unwrap_or_default();
+                let placeholder = extract_string_value(component, prop_keys::PLACEHOLDER, binding)
+                    .unwrap_or_default();
                 RenderableHtmlWidget::TextField {
                     id: component.id().clone(),
                     value,
@@ -345,15 +341,13 @@ impl WebRenderer {
                 }
             }
             "ChoicePicker" => {
-                let options = props
-                    .get("options")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(extract_static_string).collect())
+                let options = component
+                    .prop_str_list(prop_keys::OPTIONS)
+                    .map(|list| list.into_iter().map(String::from).collect())
                     .unwrap_or_default();
-                let selected = props
-                    .get("value")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(extract_static_string).collect())
+                let selected = component
+                    .prop_str_list(prop_keys::VALUE)
+                    .map(|list| list.into_iter().map(String::from).collect())
                     .unwrap_or_default();
                 RenderableHtmlWidget::ChoicePicker {
                     id: component.id().clone(),
@@ -362,7 +356,7 @@ impl WebRenderer {
                 }
             }
             "DateTimeInput" => {
-                let label = extract_string_value(props, "label", binding)
+                let label = extract_string_value(component, prop_keys::LABEL, binding)
                     .unwrap_or("Select date/time".to_string());
                 RenderableHtmlWidget::DateTimeInput {
                     id: component.id().clone(),
@@ -370,14 +364,16 @@ impl WebRenderer {
                 }
             }
             "Video" => {
-                let url = extract_string_value(props, "url", binding).unwrap_or_default();
+                let url =
+                    extract_string_value(component, prop_keys::URL, binding).unwrap_or_default();
                 RenderableHtmlWidget::Video {
                     id: component.id().clone(),
                     url,
                 }
             }
             "AudioPlayer" => {
-                let url = extract_string_value(props, "url", binding).unwrap_or_default();
+                let url =
+                    extract_string_value(component, prop_keys::URL, binding).unwrap_or_default();
                 RenderableHtmlWidget::AudioPlayer {
                     id: component.id().clone(),
                     url,
@@ -399,7 +395,7 @@ impl WebRenderer {
             }
         };
 
-        let style = ComponentStyle::from_component_props(props);
+        let style = ComponentStyle::from_component(component);
         let widget = if supports_web_style(ctype) && style != ComponentStyle::default() {
             RenderableHtmlWidget::Styled {
                 widget: Box::new(widget),
@@ -506,42 +502,34 @@ impl Renderer for WebRenderer {
 }
 
 /// 从组件 properties 中提取文本内容，支持 DynamicValue::Path 解析
-fn extract_text(props: &Value, binding: &DataBinding) -> String {
-    resolve_dynamic_string_prop(props, "text", Some(binding), "")
+fn extract_text(component: &Component, binding: &DataBinding) -> String {
+    extract_string_value(component, prop_keys::TEXT, binding).unwrap_or_default()
 }
 
 /// 从组件 properties 中提取字符串类型的值，支持 DynamicValue::Path 解析
-fn extract_string_value(props: &Value, key: &str, binding: &DataBinding) -> Option<String> {
-    props
-        .get(key)
-        .map(|_| resolve_dynamic_string_prop(props, key, Some(binding), ""))
+fn extract_string_value(component: &Component, key: &str, binding: &DataBinding) -> Option<String> {
+    component
+        .prop_dynamic_value(key)
+        .map(|dv| resolve_str(&dv, Some(binding)))
 }
 
-fn resolve_bool_value(props: &Value, key: &str, binding: &DataBinding) -> Option<bool> {
-    let value = props.get(key)?;
-    if let Some(value) = value.as_bool() {
-        return Some(value);
-    }
-    let path = value
-        .as_object()
-        .and_then(|obj| obj.get("path"))
-        .and_then(|v| v.as_str())?;
-    binding.get(path).and_then(|value| value.as_bool())
+fn resolve_bool_value(component: &Component, key: &str, binding: &DataBinding) -> Option<bool> {
+    component
+        .prop_dynamic_bool(key)
+        .and_then(|dv| resolve_bool(&dv, Some(binding)))
 }
 
-fn resolve_number_value(props: &Value, key: &str, binding: &DataBinding) -> Option<f64> {
-    let value = props.get(key)?;
-    if let Some(value) = value.as_f64() {
-        return Some(value);
-    }
-    let path = value
-        .as_object()
-        .and_then(|obj| obj.get("path"))
-        .and_then(|v| v.as_str())?;
-    binding.get(path).and_then(|value| value.as_f64())
+fn resolve_number_value(component: &Component, key: &str, binding: &DataBinding) -> Option<f64> {
+    component
+        .prop_dynamic_f64(key)
+        .and_then(|dv| resolve_f64(&dv, Some(binding)))
 }
 
 /// 从 JSON 值中提取静态字符串（非 DynamicValue）
+///
+/// 现无生产消费者（ChoicePicker 解析已委托 `prop_str_list`），
+/// 按仓库约定保留不删。
+#[allow(dead_code)]
 fn extract_static_string(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.clone()),
@@ -567,8 +555,8 @@ fn html_attr(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use a2ui_core::prelude::json;
     use a2ui_core::ComponentId;
-    use serde_json::json;
 
     #[test]
     fn test_web_renderer_new() {
@@ -589,13 +577,7 @@ mod tests {
     #[test]
     fn test_register_catalog() {
         let mut renderer = WebRenderer::new();
-        let catalog: a2ui_core::Catalog = serde_json::from_value(serde_json::json!({
-            "catalogId": "basic",
-            "instructions": "Basic catalog",
-            "components": {},
-            "functions": {}
-        }))
-        .unwrap();
+        let catalog = a2ui_core::Catalog::new("basic").with_instructions("Basic catalog");
         assert!(renderer.register_catalog(catalog).is_ok());
     }
 
@@ -631,7 +613,7 @@ mod tests {
         // 规范：被动输入变更不触发网络请求，只写回数据模型；
         // 写回后渲染的 HTML 含新值（dirty → 缓存失效链路）
         let mut renderer = WebRenderer::new();
-        let field: Component = serde_json::from_value(json!({
+        let field: Component = Component::from_value(json!({
             "component":"TextField","id":"root","value":{"path":"/form/username"}
         }))
         .unwrap();
@@ -677,7 +659,7 @@ mod tests {
     async fn test_check_toggle_writes_back_to_data_model() {
         // 旧断言（合成 toggle 消息）→ 新断言：无消息 + 写回 + 标脏
         let mut renderer = WebRenderer::new();
-        let checkbox: Component = serde_json::from_value(json!({
+        let checkbox: Component = Component::from_value(json!({
             "component":"CheckBox","id":"root","checked":{"path":"/agree"}
         }))
         .unwrap();
@@ -742,7 +724,7 @@ mod tests {
     #[tokio::test]
     async fn test_click_with_declared_action_emits_spec_envelope() {
         let mut renderer = WebRenderer::new();
-        let btn: Component = serde_json::from_value(json!({
+        let btn: Component = Component::from_value(json!({
             "id":"btn","component":"Button","child":"lbl",
             "action":{"event":{"name":"submit"}}
         }))
@@ -830,16 +812,16 @@ mod tests {
     async fn test_modal_widget_gets_content_by_id() {
         let mut renderer = WebRenderer::new();
         let components: Vec<Component> = vec![
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id":"root","component":"Modal",
                 "title":"Confirm","content":"body","trigger":"btn"
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id":"body","component":"Text","text":"HELLO_MODAL"
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id":"btn","component":"Button","label":"open"
             }))
             .unwrap(),
@@ -867,14 +849,14 @@ mod tests {
     async fn test_tabs_widget_populates_tab_children() {
         let mut renderer = WebRenderer::new();
         let components: Vec<Component> = vec![
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id":"root","component":"Tabs",
                 "tabs":[{"title":"First","child":"a"},{"title":"Second","child":"b"}]
             }))
             .unwrap(),
-            serde_json::from_value(json!({"id":"a","component":"Text","text":"TAB_A_TEXT"}))
+            Component::from_value(json!({"id":"a","component":"Text","text":"TAB_A_TEXT"}))
                 .unwrap(),
-            serde_json::from_value(json!({"id":"b","component":"Text","text":"TAB_B_TEXT"}))
+            Component::from_value(json!({"id":"b","component":"Text","text":"TAB_B_TEXT"}))
                 .unwrap(),
         ];
         renderer
@@ -906,11 +888,11 @@ mod tests {
         // trigger 误当 content 塞进 modal body——必须按 id 匹配
         let mut renderer = WebRenderer::new();
         let components: Vec<Component> = vec![
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id":"root","component":"Modal","title":"T","trigger":"btn"
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id":"btn","component":"Button","label":"TRIGGER_LABEL"
             }))
             .unwrap(),
@@ -940,33 +922,33 @@ mod tests {
     async fn test_dynamic_string_props_render_from_data_model() {
         let mut renderer = WebRenderer::new();
         let components: Vec<Component> = vec![
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "root",
                 "component": "Column",
                 "children": ["title", "text_field", "checkbox", "slider", "icon"]
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "title",
                 "component": "Text",
                 "text": {"path": "/title"}
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "text_field",
                 "component": "TextField",
                 "value": {"path": "/form/username"},
                 "placeholder": {"path": "/form/placeholder"}
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "checkbox",
                 "component": "CheckBox",
                 "label": {"path": "/remember"},
                 "value": {"path": "/rememberChecked"}
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "slider",
                 "component": "Slider",
                 "value": {"path": "/volume"},
@@ -974,7 +956,7 @@ mod tests {
                 "max": 100
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "icon",
                 "component": "Icon",
                 "name": {"path": "/missing_icon"}
@@ -1026,62 +1008,62 @@ mod tests {
             "radius": 5
         });
         let components: Vec<Component> = vec![
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "root",
                 "component": "Column",
                 "children": ["title", "icon", "row", "card", "list"],
                 "style": style.clone()
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "title",
                 "component": "Text",
                 "text": "Styled",
                 "style": style.clone()
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "icon",
                 "component": "Icon",
                 "name": "star",
                 "style": style.clone()
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "row",
                 "component": "Row",
                 "children": ["image"],
                 "style": style.clone()
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "image",
                 "component": "Image",
                 "url": "https://example.com/image.png",
                 "style": style.clone()
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "card",
                 "component": "Card",
                 "child": "card_text",
                 "style": style.clone()
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "card_text",
                 "component": "Text",
                 "text": "Card text"
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "list",
                 "component": "List",
                 "children": ["list_text"],
                 "style": style
             }))
             .unwrap(),
-            serde_json::from_value(json!({
+            Component::from_value(json!({
                 "id": "list_text",
                 "component": "Text",
                 "text": "List text"
@@ -1181,7 +1163,7 @@ mod tests {
                 surface_properties: None,
                 send_data_model: false,
                 components: Some(vec![comp]),
-                data_model: Some(serde_json::json!({"user": {"name": "Alice"}})),
+                data_model: Some(json!({"user": {"name": "Alice"}})),
             })
             .await
             .unwrap();
@@ -1368,7 +1350,7 @@ mod tests {
 
         // 未知组件（不是 root，而是 root 的子组件）
         let unknown_comp: Component =
-            serde_json::from_str(r#"{"id":"u1","component":"UnknownType"}"#).unwrap();
+            Component::from_json(r#"{"id":"u1","component":"UnknownType"}"#).unwrap();
         let root_unknown = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("u1").unwrap()],
@@ -1376,7 +1358,7 @@ mod tests {
 
         // 自定义组件（已注册）
         let custom_comp: Component =
-            serde_json::from_str(r#"{"id":"c1","component":"MyChart"}"#).unwrap();
+            Component::from_json(r#"{"id":"c1","component":"MyChart"}"#).unwrap();
         let root_custom = Component::column(
             ComponentId::new("root").unwrap(),
             vec![ComponentId::new("c1").unwrap()],
@@ -1430,7 +1412,7 @@ mod tests {
                 want_response: true,
                 call: a2ui_core::message::server_to_client::CallFunctionPayload {
                     call: "validate".into(),
-                    args: serde_json::json!({"value": "test"}),
+                    args: json!({"value": "test"}),
                 },
             })
             .await;
@@ -1448,7 +1430,7 @@ mod tests {
                 want_response: true,
                 call: a2ui_core::message::server_to_client::CallFunctionPayload {
                     call: "fetch".into(),
-                    args: serde_json::json!({"url": "https://example.com"}),
+                    args: json!({"url": "https://example.com"}),
                 },
             })
             .await;

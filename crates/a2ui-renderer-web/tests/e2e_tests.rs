@@ -93,7 +93,7 @@ async fn test_web_renderer_incremental_update() {
             surface_properties: None,
             send_data_model: false,
             components: Some(vec![comp]),
-            data_model: Some(serde_json::json!({"value": "initial"})),
+            data_model: Some(json!({"value": "initial"})),
         })
         .await
         .unwrap();
@@ -107,7 +107,7 @@ async fn test_web_renderer_incremental_update() {
         .update_data_model(a2ui_core::message::server_to_client::UpdateDataModel {
             surface_id: "incr".into(),
             path: Some("/value".into()),
-            value: Some(serde_json::json!("updated")),
+            value: Some(json!("updated")),
         })
         .await
         .unwrap();
@@ -133,7 +133,7 @@ async fn test_web_renderer_full_end_to_end() {
         ComponentId::new("greeting").unwrap(),
         DynamicValue::Literal("Welcome!".into()),
     );
-    let button: Component = serde_json::from_str(
+    let button: Component = Component::from_json(
         r#"{"id":"btn","component":"Button","child":"lbl","text":"Submit","variant":"primary"}"#,
     )
     .unwrap();

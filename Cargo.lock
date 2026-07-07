@@ -100,7 +100,6 @@ dependencies = [
  "a2ui-core",
  "a2ui-renderer",
  "async-trait",
- "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tracing",

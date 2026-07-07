@@ -16,7 +16,6 @@ path = "tests/e2e_tests.rs"
 a2ui-core = { path = "../a2ui-core" }
 a2ui-renderer = { path = "../a2ui-renderer" }
 async-trait = { workspace = true }
-serde_json = { workspace = true }
 tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
