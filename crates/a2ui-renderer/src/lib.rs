@@ -22,7 +22,7 @@ pub mod style;
 pub mod surface_lru;
 
 pub use catalog_registry::CatalogRegistry;
-pub use choice::toggle_choice;
+pub use choice::{choice_options, choice_selected, toggle_choice, ChoiceOption};
 pub use component_forest::ComponentForest;
 pub use custom_component::{CustomComponentDef, CustomComponentRegistry};
 pub use data_binding::DataBinding;

@@ -4,10 +4,95 @@
 //! 单选整体替换；`multipleSelection` 多选切换成员。逻辑收编在公共层，
 //! 平台渲染器只负责把点击事件映射到 [`toggle_choice`] 调用。
 
+use crate::data_binding::DataBinding;
+use crate::dynamic_value::{resolve_str_list, value_to_display_string};
+use a2ui_core::component::component::Component;
+use a2ui_core::component::{prop_keys, DynamicValue};
+
 /// ChoicePicker `variant` 的规范取值：多选。
 pub const VARIANT_MULTIPLE_SELECTION: &str = "multipleSelection";
 /// ChoicePicker `variant` 的规范取值：单选（规范默认值）。
 pub const VARIANT_MUTUALLY_EXCLUSIVE: &str = "mutuallyExclusive";
+
+/// 求值后的 ChoicePicker 选项（label 已按数据绑定解析为展示文本）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChoiceOption {
+    /// 展示文本（路径未命中 / 函数调用给出与 `resolve_str` 一致的占位符）
+    pub label: String,
+    /// 选项的稳定值（写回选中集时使用）
+    pub value: String,
+}
+
+/// 解析并求值组件的 `options` 声明，供平台直接渲染。
+///
+/// 形态宽容语义见 [`Component::options_decl`]；label 求值语义与
+/// [`crate::dynamic_value::resolve_str`] 一致。`options` 缺失或非数组
+/// 时给出空列表。
+///
+/// # 示例
+///
+/// ```rust
+/// use a2ui_core::component::component::Component;
+/// use a2ui_renderer::choice::choice_options;
+/// use serde::Deserialize;
+/// use serde_json::json;
+///
+/// let c = Component::deserialize(json!({
+///     "component": "ChoicePicker", "id": "cp", "value": [],
+///     "options": [{"label": "Email", "value": "email"}]
+/// })).unwrap();
+/// let options = choice_options(&c, None);
+/// assert_eq!(options[0].label, "Email");
+/// assert_eq!(options[0].value, "email");
+/// ```
+pub fn choice_options(component: &Component, binding: Option<&DataBinding>) -> Vec<ChoiceOption> {
+    component
+        .options_decl()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|opt| ChoiceOption {
+            label: resolve_label(&opt.label, binding),
+            value: opt.value,
+        })
+        .collect()
+}
+
+/// label（`DynamicValue<String>`）求值：语义对齐 `resolve_str`
+fn resolve_label(label: &DynamicValue<String>, binding: Option<&DataBinding>) -> String {
+    match label {
+        DynamicValue::Literal(s) => s.clone(),
+        DynamicValue::Path { path } => match binding.and_then(|b| b.get(path)) {
+            Some(value) => value_to_display_string(value),
+            None => format!("{{path:{}}}", path),
+        },
+        DynamicValue::FunctionCall { call, .. } => format!("{{call:{}}}", call),
+    }
+}
+
+/// 解析并求值组件的当前选中集（规范 `value`: DynamicStringList）。
+///
+/// 字面量数组直取；`{"path": ...}` 经绑定解析；解析不出一律空集。
+///
+/// # 示例
+///
+/// ```rust
+/// use a2ui_core::component::component::Component;
+/// use a2ui_renderer::choice::choice_selected;
+/// use serde::Deserialize;
+/// use serde_json::json;
+///
+/// let c = Component::deserialize(json!({
+///     "component": "ChoicePicker", "id": "cp",
+///     "options": [], "value": ["email"]
+/// })).unwrap();
+/// assert_eq!(choice_selected(&c, None), vec!["email".to_string()]);
+/// ```
+pub fn choice_selected(component: &Component, binding: Option<&DataBinding>) -> Vec<String> {
+    component
+        .prop_dynamic_str_list(prop_keys::VALUE)
+        .and_then(|dv| resolve_str_list(&dv, binding))
+        .unwrap_or_default()
+}
 
 /// 计算点击某选项后的新选中集。
 ///
@@ -46,9 +131,72 @@ pub fn toggle_choice(current: &[String], clicked: &str, variant: Option<&str>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use a2ui_core::component::component::Component;
+    use a2ui_core::DataModel;
+    use serde::Deserialize;
+    use serde_json::json;
 
     fn selected(values: &[&str]) -> Vec<String> {
         values.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn picker(props: serde_json::Value) -> Component {
+        let mut obj = props;
+        obj["component"] = json!("ChoicePicker");
+        obj["id"] = json!("cp");
+        Component::deserialize(obj).unwrap()
+    }
+
+    fn binding(data: serde_json::Value) -> crate::DataBinding {
+        crate::DataBinding::new(DataModel::new(data))
+    }
+
+    #[test]
+    fn choice_options_resolves_labels_for_both_forms() {
+        let b = binding(json!({"labels": {"phone": "电话"}}));
+        let c = picker(json!({"options": [
+            {"label": "Email", "value": "email"},
+            {"label": {"path": "/labels/phone"}, "value": "phone"},
+            {"label": {"path": "/labels/missing"}, "value": "m"},
+            {"label": {"call": "fmt", "args": {}}, "value": "f"},
+            "plain"
+        ]}));
+        let options = choice_options(&c, Some(&b));
+        assert_eq!(options.len(), 5);
+        assert_eq!(
+            (options[0].label.as_str(), options[0].value.as_str()),
+            ("Email", "email")
+        );
+        // label 路径命中 → 数据模型值
+        assert_eq!(options[1].label, "电话");
+        // 路径未命中 / 函数调用 → 与 resolve_str 一致的占位符
+        assert_eq!(options[2].label, "{path:/labels/missing}");
+        assert_eq!(options[3].label, "{call:fmt}");
+        // 裸字符串兼容形态
+        assert_eq!(
+            (options[4].label.as_str(), options[4].value.as_str()),
+            ("plain", "plain")
+        );
+    }
+
+    #[test]
+    fn choice_options_empty_when_missing_or_malformed() {
+        assert!(choice_options(&picker(json!({})), None).is_empty());
+        assert!(choice_options(&picker(json!({"options": "x"})), None).is_empty());
+    }
+
+    #[test]
+    fn choice_selected_resolves_literal_and_binding() {
+        // 字面量数组
+        let c = picker(json!({"options": [], "value": ["a"]}));
+        assert_eq!(choice_selected(&c, None), selected(&["a"]));
+        // 规范主路径：绑定到数据模型的字符串数组
+        let b = binding(json!({"contact": {"preference": ["email", "sms"]}}));
+        let c = picker(json!({"options": [], "value": {"path": "/contact/preference"}}));
+        assert_eq!(choice_selected(&c, Some(&b)), selected(&["email", "sms"]));
+        // 未命中 / 缺失 → 空集
+        assert_eq!(choice_selected(&c, None), selected(&[]));
+        assert_eq!(choice_selected(&picker(json!({})), None), selected(&[]));
     }
 
     #[test]

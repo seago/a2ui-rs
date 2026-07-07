@@ -4,8 +4,8 @@ use a2ui_core::component::prop_keys;
 use a2ui_core::prelude::Component;
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
-    resolve_bool, resolve_f64, resolve_str_with_missing_path, ComponentStyle, DataBinding,
-    StyleColor,
+    choice_options, choice_selected, resolve_bool, resolve_f64, resolve_str_with_missing_path,
+    ChoiceOption, ComponentStyle, DataBinding, StyleColor,
 };
 use iced::widget::text;
 use iced::widget::text::Shaping;
@@ -452,11 +452,9 @@ fn build_choice_picker(
     renderer: &IcedRenderer,
     surface_id: &str,
 ) -> iced::Element<'static, Message> {
-    let options: Vec<String> = node
-        .component
-        .prop_str_list(prop_keys::OPTIONS)
-        .map(|list| list.into_iter().map(String::from).collect())
-        .unwrap_or_default();
+    let binding = binding_for(renderer, surface_id);
+    let options = choice_options(&node.component, binding);
+    let selected = choice_selected(&node.component, binding);
 
     let label = resolve_dynamic_string(
         &node.component,
@@ -465,10 +463,11 @@ fn build_choice_picker(
         renderer,
         surface_id,
     );
-    let option_texts: Vec<iced::Element<'static, Message>> = options
-        .iter()
-        .map(|opt| text(opt.clone()).shaping(Shaping::Advanced).into())
-        .collect();
+    let option_texts: Vec<iced::Element<'static, Message>> =
+        choice_display_lines(&options, &selected)
+            .into_iter()
+            .map(|line| text(line).shaping(Shaping::Advanced).into())
+            .collect();
 
     iced::widget::column(vec![
         text(label).size(16).shaping(Shaping::Advanced).into(),
@@ -476,6 +475,21 @@ fn build_choice_picker(
     ])
     .spacing(4)
     .into()
+}
+
+/// 选项展示行：选中匹配按选项稳定值，展示用 label
+fn choice_display_lines(options: &[ChoiceOption], selected: &[String]) -> Vec<String> {
+    options
+        .iter()
+        .map(|opt| {
+            let marker = if selected.contains(&opt.value) {
+                "●"
+            } else {
+                " "
+            };
+            format!("({}) {}", marker, opt.label)
+        })
+        .collect()
 }
 
 fn build_datetime_input(
@@ -649,6 +663,37 @@ mod tests {
         }))
         .unwrap();
         renderer
+    }
+
+    #[test]
+    fn test_choice_display_lines_mark_selected_by_value() {
+        // 选中匹配按选项稳定值，展示用 label（iced 补选中态渲染）
+        let options = vec![
+            a2ui_renderer::ChoiceOption {
+                label: "Email".into(),
+                value: "email".into(),
+            },
+            a2ui_renderer::ChoiceOption {
+                label: "SMS".into(),
+                value: "sms".into(),
+            },
+        ];
+        assert_eq!(
+            choice_display_lines(&options, &["email".to_string()]),
+            vec!["(●) Email".to_string(), "( ) SMS".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_build_choice_picker_accepts_spec_object_options() {
+        // 规范形态冒烟：对象 options + 绑定 value 构树不 panic
+        let renderer = renderer_with_binding("s1", json!({"contact":{"preference":["email"]}}));
+        let node = tree_node(json!({
+            "component":"ChoicePicker","id":"cp",
+            "options":[{"label":"Email","value":"email"},{"label":"SMS","value":"sms"}],
+            "value":{"path":"/contact/preference"}
+        }));
+        let _ = build_element_tree(&node, &renderer, "s1");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use a2ui_core::prelude::*;
-use a2ui_renderer::{ComponentStyle, StyleColor, StyleSpacing};
+use a2ui_renderer::{ChoiceOption, ComponentStyle, StyleColor, StyleSpacing};
 
 /// HTML 渲染 widget
 #[derive(Debug, Clone)]
@@ -80,7 +80,7 @@ pub enum RenderableHtmlWidget {
     /// 选择器组件
     ChoicePicker {
         id: ComponentId,
-        options: Vec<String>,
+        options: Vec<ChoiceOption>,
         selected: Vec<String>,
     },
     /// 日期时间输入组件
@@ -248,16 +248,17 @@ impl HtmlBuilder {
                 let opts: String = options
                     .iter()
                     .map(|o| {
-                        let sel = if selected.contains(o) {
+                        // 选中匹配按选项稳定值，value 属性用稳定值、文本用 label
+                        let sel = if selected.contains(&o.value) {
                             " selected"
                         } else {
                             ""
                         };
                         format!(
                             "<option value=\"{}\"{}>{}</option>",
-                            html_attr(o),
+                            html_attr(&o.value),
                             sel,
-                            html_escape(o)
+                            html_escape(&o.label)
                         )
                     })
                     .collect();
@@ -933,14 +934,40 @@ mod tests {
 
     #[test]
     fn test_render_choicepicker() {
+        let option = |label: &str, value: &str| a2ui_renderer::ChoiceOption {
+            label: label.to_string(),
+            value: value.to_string(),
+        };
         let html = HtmlBuilder.render(&RenderableHtmlWidget::ChoicePicker {
             id: ComponentId::new("cp1").unwrap(),
-            options: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+            options: vec![option("A", "A"), option("B", "B"), option("C", "C")],
             selected: vec!["A".to_string()],
         });
         assert!(html.contains("<select"));
         assert!(html.contains("<option"));
         assert!(html.contains("selected"));
+    }
+
+    #[test]
+    fn test_render_choicepicker_uses_option_value_attr_and_label_text() {
+        // 规范对象形态：value 进 option 的 value 属性、label 是展示文本，
+        // 选中匹配按稳定值
+        let html = HtmlBuilder.render(&RenderableHtmlWidget::ChoicePicker {
+            id: ComponentId::new("cp2").unwrap(),
+            options: vec![
+                a2ui_renderer::ChoiceOption {
+                    label: "Email".to_string(),
+                    value: "email".to_string(),
+                },
+                a2ui_renderer::ChoiceOption {
+                    label: "SMS".to_string(),
+                    value: "sms".to_string(),
+                },
+            ],
+            selected: vec!["email".to_string()],
+        });
+        assert!(html.contains("<option value=\"email\" selected>Email</option>"));
+        assert!(html.contains("<option value=\"sms\">SMS</option>"));
     }
 
     #[test]

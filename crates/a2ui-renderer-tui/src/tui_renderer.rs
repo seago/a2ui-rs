@@ -283,10 +283,12 @@ impl TuiRenderer {
                 let display: Vec<String> = options
                     .iter()
                     .map(|o| {
-                        if selected.contains(o) {
-                            format!("(●) {}", o)
+                        // 选中匹配按选项稳定值，展示用 label（两者在裸字符串
+                        // 兼容形态下相同）
+                        if selected.contains(&o.value) {
+                            format!("(●) {}", o.label)
                         } else {
-                            format!("( ) {}", o)
+                            format!("( ) {}", o.label)
                         }
                     })
                     .collect();

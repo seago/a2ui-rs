@@ -1,8 +1,9 @@
 use a2ui_core::component::{prop_keys, ChildrenDecl};
 use a2ui_core::prelude::*;
 use a2ui_renderer::{
-    resolve_bool, resolve_f64, resolve_str_with_missing_path, value_to_display_string,
-    ComponentStyle, CustomComponentRegistry, StyleColor, StyleSpacing,
+    choice_options, choice_selected, resolve_bool, resolve_f64, resolve_str_with_missing_path,
+    value_to_display_string, ChoiceOption, ComponentStyle, CustomComponentRegistry, StyleColor,
+    StyleSpacing,
 };
 use std::collections::HashMap;
 
@@ -83,7 +84,7 @@ pub enum RenderableGuiWidget {
     },
     ChoicePicker {
         id: ComponentId,
-        options: Vec<String>,
+        options: Vec<ChoiceOption>,
         selected: Vec<String>,
     },
     DateTimeInput {
@@ -307,21 +308,11 @@ impl WidgetMapper {
                     variant,
                 }
             }
-            "ChoicePicker" => {
-                let options = component
-                    .prop_str_list(prop_keys::OPTIONS)
-                    .map(|list| list.into_iter().map(String::from).collect())
-                    .unwrap_or_default();
-                let selected = component
-                    .prop_str_list(prop_keys::VALUE)
-                    .map(|list| list.into_iter().map(String::from).collect())
-                    .unwrap_or_default();
-                RenderableGuiWidget::ChoicePicker {
-                    id: component.id().clone(),
-                    options,
-                    selected,
-                }
-            }
+            "ChoicePicker" => RenderableGuiWidget::ChoicePicker {
+                id: component.id().clone(),
+                options: choice_options(component, data_model),
+                selected: choice_selected(component, data_model),
+            },
             "DateTimeInput" => {
                 let label = resolve_dynamic_prop(
                     component,
@@ -796,8 +787,13 @@ impl WidgetMapper {
             } => {
                 ui.horizontal(|ui| {
                     for opt in options {
-                        let is_sel = selected.contains(opt);
-                        ui.label(format!("[{}] {}", if is_sel { "x" } else { " " }, opt));
+                        // 选中匹配按选项稳定值，展示用 label
+                        let is_sel = selected.contains(&opt.value);
+                        ui.label(format!(
+                            "[{}] {}",
+                            if is_sel { "x" } else { " " },
+                            opt.label
+                        ));
                     }
                 });
             }
@@ -1555,6 +1551,36 @@ mod tests {
         assert!(
             matches!(widget, RenderableGuiWidget::ChoicePicker { ref options, .. } if options.len() == 3)
         );
+    }
+
+    #[test]
+    fn test_map_choicepicker_spec_object_options_and_bound_selection() {
+        // 规范形态：{label, value} 对象数组 + value 绑定数据模型
+        let mapper = WidgetMapper;
+        let binding = a2ui_renderer::DataBinding::new(DataModel::new(json!({
+            "contact": {"preference": ["email"]}
+        })));
+        let comp: Component = Component::from_json(
+            r#"{"id":"cp2","component":"ChoicePicker",
+                "options":[{"label":"Email","value":"email"},{"label":"SMS","value":"sms"}],
+                "value":{"path":"/contact/preference"}}"#,
+        )
+        .unwrap();
+        let widget = mapper.map_to_gui_widget(&comp, &empty_registry(), Some(&binding));
+        let RenderableGuiWidget::ChoicePicker {
+            options, selected, ..
+        } = widget
+        else {
+            panic!("expected ChoicePicker widget");
+        };
+        assert_eq!(
+            options
+                .iter()
+                .map(|o| (o.label.as_str(), o.value.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("Email", "email"), ("SMS", "sms")]
+        );
+        assert_eq!(selected, vec!["email".to_string()]);
     }
 
     #[test]

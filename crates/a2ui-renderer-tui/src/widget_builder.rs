@@ -2,7 +2,8 @@ use a2ui_core::component::{prop_keys, ChildrenDecl};
 use a2ui_core::prelude::*;
 use a2ui_renderer::component_forest::ComponentTreeNode;
 use a2ui_renderer::{
-    resolve_str, ComponentForest, ComponentStyle, CustomComponentRegistry, DataBinding,
+    choice_options, choice_selected, resolve_str, ChoiceOption, ComponentForest, ComponentStyle,
+    CustomComponentRegistry, DataBinding,
 };
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -79,7 +80,7 @@ pub enum RenderableWidget {
     ChoicePicker {
         id: ComponentId,
         area: Rect,
-        options: Vec<String>,
+        options: Vec<ChoiceOption>,
         selected: Vec<String>,
     },
     Video {
@@ -360,22 +361,12 @@ impl<'a> WidgetBuilder<'a> {
                     children_ids,
                 }
             }
-            "ChoicePicker" => {
-                let options: Vec<String> = component
-                    .prop_str_list(prop_keys::OPTIONS)
-                    .map(|list| list.into_iter().map(String::from).collect())
-                    .unwrap_or_default();
-                let selected: Vec<String> = component
-                    .prop_str_list(prop_keys::VALUE)
-                    .map(|list| list.into_iter().map(String::from).collect())
-                    .unwrap_or_default();
-                RenderableWidget::ChoicePicker {
-                    id: component.id().clone(),
-                    area,
-                    options,
-                    selected,
-                }
-            }
+            "ChoicePicker" => RenderableWidget::ChoicePicker {
+                id: component.id().clone(),
+                area,
+                options: choice_options(component, Some(self.binding)),
+                selected: choice_selected(component, Some(self.binding)),
+            },
             "Video" => {
                 let url = resolve_string_prop(component, prop_keys::URL, self.binding, "");
                 RenderableWidget::Video {
@@ -1280,6 +1271,45 @@ mod tests {
         let w = widgets.iter().find(|w| w.id().as_str() == "cp");
         assert!(w.is_some(), "ChoicePicker widget should exist");
         assert!(matches!(w.unwrap(), RenderableWidget::ChoicePicker { .. }));
+    }
+
+    #[test]
+    fn test_choice_picker_parses_spec_object_options_and_bound_selection() {
+        // 规范 basic catalog 形态：options 为 {label, value} 对象数组，
+        // value（选中集）绑定到数据模型
+        let mut forest = ComponentForest::new();
+        let binding = DataBinding::new(DataModel::new(json!({
+            "contact": {"preference": ["email"]}
+        })));
+        let root = Component::column(
+            ComponentId::new("root").unwrap(),
+            vec![ComponentId::new("cp").unwrap()],
+        );
+        let cp: Component = Component::from_json(
+            r#"{"id":"cp","component":"ChoicePicker",
+                "options":[{"label":"Email","value":"email"},{"label":"SMS","value":"sms"}],
+                "value":{"path":"/contact/preference"}}"#,
+        )
+        .unwrap();
+        forest.upsert("s1", root).unwrap();
+        forest.upsert("s1", cp).unwrap();
+        let reg = CustomComponentRegistry::new();
+        let builder = WidgetBuilder::new(&binding, &forest, &reg);
+        let widgets = builder.build_tree("s1", Rect::new(0, 0, 80, 24));
+        let Some(RenderableWidget::ChoicePicker {
+            options, selected, ..
+        }) = widgets.iter().find(|w| w.id().as_str() == "cp")
+        else {
+            panic!("ChoicePicker widget should exist");
+        };
+        assert_eq!(
+            options
+                .iter()
+                .map(|o| (o.label.as_str(), o.value.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("Email", "email"), ("SMS", "sms")]
+        );
+        assert_eq!(selected, &vec!["email".to_string()]);
     }
 
     #[test]

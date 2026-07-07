@@ -10,8 +10,9 @@ use a2ui_core::message::{
 use a2ui_core::prelude::*;
 use a2ui_core::Value;
 use a2ui_renderer::{
-    resolve_bool, resolve_f64, resolve_str, ComponentStyle, CoreEffects, CustomComponentRegistry,
-    DataBinding, RenderResult, Renderer, RendererCore, SurfaceHandle, UserEvent,
+    choice_options, choice_selected, resolve_bool, resolve_f64, resolve_str, ComponentStyle,
+    CoreEffects, CustomComponentRegistry, DataBinding, RenderResult, Renderer, RendererCore,
+    SurfaceHandle, UserEvent,
 };
 use std::collections::HashMap;
 
@@ -340,21 +341,11 @@ impl WebRenderer {
                     placeholder,
                 }
             }
-            "ChoicePicker" => {
-                let options = component
-                    .prop_str_list(prop_keys::OPTIONS)
-                    .map(|list| list.into_iter().map(String::from).collect())
-                    .unwrap_or_default();
-                let selected = component
-                    .prop_str_list(prop_keys::VALUE)
-                    .map(|list| list.into_iter().map(String::from).collect())
-                    .unwrap_or_default();
-                RenderableHtmlWidget::ChoicePicker {
-                    id: component.id().clone(),
-                    options,
-                    selected,
-                }
-            }
+            "ChoicePicker" => RenderableHtmlWidget::ChoicePicker {
+                id: component.id().clone(),
+                options: choice_options(component, Some(binding)),
+                selected: choice_selected(component, Some(binding)),
+            },
             "DateTimeInput" => {
                 let label = extract_string_value(component, prop_keys::LABEL, binding)
                     .unwrap_or("Select date/time".to_string());
@@ -879,6 +870,38 @@ mod tests {
         assert!(
             html.contains("TAB_B_TEXT"),
             "tab 1 内容应被渲染，got: {html}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_choicepicker_renders_spec_object_options_with_bound_selection() {
+        // 规范 basic catalog 形态：{label, value} 对象 options + value 绑定
+        let mut renderer = WebRenderer::new();
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(vec![Component::from_value(json!({
+                    "id":"root","component":"ChoicePicker",
+                    "options":[{"label":"Email","value":"email"},{"label":"SMS","value":"sms"}],
+                    "value":{"path":"/contact/preference"}
+                }))
+                .unwrap()]),
+                data_model: Some(json!({"contact":{"preference":["email"]}})),
+            })
+            .await
+            .unwrap();
+
+        let html = renderer.render_surface_html("s1").expect("html");
+        assert!(
+            html.contains("<option value=\"email\" selected>Email</option>"),
+            "选中项应按 value 匹配并展示 label，got: {html}"
+        );
+        assert!(
+            html.contains("<option value=\"sms\">SMS</option>"),
+            "未选中项应展示 label，got: {html}"
         );
     }
 
