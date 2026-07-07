@@ -69,6 +69,11 @@ fn extract_spacing(style: &Map<String, Value>) -> Option<StyleSpacing> {
 fn parse_color(value: &Value) -> Option<StyleColor> {
     let value = value.as_str()?.trim();
     let hex = value.strip_prefix('#').unwrap_or(value);
+    // len() 是字节长度、下面按字节范围切片：非 ASCII 输入会落在非字符
+    // 边界导致 panic，且合法十六进制颜色只含 ASCII，直接拒绝
+    if !hex.is_ascii() {
+        return None;
+    }
     let parse = |range: std::ops::Range<usize>| u8::from_str_radix(&hex[range], 16).ok();
 
     match hex.len() {
@@ -235,6 +240,19 @@ mod tests {
         }));
 
         assert_eq!(style.color, None);
+    }
+
+    #[test]
+    fn ignores_non_ascii_color_without_panicking() {
+        // "€€" 为 6 字节 2 字符：按字节长度进入 6 位分支后，
+        // 字节切片落在非字符边界会 panic——必须安全返回 None
+        for bad in ["€€", "#€€", "ééé", "#ffff€€", "\u{1F600}\u{1F600}"] {
+            let style = ComponentStyle::from_component_props(&json!({
+                "style": {"color": bad, "fill": bad}
+            }));
+            assert_eq!(style.color, None, "input {bad:?} must not parse");
+            assert_eq!(style.fill, None, "input {bad:?} must not parse");
+        }
     }
 
     #[test]
