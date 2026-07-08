@@ -71,7 +71,8 @@ fn resolve_label(label: &DynamicValue<String>, binding: Option<&DataBinding>) ->
 
 /// 解析并求值组件的当前选中集（规范 `value`: DynamicStringList）。
 ///
-/// 字面量数组直取；`{"path": ...}` 经绑定解析；解析不出一律空集。
+/// 字面量数组直取；`{"path": ...}` 经绑定解析；混入非字符串项的字面量
+/// 数组逐项过滤（与数据模型侧的宽容一致）；仍解析不出一律空集。
 ///
 /// # 示例
 ///
@@ -88,9 +89,18 @@ fn resolve_label(label: &DynamicValue<String>, binding: Option<&DataBinding>) ->
 /// assert_eq!(choice_selected(&c, None), vec!["email".to_string()]);
 /// ```
 pub fn choice_selected(component: &Component, binding: Option<&DataBinding>) -> Vec<String> {
-    component
+    if let Some(values) = component
         .prop_dynamic_str_list(prop_keys::VALUE)
         .and_then(|dv| resolve_str_list(&dv, binding))
+    {
+        return values;
+    }
+    // 类型化解析失败的兜底：字面量数组混入非字符串项时逐项过滤——
+    // 与数据模型侧（resolve_str_list 对 path 命中数组）的宽容一致，
+    // 声明侧与数据侧不应有不同的宽容度
+    component
+        .prop_str_list(prop_keys::VALUE)
+        .map(|list| list.into_iter().map(String::from).collect())
         .unwrap_or_default()
 }
 
@@ -183,6 +193,14 @@ mod tests {
     fn choice_options_empty_when_missing_or_malformed() {
         assert!(choice_options(&picker(json!({})), None).is_empty());
         assert!(choice_options(&picker(json!({"options": "x"})), None).is_empty());
+    }
+
+    #[test]
+    fn choice_selected_filters_non_string_entries_in_literal_array() {
+        // 声明侧与数据模型侧同等宽容：字面量数组混入非字符串项逐项过滤
+        // （resolve_str_list 对 path 命中的数组即此语义，两侧必须一致）
+        let c = picker(json!({"options": [], "value": ["a", 3, "b"]}));
+        assert_eq!(choice_selected(&c, None), selected(&["a", "b"]));
     }
 
     #[test]
