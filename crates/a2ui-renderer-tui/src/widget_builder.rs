@@ -223,6 +223,26 @@ impl<'a> WidgetBuilder<'a> {
             // TUI 未实现 Modal 弹层交互，占位文本已含 trigger/content 信息，
             // 不平铺其子组件（否则会与占位文本重叠渲染）
             "Modal" => return,
+            // Button 的 child 已被消费为 label（resolve_child_text），
+            // 不再作为独立 widget 渲染（对齐其余三家语义，避免同区域叠加）
+            "Button" => return,
+            // Card 的 child 渲染在标题行下方，避免与标题同区域叠加
+            "Card" => {
+                if let Some(child_id) = comp.prop_component_id(prop_keys::CHILD) {
+                    if let Some(child_node) =
+                        children.iter().find(|c| *c.component.id() == child_id)
+                    {
+                        let content_area = Rect::new(
+                            area.x,
+                            area.y.saturating_add(1),
+                            area.width,
+                            area.height.saturating_sub(1),
+                        );
+                        self.flatten_node(child_node, content_area, widgets);
+                    }
+                }
+                return;
+            }
             // Tabs 仅渲染激活（第 0 个）tab 的子组件，按 id 从 children 中选取
             "Tabs" => {
                 let (_, tab_children) = parse_tabs(comp);

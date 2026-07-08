@@ -2163,6 +2163,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_button_child_text_not_double_rendered() {
+        // Button 的 child 已被消费为 label（resolve_child_text）：
+        // 子 Text 不得再作为独立 widget 渲染，否则同区域叠加显示错乱
+        let mut renderer = TuiRenderer::new();
+        let components: Vec<Component> = vec![
+            Component::from_json(r#"{"id":"root","component":"Column","children":["btn"]}"#)
+                .unwrap(),
+            Component::from_json(r#"{"id":"btn","component":"Button","child":"lbl"}"#).unwrap(),
+            Component::from_json(r#"{"id":"lbl","component":"Text","text":"MoreInfo"}"#).unwrap(),
+        ];
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(components),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+        let text = frame_text(&mut renderer).await;
+        assert!(
+            text.contains("< MoreInfo >"),
+            "按钮应完整渲染 label，got: {text}"
+        );
+        assert_eq!(
+            text.matches("MoreInfo").count(),
+            1,
+            "子 Text 不得双重渲染，got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_card_child_renders_below_card_title() {
+        // Card 的 child 与卡片标题不得同区域叠加：内容区应从标题行下方开始
+        let mut renderer = TuiRenderer::new();
+        let components: Vec<Component> = vec![
+            Component::from_json(r#"{"id":"root","component":"Card","child":"t"}"#).unwrap(),
+            Component::from_json(r#"{"id":"t","component":"Text","text":"CardBody"}"#).unwrap(),
+        ];
+        renderer
+            .create_surface(CreateSurface {
+                surface_id: "s1".into(),
+                catalog_id: "a2ui://catalogs/basic/v1".into(),
+                surface_properties: None,
+                send_data_model: false,
+                components: Some(components),
+                data_model: None,
+            })
+            .await
+            .unwrap();
+        let text = frame_text(&mut renderer).await;
+        assert!(text.contains("┌─┐"), "卡片标题应可见，got: {text}");
+        assert!(text.contains("CardBody"), "卡片内容应可见，got: {text}");
+    }
+
+    #[tokio::test]
     async fn test_textfield_obscured_masks_value_in_frame() {
         // 规范 variant=obscured：密码不得明文回显（TUI 降级为 * 打码）
         let mut renderer = TuiRenderer::new();
